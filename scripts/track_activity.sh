@@ -25,6 +25,14 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
+# v0.6: include file content in the payload if under 256 KB
+SIZE=$(stat -c%s "$FILE_PATH" 2>/dev/null || stat -f%z "$FILE_PATH" 2>/dev/null || echo 999999)
+if [ "$SIZE" -lt 262144 ] && [ -f "$FILE_PATH" ]; then
+  CONTENT=$(jq -Rs . < "$FILE_PATH" 2>/dev/null || echo "null")
+else
+  CONTENT="null"
+fi
+
 curl -s --max-time 1 -X POST "$COORDINATOR_URL/api/log-file" \
   -H "Content-Type: application/json" \
   -d "$(jq -n \
@@ -33,5 +41,15 @@ curl -s --max-time 1 -X POST "$COORDINATOR_URL/api/log-file" \
     --arg aname "$AGENT_NAME" \
     --arg tool "$TOOL_NAME" \
     --arg file "$FILE_PATH" \
-    '{session_id: $sid, agent_id: $aid, agent_name: $aname, tool_name: $tool, file: $file}')" \
+    --argjson content "$CONTENT" \
+    '{session_id: $sid, agent_id: $aid, agent_name: $aname, tool_name: $tool, file: $file, content: $content}')" \
   >/dev/null 2>&1 &
+
+# v0.6: notify coordinator that this agent has stopped editing the file
+curl -s --max-time 2 -X POST "$COORDINATOR_URL/api/working-files/stop" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n \
+    --arg aid "$AGENT_ID" \
+    --arg file "$FILE_PATH" \
+    '{agent_id: $aid, file_path: $file}')" \
+  >/dev/null 2>&1 || true
