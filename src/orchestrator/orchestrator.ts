@@ -482,7 +482,7 @@ export function writeClaudeHooksDir(params: {
     const hookEntry: Record<string, unknown> = {
       hooks: [{ type: "command", command }],
     };
-    if (eventName === "PostToolUse") {
+    if (eventName === "PostToolUse" || eventName === "PreToolUse") {
       hookEntry.matcher = POST_TOOL_USE_MATCHER;
     }
     hooksConfig[eventName] = [hookEntry];

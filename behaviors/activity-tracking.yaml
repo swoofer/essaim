@@ -14,6 +14,10 @@ sections:
         ou une étape-clé (ex: "bug validé, patch prêt"). Pas besoin après chaque Read.
 
 hooks:
+  pre-tool-use:
+    script: pre_track_activity.sh
+    blocking: false
+    order: 50
   post-tool-use:
     script: track_activity.sh
     blocking: false
