@@ -2,6 +2,22 @@
 
 Thanks for considering a contribution.
 
+## Contributor License Grant
+
+By submitting a pull request, comment with code suggestion, or any other contribution to this repository, you certify that:
+
+1. The contribution is your original work, **or** you have explicit permission from the rights holder to submit it.
+2. Your contribution is licensed under the [MIT License](./LICENSE), same as the rest of the project.
+3. You grant the project maintainer (Maxime Gagnon) and successors a **perpetual, irrevocable, worldwide, royalty-free right** to relicense your contribution under different terms in future versions of the project, including more restrictive or commercial licenses (e.g. BSL, AGPL, source-available, dual-license).
+
+### Why the relicense grant?
+
+The project is MIT today and is expected to stay MIT for the foreseeable future. The grant preserves the **option** to dual-license or pivot to a source-available license later if adoption sustains a commercial track. It does **not** change the terms under which you can use, fork, or redistribute the project as it exists today — all released versions remain MIT, forever.
+
+If your employer's IP policy or your own preference makes this grant unacceptable, please open an issue **before** opening a PR so we can discuss.
+
+This grant is on the same model used by Sentry, HashiCorp, and similar projects before they pivoted to source-available licenses. It is functionally a lightweight inbound-license-grant — no separate CLA signature required; acceptance is by act of contribution.
+
 ## Reporting bugs
 
 Open an issue with the "bug" template. Include the version (`essaim --version`) and a minimal reproduction (preset used, agent count, log output).
