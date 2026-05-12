@@ -25,6 +25,17 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
+# Normalize FILE_PATH to repo-relative, forward-slash form.
+# In team-mode the coordinator is on a different machine and cannot
+# resolve the agent's local repo root; only this client can.
+if [ -n "$FILE_PATH" ] && [ "$FILE_PATH" != "null" ]; then
+  REPO_ROOT=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "$REPO_ROOT" ] && [[ "$FILE_PATH" == "$REPO_ROOT"/* ]]; then
+    FILE_PATH="${FILE_PATH#$REPO_ROOT/}"
+  fi
+  FILE_PATH="${FILE_PATH//\\//}"
+fi
+
 # v0.6: include file content in the payload if under 256 KB
 SIZE=$(stat -c%s "$FILE_PATH" 2>/dev/null || stat -f%z "$FILE_PATH" 2>/dev/null || echo 999999)
 if [ "$SIZE" -lt 262144 ] && [ -f "$FILE_PATH" ]; then
