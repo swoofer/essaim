@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { createLogger } from "../logger.js";
 import { startServer } from "mcp-coordinator";
+type ServerHandle = Awaited<ReturnType<typeof startServer>>;
 const log = createLogger("orchestrator");
 
 let __filename: string;
@@ -61,17 +62,17 @@ export async function runProject(
   runOpts: RunProjectOptions = {},
 ): Promise<RunResult> {
   // Strategy A: start in-process coordinator unless caller provided an external URL.
-  // startServer() returns Promise<void> — no handle is exposed, so cleanup is
-  // implicit when the process exits. We track whether we started one so the
-  // finally block can log appropriately.
-  let inProcessCoordinatorStarted = false;
+  // mcp-coordinator >=0.13 returns a ServerHandle from startServer({...}); we
+  // hold onto it so the finally block can release the HTTP server, MQTT broker,
+  // SSE listeners, DB, and quota timer without waiting for process exit.
+  // registerSignalHandlers:false because essaim owns SIGTERM/SIGINT itself.
+  let coordinatorHandle: ServerHandle | null = null;
   if (mode === "with_coordinator" && !runOpts.coordinatorUrl) {
     const port = parseInt(process.env.PORT || "3100", 10);
     const dataDir = process.env.COORDINATOR_DATA_DIR || "./tmp-essaim/coordinator-data";
     log.info(`Starting in-process coordinator on port ${port} (dataDir: ${dataDir})`);
-    await startServer({ port, dataDir });
-    runOpts = { ...runOpts, coordinatorUrl: `http://localhost:${port}` };
-    inProcessCoordinatorStarted = true;
+    coordinatorHandle = await startServer({ port, dataDir, registerSignalHandlers: false });
+    runOpts = { ...runOpts, coordinatorUrl: `http://localhost:${coordinatorHandle.port}` };
     log.info(`In-process coordinator ready at ${runOpts.coordinatorUrl}`);
   }
 
@@ -82,12 +83,13 @@ export async function runProject(
   try {
     return await _runProjectBody(project, mode, cleanup, runOpts, effectiveCoordinatorUrl);
   } finally {
-    if (inProcessCoordinatorStarted) {
-      // startServer() does not expose a .close() handle; the HTTP server is
-      // released when the process exits. For CLI one-shot invocations this is
-      // fine. If long-lived embedding is needed, mcp-coordinator would need to
-      // expose a ServerHandle type from startServer.
-      log.info("In-process coordinator will stop on process exit");
+    if (coordinatorHandle) {
+      try {
+        await coordinatorHandle.stop();
+        log.info("In-process coordinator stopped");
+      } catch (err) {
+        log.warn("Failed to stop in-process coordinator cleanly", { err: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 }
