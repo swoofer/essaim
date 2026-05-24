@@ -3,6 +3,7 @@ description: "Interactive developer session — briefing, coordinator-aware, fil
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - session-lifecycle
   - activity-tracking

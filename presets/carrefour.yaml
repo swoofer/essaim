@@ -3,6 +3,7 @@ description: "Test de détection de conflits — agents sur les mêmes fichiers"
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

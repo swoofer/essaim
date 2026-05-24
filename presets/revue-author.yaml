@@ -3,6 +3,7 @@ description: "Auteur dans une revue croisée — améliore un module"
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

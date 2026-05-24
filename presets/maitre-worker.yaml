@@ -3,6 +3,7 @@ description: "Worker — exécute les tâches assignées par le lead"
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

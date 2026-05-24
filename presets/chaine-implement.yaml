@@ -3,6 +3,7 @@ description: "Pipeline séquentiel — étape 1: implémentation"
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

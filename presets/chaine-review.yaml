@@ -3,6 +3,7 @@ description: "Pipeline séquentiel — étape 2: review"
 profile: communicant
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - check-interrupt
   - activity-tracking

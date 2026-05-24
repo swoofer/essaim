@@ -3,6 +3,7 @@ description: "Traducteur de documentation"
 profile: communicant
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt
