@@ -3,9 +3,34 @@ name: Release binaries
 on:
   push:
     tags: ["v*"]
+  # Manual lever — useful if a tag was already pushed but the binary
+  # upload needs a retry (transient GH Release upload failure, runner
+  # outage, etc.).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build from (e.g. v0.2.0)"
+        required: true
+        type: string
+  # Called from release.yml after release-please tags + npm publish
+  # complete, so the binaries upload runs in the same workflow run as
+  # the release. (GitHub's anti-recursive policy means a tag push from
+  # GITHUB_TOKEN does NOT trigger the `push: tags` path above — without
+  # this hook the native binaries would only update on manual dispatch.)
+  workflow_call:
+    inputs:
+      tag:
+        description: "Git tag to build from"
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+concurrency:
+  # Don't cancel in progress — a partial upload (some platforms missing) is
+  # worse than a second concurrent run that no-ops on existing release assets.
+  group: release-binaries-${{ github.ref }}-${{ inputs.tag }}
 
 jobs:
   build:
@@ -26,9 +51,14 @@ jobs:
             bun_target: bun-linux-x64
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # When dispatched / called, check out the requested tag rather than
+          # the caller's branch (which is typically refs/heads/main).
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -37,7 +67,7 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - run: npm install
+      - run: npm ci
 
       - name: Build binary
         run: |
@@ -71,7 +101,12 @@ jobs:
 
       - name: Package tarball
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          # When called via workflow_dispatch / workflow_call, GITHUB_REF_NAME
+          # is the caller's branch (typically `main`), not the tag — so we use
+          # `inputs.tag` when present and fall back to GITHUB_REF_NAME for the
+          # direct `push: tags` path.
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
           DIST_NAME="essaim-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "dist/${DIST_NAME}/behaviors" "dist/${DIST_NAME}/presets" "dist/${DIST_NAME}/compositions" "dist/${DIST_NAME}/scripts"
 
@@ -88,6 +123,11 @@ jobs:
       - name: Publish tarball to GH Release
         uses: softprops/action-gh-release@v2
         with:
+          # tag_name is required on workflow_call / workflow_dispatch because
+          # github.ref is the caller branch (not the tag). On a direct
+          # `push: tags` event, github.ref_name == the tag, so this still
+          # resolves correctly.
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: dist/*.tar.gz
           generate_release_notes: true
           fail_on_unmatched_files: true
