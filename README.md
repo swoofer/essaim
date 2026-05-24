@@ -125,7 +125,7 @@ Behaviors contribute numbered sections that sort deterministically into a final 
 
 | Layer | Sections | Responsibility | Sample behaviors |
 |-------|----------|----------------|------------------|
-| Foundation | 000-009 | Who I am, which project | `project-context`, `coordinator-rules` |
+| Foundation | 000-009 | Who I am, which project | `project-context`, `user-brief`, `coordinator-rules` |
 | Patterns | 010-029 | How I coordinate | `announce-before-write`, `conflict-resolution`, `worktree-isolation`, `sequential-wait` |
 | Mission | 030-050 | What I actually do | bug-hunting, test-writing, refactoring, code-review, debate, quiz, translation, sequential pipelines — 21 in total |
 | Transversal | 050-099 | Constraints and style | `activity-tracking`, `read-only-mode` |
@@ -141,6 +141,20 @@ Three rules adapt behaviors automatically based on what's assembled.
 | `solo-mode-strip` | `coordinator-rules.solo_mode = true` | Strips announce / conflict-resolution entirely; agent works alone |
 
 List the templates the CLI ships with via `essaim list`. To preview what a template assembles (prompt + agent plan) without burning tokens, use `essaim run <template> --dry-run`. Behaviors, presets, and composition rules live under [`behaviors/`](./behaviors/), [`presets/`](./presets/), and [`compositions/`](./compositions/) in this repo — browse them directly to author or edit.
+
+### Briefing a run with free-form context
+
+Every preset includes the `user-brief` behavior in slot `001-user-brief` (right after project identity, before any coordination rules). It's a free-form "system-prompt prefix" the operator can fill at launch time, no preset edit required. Both fields are optional — when neither is set, nothing renders.
+
+```bash
+essaim run raid -p . --agents 3 \
+  --set user-brief.brief='We are migrating the checkout from Stripe v3 to v4. Payment-touching code under src/payments/ must NOT be modified without a feature flag.' \
+  --set user-brief.constraints='["No breaking changes to /api/v1/*","Keep Node 18 compat","Each agent commits in its own worktree, no cross-merge"]'
+```
+
+The brief lands once per agent prompt and is visible across every phase (discover / review / execute) because `user-brief` is not phase-tagged. Confirm with `essaim run <template> --dry-run` (the assembled prompt size will jump by the brief's length).
+
+**Dispatch caveat (`maitre`, `revue`)**: in lead/worker presets, the lead's brief does NOT auto-propagate to dispatched workers — the dispatch travels through `announce_work(plan: ...)`, not through the worker's prompt. Set the brief on the worker preset too (`maitre-worker`, `revue-reviewer`) — every agent reads its own copy.
 
 ---
 

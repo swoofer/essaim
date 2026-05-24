@@ -3,6 +3,7 @@ description: "Audit qualité du projet — analyse sans modification"
 profile: communicant
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

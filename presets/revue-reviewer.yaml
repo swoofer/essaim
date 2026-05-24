@@ -3,6 +3,7 @@ description: "Reviewer dans une revue croisée — review un module différent"
 profile: communicant
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - check-interrupt
   - activity-tracking

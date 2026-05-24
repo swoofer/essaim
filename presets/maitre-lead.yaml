@@ -3,6 +3,7 @@ description: "Tech lead — analyse et distribue les tâches aux workers"
 profile: communicant
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

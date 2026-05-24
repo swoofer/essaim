@@ -3,6 +3,7 @@ description: "Réviseur de traductions"
 profile: communicant
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - check-interrupt
   - activity-tracking

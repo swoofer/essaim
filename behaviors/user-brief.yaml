@@ -1,0 +1,29 @@
+name: user-brief
+description: "Per-run free-form context — narrative brief and hard constraints"
+category: coordination
+
+params:
+  brief:
+    type: string
+    required: false
+    description: "Free-form context the operator wants every agent to see before doing anything (goal, background, gotchas)"
+  constraints:
+    type: "string[]"
+    required: false
+    description: "Hard rules for this run — e.g. modules not to modify, API contracts to preserve, compat requirements"
+
+sections:
+  "001-user-brief":
+    prompt: |
+      {{#if params.brief}}
+      ## Contexte de cette session
+      {{params.brief}}
+
+      {{/if}}
+      {{#if params.constraints}}
+      ### Contraintes pour ce run
+      {{#each params.constraints}}
+      - {{this}}
+      {{/each}}
+
+      {{/if}}

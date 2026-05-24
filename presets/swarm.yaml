@@ -3,6 +3,7 @@ description: “Refactoring en essaim — discovery + work-stealing”
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - conflict-resolution

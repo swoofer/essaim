@@ -3,6 +3,7 @@ description: "Course de relais — Coureur 2: amélioration architecturale (mili
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt

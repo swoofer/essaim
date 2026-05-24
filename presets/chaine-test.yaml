@@ -3,6 +3,7 @@ description: "Pipeline séquentiel — étape 3: tests"
 profile: codeur
 behaviors:
   - project-context
+  - user-brief
   - coordinator-rules
   - announce-before-write
   - check-interrupt
