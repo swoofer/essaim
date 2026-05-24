@@ -140,7 +140,7 @@ Three rules adapt behaviors automatically based on what's assembled.
 | `sequential-then-announce` | `sequential-wait` + `announce-before-write` | Injects section 012: "wait -> announce -> code" |
 | `solo-mode-strip` | `coordinator-rules.solo_mode = true` | Strips announce / conflict-resolution entirely; agent works alone |
 
-Inspect the catalog with `essaim list behaviors` / `essaim list presets`; preview an assembled prompt with `essaim bce build <preset> --dry-run`.
+List the templates the CLI ships with via `essaim list`. To preview what a template assembles (prompt + agent plan) without burning tokens, use `essaim run <template> --dry-run`. Behaviors, presets, and composition rules live under [`behaviors/`](./behaviors/), [`presets/`](./presets/), and [`compositions/`](./compositions/) in this repo — browse them directly to author or edit.
 
 ---
 
@@ -181,24 +181,22 @@ essaim ships a CLI binary. All commands:
 
 | Command | Description |
 |---------|-------------|
-| `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--dry-run] [--base-ref ref] [--max-quota-pct pct]` | Launch coordinated agents using a template |
+| `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--dry-run] [--base-ref ref] [--coordinator-url url] [--max-quota-pct pct] [--cleanup]` | Launch coordinated agents using a template. `--dry-run` previews the assembled prompts + agent plan without launching. |
 | `essaim solo <template> [-p path] [--timeout min] [--set k=v]` | Launch a single agent without orchestration |
 | `essaim scan <path>` | Auto-detect project language, structure, test framework |
 | `essaim init [path] [--url url] [--name name] [--modules list]` | Install hooks + MCP config on a project |
-| `essaim list [behaviors\|presets\|compositions]` | List catalog entries |
+| `essaim list` | List the templates the CLI ships with |
 | `essaim self-update` | Update to the latest release |
-| `essaim bce build <preset> [--dry-run] [--set k=v]` | Assemble a prompt from a preset |
-| `essaim bce list <type>` | List behaviors, presets, or compositions |
-| `essaim bce validate [file] [--all]` | Validate BCE YAML files |
 
 ### Examples
 
 ```bash
-essaim scan ~/my-project              # detect language, tests, modules
-essaim run raid -p ~/my-project --agents 3      # bug hunt
-essaim run swarm -p ~/my-project --agents 4     # refactoring
-essaim solo gardien -p ~/my-project              # read-only audit
-essaim bce build raid --dry-run --set coordinator-rules.solo_mode=true  # preview
+essaim scan ~/my-project                            # detect language, tests, modules
+essaim run raid -p ~/my-project --dry-run           # preview assembled prompts, no launch
+essaim run raid -p ~/my-project --agents 3          # bug hunt
+essaim run swarm -p ~/my-project --agents 4         # refactoring
+essaim solo gardien -p ~/my-project                 # read-only audit
+essaim run raid -p ~/my-project --set bug-hunting.modules='["src/auth"]'
 ```
 
 ---
