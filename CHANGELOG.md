@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/swoofer/essaim/compare/v0.2.0...v0.3.0) (2026-05-24)
+
+
+### Features
+
+* **behaviors:** add user-brief — free-form per-run context injection ([#13](https://github.com/swoofer/essaim/issues/13)) ([294b941](https://github.com/swoofer/essaim/commit/294b941d3c19a20abd43b405f884fd8c5ae0002e))
+
+
+### Bug Fixes
+
+* **hooks:** normalize file_path to repo-relative before POST ([40db10c](https://github.com/swoofer/essaim/commit/40db10cce33b44609a00907c29cec676a8ab3671))
+* **hooks:** normalize file_path to repo-relative before POST to coordinator ([494b023](https://github.com/swoofer/essaim/commit/494b023dd13f5e164915361c77162fb5b9121fea))
+* **readme:** drop fake `essaim bce` subcommands that don't exist in the CLI ([#12](https://github.com/swoofer/essaim/issues/12)) ([46baae7](https://github.com/swoofer/essaim/commit/46baae7cd4a40c7d24e01102cfafeab7dcc8490f))
+
+
+### Documentation
+
+* add Contributor License Grant (relicense optionality) ([a41bcbb](https://github.com/swoofer/essaim/commit/a41bcbbbe9fb4deb149c2be2a5dd3aae144fa948))
+* **contributing:** add Contributor License Grant for relicense optionality ([48590da](https://github.com/swoofer/essaim/commit/48590dad415effd10e71ad5aac559f7ff14a605f))
+* **readme:** trim mcp-coordinator overlap (-48% length) ([#11](https://github.com/swoofer/essaim/issues/11)) ([73cb82e](https://github.com/swoofer/essaim/commit/73cb82e8b6aca98547bcf13c3c71619c32d0091e))
+
 ## [0.2.0](https://github.com/swoofer/essaim/compare/v0.1.1...v0.2.0) (2026-05-10)
 
 
