@@ -3,6 +3,16 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_only:
+        description: "Skip release-please and just publish to npm from main HEAD"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: write
@@ -12,28 +22,56 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Surface release-please outputs to the binaries job below so it can decide
+    # whether a release was actually cut and which tag to build native binaries for.
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
+        if: ${{ github.event_name == 'push' || inputs.publish_only != 'true' }}
         with:
-          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
       - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
 
       - uses: actions/setup-node@v4
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+          cache: "npm"
 
-      - run: npm install
-        if: ${{ steps.release.outputs.release_created }}
+      - run: npm ci
+        if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
 
       - run: npm run build
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
 
       - run: npm publish
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Chained native-binaries publish on every release-please cut. A tag push from
+  # release-please's GITHUB_TOKEN does NOT trigger release-binaries.yml's
+  # `push: tags` event (GitHub anti-recursive workflow policy). Calling
+  # release-binaries.yml as a reusable workflow runs it in the same overall
+  # run as `release`, so no token gymnastics are needed.
+  #
+  # Gated on `release_created` so this is a no-op on every push that
+  # ONLY moves the release-please tracking PR — we only build+upload when
+  # there's a real release.
+  binaries:
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-binaries.yml
+    with:
+      tag: ${{ needs.release.outputs.tag_name }}
+    secrets: inherit
