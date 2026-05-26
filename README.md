@@ -128,7 +128,7 @@ Behaviors contribute numbered sections that sort deterministically into a final 
 | Foundation | 000-009 | Who I am, which project | `project-context`, `user-brief`, `coordinator-rules` |
 | Patterns | 010-029 | How I coordinate | `announce-before-write`, `conflict-resolution`, `worktree-isolation`, `sequential-wait` |
 | Mission | 030-050 | What I actually do | bug-hunting, test-writing, refactoring, code-review, debate, quiz, translation, sequential pipelines — 21 in total |
-| Transversal | 050-099 | Constraints and style | `activity-tracking`, `read-only-mode` |
+| Transversal | 050-099 | Constraints and style | `activity-tracking`, `read-only-mode`, `audit-output` |
 
 ### Composition rules
 
@@ -141,6 +141,17 @@ Three rules adapt behaviors automatically based on what's assembled.
 | `solo-mode-strip` | `coordinator-rules.solo_mode = true` | Strips announce / conflict-resolution entirely; agent works alone |
 
 List the templates the CLI ships with via `essaim list`. To preview what a template assembles (prompt + agent plan) without burning tokens, use `essaim run <template> --dry-run`. Behaviors, presets, and composition rules live under [`behaviors/`](./behaviors/), [`presets/`](./presets/), and [`compositions/`](./compositions/) in this repo — browse them directly to author or edit.
+
+### Read-only audits with a fixed write surface
+
+`read-only-mode` is strict: agents read, analyze, and communicate via MCP threads, but write nothing — no `Write`, no `Edit`, no created files. To carve out an exception for a specific audit report (without lifting the rest of the no-write fence), pair it with `audit-output`:
+
+```bash
+essaim solo gardien -p . \
+  --set 'audit-output.paths=["MIGRATION_AUDIT.md","docs/risks.md"]'
+```
+
+`gardien` ships with `audit-output.paths = ["AUDIT.md"]` by default; override with `--set` for any other artifact path. The pair (`read-only-mode` + `audit-output`) renders as "no writes — except these exact paths". Presets that need pure read-only communication (`debat`, `revue-reviewer`, `chaine-review`, `arene-*`) include only `read-only-mode` and write nothing at all.
 
 ### Briefing a run with free-form context
 

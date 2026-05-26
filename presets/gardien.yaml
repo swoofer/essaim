@@ -1,5 +1,5 @@
 name: gardien
-description: "Audit qualité du projet — analyse sans modification"
+description: "Audit qualité du projet — analyse sans modification, écrit un rapport unique"
 profile: communicant
 behaviors:
   - project-context
@@ -10,4 +10,9 @@ behaviors:
   - activity-tracking
   - shared-workspace
   - read-only-mode
+  - audit-output
   - quality-audit
+params:
+  audit-output:
+    paths:
+      - "AUDIT.md"
