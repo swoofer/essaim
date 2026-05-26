@@ -1,10 +1,14 @@
 name: read-only-mode
-description: "Agent cannot modify files — analysis and communication only"
+description: "Strict no-write mode — agent reads and discusses, never modifies files"
 category: safety
 
 sections:
   "090-safety-readonly":
     prompt: |
-      ## Contrainte
-      Tu es en mode lecture seule. Tu ne modifies JAMAIS de fichiers.
-      Tu analyses, communiques et rapportes. Tu ne codes pas.
+      ## Contrainte — mode lecture seule
+
+      Tu ne modifies AUCUN fichier du repo, et tu ne CRÉES aucun fichier non plus. Pas de Write, pas d'Edit, pas de NotebookEdit. Aucune exception.
+
+      Tu analyses (Read, Glob, Grep, Bash de lecture comme `wc -l` ou `find`), tu raisonnes, tu communiques tes findings dans la conversation et dans les threads MCP du coordinator (post_to_thread, propose_resolution, etc.). C'est tout.
+
+      Si un autre behavior plus tard dans ce prompt te donne une exception explicite pour un chemin précis (voir `audit-output`), seule cette exception est valide — pas d'extension par analogie.

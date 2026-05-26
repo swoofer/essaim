@@ -1,0 +1,25 @@
+name: audit-output
+description: "Carve out write permission for a fixed list of audit artifact paths"
+category: safety
+
+params:
+  paths:
+    type: "string[]"
+    required: false
+    description: "Exact paths (relative to project root) the agent may write to — typically audit reports or plan documents. Anything not in this list is refused."
+
+sections:
+  "091-audit-output":
+    prompt: |
+      {{#if params.paths}}
+      ## Exception au mode lecture seule
+
+      Le mode lecture seule (section précédente) interdit toute écriture, MAIS tu as l'autorisation explicite d'écrire EXACTEMENT les fichiers listés ci-dessous — et eux seuls :
+
+      {{#each params.paths}}
+      - `{{this}}`
+      {{/each}}
+
+      Aucun autre Write ou Edit n'est autorisé. Si tu ne peux pas exprimer tes findings dans ces fichiers, signale-le et arrête. Ne tente pas de contourner (renommer, déplacer ailleurs, créer un fichier différent &laquo;&nbsp;équivalent&nbsp;&raquo;).
+
+      {{/if}}
