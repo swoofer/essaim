@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/swoofer/essaim/compare/v0.3.0...v0.4.0) (2026-05-26)
+
+
+### Features
+
+* **behaviors:** split read-only-mode + add audit-output ([#15](https://github.com/swoofer/essaim/issues/15)) ([8ef65a6](https://github.com/swoofer/essaim/commit/8ef65a6916aa6dbbd3612bd1843eb8d343cfc868))
+
 ## [0.3.0](https://github.com/swoofer/essaim/compare/v0.2.0...v0.3.0) (2026-05-24)
 
 

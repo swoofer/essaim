@@ -1,6 +1,6 @@
 {
   "name": "essaim",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Spawn N coordinated Claude Code agents — orchestrator + behavior catalog. Pairs with @swoofer/promptweave + mcp-coordinator.",
   "type": "module",
   "license": "MIT",
