@@ -1,0 +1,29 @@
+name: phare-synth
+description: "Phare — réconciliateur : fusionne les 4 rapports YAML en MIGRATION_AUDIT.md final"
+profile: communicant
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - read-only-mode
+  - sequential-wait
+  - audit-output
+  - audit-reconciliator
+params:
+  sequential-wait:
+    predecessor_description: "les 4 spécialistes (inventaire, edges, deps, risques) — vérifie list_threads que leurs sessions sont terminées"
+    wait_for_status: "resolved"
+  audit-output:
+    paths:
+      - "MIGRATION_AUDIT.md"
+  audit-reconciliator:
+    input_paths:
+      - "tmp/audit/inventaire.yaml"
+      - "tmp/audit/edges.yaml"
+      - "tmp/audit/deps.yaml"
+      - "tmp/audit/risques.yaml"
+    final_output_path: "MIGRATION_AUDIT.md"

@@ -1,0 +1,81 @@
+name: audit-specialist
+description: "Audit specialist — one focused angle, structured YAML output for downstream reconciliation"
+category: mission
+
+params:
+  focus_name:
+    type: string
+    required: true
+    description: "Short identifier for this specialist's focus (e.g. inventaire, edges, deps, risques)"
+  focus_description:
+    type: string
+    required: true
+    description: "What this specialist looks at, exclusively"
+  patterns_to_grep:
+    type: "string[]"
+    required: false
+    description: "Explicit grep patterns the agent MUST use (exhaustive list). Prevents undercounting."
+  scope_paths:
+    type: "string[]"
+    required: false
+    description: "Paths to read. Anything outside is HORS-SUJET."
+  output_yaml_schema:
+    type: string
+    required: true
+    description: "YAML schema the agent must produce. Reconciliator depends on this contract."
+  effort:
+    type: string
+    default: mid
+    description: "Effort profile (low/mid/high/max). Defaults to mid (Sonnet)."
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Spécialiste « {{params.focus_name}} »
+
+      Tu fais partie d'un essaim de 4 spécialistes en parallèle. **Chacun a un angle exclusif.** Ne déborde pas sur les autres angles — d'autres agents s'en occupent.
+
+      ### Ton angle
+      {{params.focus_description}}
+
+      {{#if params.scope_paths}}
+      ### Périmètre de lecture
+      Tu ne lis QUE ces chemins (relatifs à la racine du projet) :
+      {{#each params.scope_paths}}
+      - `{{this}}`
+      {{/each}}
+
+      Tout ce qui n'est pas dans cette liste est HORS-SUJET — un autre spécialiste s'en charge ou ça ne fait pas partie de l'audit.
+      {{/if}}
+
+      {{#if params.patterns_to_grep}}
+      ### Patterns grep OBLIGATOIRES (exhaustifs)
+      Pour ton angle, tu DOIS rechercher chacun de ces patterns. Ne te limite pas à un seul, c'est la cause #1 d'audit incomplet :
+
+      {{#each params.patterns_to_grep}}
+      - `{{this}}`
+      {{/each}}
+
+      Pour chaque pattern : lance la recherche, note les hits avec leur fichier:ligne, intègre-les à ton output.
+      {{/if}}
+
+      ### Méthode imposée
+      1. **Liste les slices** présents dans le périmètre (`Glob` ou `ls`)
+      2. **Pour chaque slice**, applique TA méthode d'analyse (LOC via `wc -l`, grep patterns, etc.)
+      3. **Cite des preuves** : chaque affirmation a un `fichier:ligne` ou un `wc -l` exact. Pas d'estimation à la louche.
+      4. **Reste dans ton couloir** : si tu vois des risques mais que tu es le spécialiste inventaire, **note-les pour le réconciliateur** dans la section `notes_pour_synthese` de ton YAML — ne les développe pas.
+
+      ### Output OBLIGATOIRE
+
+      Tu écris UN SEUL fichier à l'emplacement défini par `audit-output` (cf. section plus bas) en **YAML strict** suivant ce schéma :
+
+      ```yaml
+      {{params.output_yaml_schema}}
+      ```
+
+      🚨 **Format YAML strict** : pas de prose libre hors des champs. Le réconciliateur parse ton YAML — un format cassé = ton travail perdu.
+
+      ### Garde-fous
+      - **Pas d'analyse de code source côté `monpikto-react/`** sauf si ton angle l'exige explicitement
+      - **Pas de jugement sur l'ordre de migration** — c'est le rôle du réconciliateur
+      - **Pas de recommandations React** — purs faits sur l'état Rust actuel

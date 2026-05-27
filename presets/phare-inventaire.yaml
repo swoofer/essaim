@@ -1,0 +1,52 @@
+name: phare-inventaire
+description: "Phare — spécialiste inventaire : LOC exact + structure + responsabilités par fichier"
+profile: communicant
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - read-only-mode
+  - audit-output
+  - audit-specialist
+params:
+  audit-output:
+    paths:
+      - "tmp/audit/inventaire.yaml"
+  audit-specialist:
+    focus_name: inventaire
+    focus_description: >
+      Inventaire factuel et quantitatif. Pour chaque slice de `src/features/`,
+      tu rapportes la liste exacte des fichiers, leur LOC vérifié par `wc -l`
+      (pas une estimation), et la responsabilité de chaque fichier (rendu UI,
+      état, modèles, services, tests). Tu repères les fichiers trop gros
+      (>500 LOC = à découper), les responsabilités mélangées et les patterns
+      de structure inhabituels par rapport au reste des slices.
+
+      Tu ne touches PAS aux dépendances inter-feature (c'est `deps`), aux
+      Edge Functions (c'est `edges`), ni aux risques (c'est `risques`). Si
+      tu remarques quelque chose dans ces angles, écris-le dans
+      `notes_pour_synthese` et passe à autre chose.
+    scope_paths:
+      - "src/features/"
+    output_yaml_schema: |
+      schema_version: 1
+      auditor: inventaire
+      generated_at: <iso8601>
+      slices:
+        - name: <slice_name>          # e.g. auth, chat, projects
+          files:
+            - path: <relative_to_root>  # e.g. src/features/auth/components.rs
+              loc: <int>                # exact wc -l count
+              role: <string>            # "ui_components" | "state" | "models" | "services" | "tests" | "other"
+              notes: <string|null>       # only structural notes (e.g. "file >1000 LOC, multi-responsibility")
+          loc_total: <int>             # sum of files[].loc
+          structural_complexities:
+            - <short string>            # e.g. "components.rs at 2133 LOC mixes 8+ React-equivalent components"
+          notes_pour_synthese: <string|null>
+      project_totals:
+        slices_count: <int>
+        loc_total: <int>

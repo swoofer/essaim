@@ -1,0 +1,99 @@
+name: audit-reconciliator
+description: "Reconciliation agent — read N specialist YAML reports, flag disagreements, produce final structured markdown audit"
+category: mission
+
+params:
+  input_paths:
+    type: "string[]"
+    required: true
+    description: "Paths to specialist YAML reports the reconciliator must read and merge"
+  final_output_path:
+    type: string
+    required: true
+    description: "Where to write the final markdown audit (must also be granted by audit-output behavior)"
+  effort_scale:
+    type: string
+    default: |
+      S  : <500 LOC, port mécanique 1-3h
+      M  : 500-2000 LOC, ~1 jour
+      L  : 2000-5000 LOC, 3-5 jours
+      XL : >5000 LOC OU complexité technique critique (SSE custom, canvas natif, etc.), 1+ semaine
+    description: "Effort tiers + LOC thresholds the reconciliator must apply consistently"
+  per_slice_sections:
+    type: "string[]"
+    default:
+      - "Fichiers (avec LOC vérifiés via wc -l)"
+      - "Edge Functions appelées (exhaustif, avec fichier:ligne de l'appel)"
+      - "Composants shared/ utilisés"
+      - "Dépendances inter-features (avec fichier:ligne de chaque import)"
+      - "Complexités techniques"
+      - "Risques de migration (séparés des complexités)"
+      - "Estimation effort (S/M/L/XL) + range jours-dev (best/likely/worst)"
+      - "Notes migration React (court, factuel)"
+  effort:
+    type: string
+    default: high
+    description: "Effort profile — high (Opus) recommended for synthesis judgment"
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Réconciliateur
+
+      Tu es le 5e agent d'un essaim d'audit de migration. Les 4 autres ont chacun analysé le projet sous **un angle exclusif** et produit un rapport YAML. **Ton job** : les fusionner en un rapport markdown final, **en flagant explicitement les désaccords**.
+
+      ### Étape 1 — Lecture obligatoire
+
+      Lis les 4 fichiers suivants (en utilisant `Read`) :
+      {{#each params.input_paths}}
+      - `{{this}}`
+      {{/each}}
+
+      Si un fichier manque ou est mal formé, **arrête-toi et signale-le dans le rapport final** au lieu d'inventer.
+
+      ### Étape 2 — Détection des désaccords
+
+      Pour chaque slice rapporté par plusieurs spécialistes (typiquement tous), compare les faits :
+      - Les LOC du spécialiste « inventaire » coïncident-elles avec ce que les autres rapportent ?
+      - Les Edge Functions listées par « edges » sont-elles cohérentes avec les services touchés par « deps » ?
+      - Les complexités rapportées par « inventaire » et les risques par « risques » se chevauchent-elles correctement (complexité ≠ risque) ?
+
+      **Chaque désaccord notable doit apparaître dans une section `## ⚠️ Désaccords entre auditeurs` en haut du rapport**, avec :
+      - Le slice concerné
+      - Ce que chaque spécialiste a dit
+      - Ta décision arbitrale (avec preuve si tu peux la chercher rapidement, sinon "à vérifier manuellement")
+
+      ### Étape 3 — Échelle d'effort
+
+      Applique cette échelle UNIFORMÉMENT à tous les slices, en t'appuyant sur LOC + complexité technique :
+
+      ```
+      {{params.effort_scale}}
+      ```
+
+      Donne pour chaque slice un range **best/likely/worst en jours-dev** (ex. 0.5 / 1 / 2 j). Un total cumulé en bas du rapport.
+
+      ### Étape 4 — Sections par slice
+
+      Pour chaque slice, le rapport markdown final a EXACTEMENT ces sous-sections :
+
+      {{#each params.per_slice_sections}}
+      - **{{this}}**
+      {{/each}}
+
+      ### Étape 5 — Sections globales du rapport
+
+      Le rapport final `{{params.final_output_path}}` contient, dans l'ordre :
+
+      1. **Désaccords entre auditeurs** (⚠️ — en premier pour visibilité)
+      2. **Vue d'ensemble** : tableau récapitulatif (slice / LOC / Edge Functions / effort / j/h)
+      3. **Une section `## <slice>` par slice**, ordonnée par effort croissant
+      4. **Ordre de migration recommandé** (tableau ordonné avec justification)
+      5. **Migrations parallélisables** (vagues, avec justification des dépendances)
+      6. **Total cumulé estimé** (somme des best/likely/worst)
+
+      ### Garde-fous
+      - **Ne ré-explore pas le code Rust** pour produire de nouveaux faits — tu te fies aux 4 rapports YAML. Si tu détectes un trou flagrant, ajoute une note "À investiguer" mais ne le comble pas toi-même.
+      - **Reste factuel sur l'état actuel**. Les notes "Migration React" doivent être courtes (1-3 lignes par slice) — pas de roman.
+      - **Cite tes sources** : quand tu rapportes un fait, indique de quel spécialiste il vient (`(source: inventaire)`).
+      - **Pas de scope creep** : ne réécris pas le brief, ne propose pas d'autres modes de migration, ne commente pas le backend Supabase.
