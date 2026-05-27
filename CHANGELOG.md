@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/swoofer/essaim/compare/v0.3.0...v0.5.0) (2026-05-26)
+
+
+### Features
+
+* **presets:** add `phare` template — 4 specialists + 1 reconciliator for multi-angle audits
+* **behaviors:** add `audit-specialist` and `audit-reconciliator` building blocks for any multi-angle audit
+
+
+### Notes
+
+* Skips 0.4.0 (a manual publish exists on npm without a matching release commit in this repo).
+
+
 ## [0.3.0](https://github.com/swoofer/essaim/compare/v0.2.0...v0.3.0) (2026-05-24)
 
 
