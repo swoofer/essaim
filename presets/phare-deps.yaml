@@ -1,0 +1,74 @@
+name: phare-deps
+description: "Phare — spécialiste graphe de dépendances inter-features + cycles + composants shared"
+profile: communicant
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - read-only-mode
+  - audit-output
+  - audit-specialist
+params:
+  audit-output:
+    paths:
+      - "tmp/audit/deps.yaml"
+  audit-specialist:
+    focus_name: deps
+    focus_description: >
+      Graphe complet des dépendances inter-features et usage de
+      `src/features/shared/`. Tu rapportes :
+
+      1. Pour chaque slice : quels autres slices il importe (`use crate::features::<other>::...`),
+         avec le SYMBOLE importé et le fichier:ligne PRÉCIS de chaque import.
+
+      2. Les composants `shared/` utilisés par chaque slice (idem : nom du
+         composant + fichier:ligne d'usage).
+
+      3. Les cycles de dépendances détectés — par exemple si `A` importe de
+         `B` ET `B` importe de `A`, c'est un cycle à briser AVANT toute
+         migration parallèle.
+
+      C'est la base du graphe topologique qui détermine l'ordre de
+      migration. La précision (n° de ligne obligatoire) est ce qui rend
+      ton rapport actionnable.
+    scope_paths:
+      - "src/features/"
+    patterns_to_grep:
+      - "use crate::features::"
+      - "crate::features::shared::"
+    output_yaml_schema: |
+      schema_version: 1
+      auditor: deps
+      generated_at: <iso8601>
+      slices:
+        - name: <slice_name>
+          cross_feature_imports:
+            - from_slice: <other_slice_name>
+              symbol: <imported_symbol>     # e.g. "AuthStatus", "CharacterAvatar"
+              at:
+                - file: <path>
+                  line: <int>
+          shared_components_used:
+            - component: <name>             # e.g. "Button", "Card"
+              at:
+                - file: <path>
+                  line: <int>
+          notes_pour_synthese: <string|null>
+      cycles_detected:
+        - between: [<slice_a>, <slice_b>]
+          evidence:
+            - file: <path>
+              line: <int>
+              direction: "<a→b>"            # or "<b→a>"
+          severity: <"blocker"|"warning">
+          notes: <string>
+      topological_layers:                   # leaves first, dependents last
+        - layer: 0
+          slices: [<...>]                    # zero inter-feature deps
+        - layer: 1
+          slices: [<...>]
+        # ... etc

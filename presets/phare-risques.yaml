@@ -1,0 +1,65 @@
+name: phare-risques
+description: "Phare — spécialiste risques de migration (≠ complexités techniques)"
+profile: communicant
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - read-only-mode
+  - audit-output
+  - audit-specialist
+params:
+  audit-output:
+    paths:
+      - "tmp/audit/risques.yaml"
+  audit-specialist:
+    focus_name: risques
+    focus_description: >
+      Inventaire des RISQUES de migration — ce qui peut casser silencieusement
+      ou demander une attention particulière au moment du switch Rust→React.
+
+      **Risque ≠ complexité technique** :
+      - Une complexité est un défi à l'implémentation (SSE custom, canvas
+        Fabric.js, crop d'image canvas 2D).
+      - Un risque est ce qui peut PLANTER en prod si on n'y prête pas
+        attention (race conditions, RLS qui ne fonctionnent plus si le JWT
+        n'est pas injecté avant le premier fetch, contrats Edge Functions
+        non versionnés, états transitoires mal gérés au streaming, etc.).
+
+      Pour CHAQUE slice, tu listes :
+      - Les complexités techniques objectives (avec preuve fichier:ligne)
+      - Les risques de migration distincts (avec sévérité)
+      - Les pré-requis obligatoires pour migrer ce slice sans casse (ex.
+        "JWT doit être propagé dans le SupabaseClient AVANT toute requête
+        authentifiée pour que RLS fonctionne").
+    scope_paths:
+      - "src/features/"
+    output_yaml_schema: |
+      schema_version: 1
+      auditor: risques
+      generated_at: <iso8601>
+      slices:
+        - name: <slice_name>
+          technical_complexities:           # objectif, code-driven
+            - what: <description>
+              where:
+                - file: <path>
+                  line: <int>
+              category: <"streaming"|"canvas"|"upload"|"async_state"|"webhook"|"crypto"|"other">
+          migration_risks:                  # ce qui peut casser
+            - what: <description>
+              severity: <"critical"|"high"|"medium"|"low">
+              why: <reasoning>
+              mitigation: <how to derisk>
+          pre_migration_requirements:       # ce qu'il faut avoir AVANT de migrer ce slice
+            - <requirement>
+          notes_pour_synthese: <string|null>
+      cross_cutting_risks:                  # risques qui dépassent un seul slice
+        - what: <description>
+          impacted_slices: [<...>]
+          severity: <"critical"|"high"|"medium"|"low">
+          mitigation: <string>

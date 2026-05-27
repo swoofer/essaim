@@ -1,0 +1,70 @@
+name: phare-edges
+description: "Phare — spécialiste backend touchpoints : Edge Functions, Storage, RLS"
+profile: communicant
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - read-only-mode
+  - audit-output
+  - audit-specialist
+params:
+  audit-output:
+    paths:
+      - "tmp/audit/edges.yaml"
+  audit-specialist:
+    focus_name: edges
+    focus_description: >
+      Inventaire EXHAUSTIF de tous les touchpoints backend depuis chaque slice frontend :
+      Edge Functions Supabase appelées, buckets Storage référencés, tables RLS impliquées.
+
+      C'est le point le plus critique de l'audit — la cause #1 d'erreurs dans
+      les audits précédents est la sous-détection des Edge Functions parce
+      qu'on n'a regardé qu'un seul pattern. Tu DOIS appliquer TOUS les
+      patterns listés et reporter chaque hit avec son fichier:ligne.
+
+      Pour chaque slice, liste les Edge Functions appelées (nom de la
+      function + emplacements de l'appel), les buckets Storage référencés,
+      et les tables Supabase touchées (déductibles par les noms de table
+      dans `.from("<table>")` ou équivalent PostgREST).
+    scope_paths:
+      - "src/features/"
+      - "src/infrastructure/"
+    patterns_to_grep:
+      - "functions_url("
+      - "/functions/v1/"
+      - "format!(\".*functions/v1/"
+      - "format!.*/functions/v1/"
+      - "invoke(\""
+      - "storage/v1/object"
+      - ".from(\""
+      - "PostgrestRequest"
+    output_yaml_schema: |
+      schema_version: 1
+      auditor: edges
+      generated_at: <iso8601>
+      slices:
+        - name: <slice_name>
+          edge_functions:
+            - name: <fn_name>          # e.g. "generate-image"
+              calls:
+                - file: <relative_path>
+                  line: <int>
+                  pattern_matched: <string>  # which grep pattern caught it
+                  snippet: <string>           # the actual line (truncated to 120 chars)
+          storage_buckets:
+            - name: <bucket_name>
+              usage: <"read"|"write"|"public_url_construction">
+              at:
+                - file: <path>
+                  line: <int>
+          rls_tables:                      # tables touched by this slice (informational)
+            - <table_name>
+          notes_pour_synthese: <string|null>
+      project_totals:
+        unique_edge_functions: [<list>]
+        unique_buckets: [<list>]
