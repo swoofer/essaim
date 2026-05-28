@@ -1,0 +1,96 @@
+name: migrate-slice
+description: "Slice migrator — one agent ports one source-slice into a target tech stack, referencing an upstream audit"
+category: mission
+
+params:
+  target_slice:
+    type: string
+    required: true
+    description: "Slice this agent owns (e.g. 'auth', 'shared'). Set per-agent by the orchestrator from context.modules."
+  audit_path:
+    type: string
+    default: MIGRATION_AUDIT.md
+    description: "Relative path to the consolidated migration audit (read-only reference)."
+  source_root:
+    type: string
+    default: src/features
+    description: "Where the source slices live."
+  target_root:
+    type: string
+    default: web/src/features
+    description: "Where the migrated slices must land."
+  target_stack:
+    type: string
+    default: "React 18 + TypeScript strict, Vite, Tailwind 4 + DaisyUI 5, TanStack Query, Zustand, Vitest"
+    description: "One-line description of the destination tech stack."
+  test_command:
+    type: string
+    default: "cd web && npm test"
+    description: "Command the agent runs to verify its tests pass."
+  typecheck_command:
+    type: string
+    default: "cd web && npx tsc --noEmit"
+    description: "Command the agent runs to verify TS types."
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Migrateur du slice « {{params.target_slice}} »
+
+      Tu fais partie d'un essaim de N migrateurs en parallèle. **Chacun possède UN slice exclusif.** Le tien est `{{params.target_slice}}`. Ne touche à aucun autre — un autre agent s'en occupe.
+
+      ### Tes périmètres
+      - **À lire (source)** : `{{params.source_root}}/{{params.target_slice}}/`
+      - **À écrire (cible)** : `{{params.target_root}}/{{params.target_slice}}/`
+      - **À NE PAS toucher** : tout `{{params.source_root}}/<autre>/` (code source intact), tout `{{params.target_root}}/<autre>/` (territoire d'un autre agent), `supabase/` (backend hors scope).
+
+      ### Référence obligatoire — l'audit consolidé
+
+      Avant TOUT code, lis :
+      1. `{{params.audit_path}}` en entier (vue d'ensemble, désaccords, risques transverses, ordre de migration).
+      2. La section `## {{params.target_slice}}` qui te concerne (fichiers exacts, risques propres, edge functions, complexités).
+
+      Cet audit est ton contrat. Si un fait du code te surprend par rapport à l'audit, signale-le dans ton thread plutôt que de réécrire silencieusement.
+
+      ### Stack cible
+      {{params.target_stack}}
+
+      ### Méthode imposée (TDD strict)
+
+      1. **Setup partagé d'abord** : si `{{params.target_root}}/../` (la racine `web/`) n'existe pas encore, **tu es le premier agent à arriver** — initialise le scaffold (`npm create vite@latest web -- --template react-ts`, install Tailwind 4 + DaisyUI 5 + TanStack Query + Zustand + Vitest, configure `vite.config.ts` + `tsconfig.json`). **Annonce ce setup au coordinator AVANT de commencer** (`announce_work` avec `target_modules` incluant un module commun comme `web-scaffold`) pour que les autres agents ne dupliquent pas.
+
+      2. **Pour chaque module de ton slice** (`models.rs`, `state.rs`, `services.rs`, `components.rs`, etc.) :
+         - Lis le fichier source ET ses tests (`tests.rs`)
+         - Porte les **tests Vitest AVANT** le code (RED). 1 test Rust = 1 test Vitest, même nom de cas, même assertion.
+         - Implémente le code TypeScript pour rendre les tests verts (GREEN). Minimum viable.
+         - Refactor une fois vert (REFACTOR), sans casser les tests.
+         - Lance `{{params.test_command}}` pour confirmer.
+
+      3. **Coordination via le coordinator** :
+         - `announce_work` au démarrage avec `target_modules: ["{{params.target_slice}}"]`, `subject` clair, `plan` court.
+         - À chaque jalon (module terminé, blocage, décision transverse), `post_to_thread` un résumé court.
+         - Si tu touches à un pattern transverse (auth headers, supabase client, idempotency-key helper), annonce-le sur un module commun (ex. `target_modules: ["{{params.target_slice}}", "shared-infra"]`) pour que les autres agents prennent ta convention.
+         - À la fin, `propose_resolution` avec la liste des livrables et les éventuels TODO.
+
+      ### Règles dures (verrouillées par les tests)
+
+      - **Pas de texte hardcodé** dans les composants — labels via props.
+      - **Pas de `fetch()` direct** dans un composant — toujours un service via hook.
+      - **Pas de client Supabase construit dans un composant** — singleton dans `web/src/lib/supabase.ts`.
+      - **Pas de `as any`, pas de `@ts-ignore`** sauf cas extrême documenté en commentaire.
+      - **Préserver tous les ARIA labels** du Rust (vérifiés par tests).
+      - **Risques transverses de l'audit** : appliquer obligatoirement les helpers `buildAuthHeaders`, `useAuthedQuery`, `useIdempotentMutation` (ou créer si ton slice les introduit en premier).
+
+      ### Livrables minimum
+
+      - `{{params.target_root}}/{{params.target_slice}}/index.ts` (re-exports publics)
+      - Tous les fichiers TS/TSX nécessaires
+      - Tests Vitest qui passent : `{{params.test_command}}`
+      - Zéro erreur TypeScript strict : `{{params.typecheck_command}}`
+      - Un court récap dans `propose_resolution` (composants livrés, tests portés, conventions adoptées, TODO restants si applicable).
+
+      ### Garde-fous
+
+      - **Ne te lance pas sur les autres slices** même si tu vois un bug — annonce-le dans un thread, c'est tout.
+      - **Ne refactore pas le code Rust** — il restera en service le temps que tous les slices migrent.
+      - **N'introduis pas de dépendance npm exotique** sans justifier dans `propose_resolution`.

@@ -58,8 +58,25 @@ interface TemplateDefinition {
     profile: 'codeur' | 'communicant';
     role?: string;
     launch_delay?: number;
-    count?: number | 'dynamic'; // 'dynamic' = based on modules/files
+    // count semantics:
+    //   number    — exactly N agents
+    //   'dynamic' — derive N from context.modules.length (capped 2..4)
+    //   'per-module' — one agent per entry in context.modules; combine with
+    //                  perModuleParam to give each its own value
+    count?: number | 'dynamic' | 'per-module';
     params?: Record<string, Record<string, unknown>>;
+    // perModuleParam (only with count: 'per-module'): for each agent i,
+    // inject context.modules[i] as params[behavior][key]. The agent's
+    // idPrefix is also suffixed with the module name (e.g. migrator-shared)
+    // so the dashboard shows which slice each agent owns.
+    perModuleParam?: { behavior: string; key: string };
+    // perModuleRegisterOwnOnly (only with count: 'per-module'): if true,
+    // register the agent's coordinator `modules` as just [its own module]
+    // instead of the full project list. Use this when each agent should
+    // primarily attract consultations on its own slice; cross-slice
+    // collaboration still works because announce_work can target multiple
+    // modules. Defaults to false (= full module list, broad collaboration).
+    perModuleRegisterOwnOnly?: boolean;
   }>;
 }
 
@@ -253,6 +270,32 @@ const TEMPLATE_DEFS: Record<string, TemplateDefinition> = {
       { idPrefix: 'synth', namePrefix: 'Reconciliateur', preset: 'phare-synth', profile: 'communicant', count: 1, launch_delay: 60 },
     ],
   },
+  'migrate-phase2': {
+    name: 'Migration Phase 2',
+    description: 'N migrateurs en parallèle — un agent par slice (context.modules), chacun porte son slice vers un stack cible en suivant un audit consolidé',
+    phase: 2,
+    workspace: 'worktree',
+    stagger: { mode: 'fixed', delay: [0, 0] },
+    timeout_minutes: 90,
+    metrics: ['slices_migrated', 'tests_ported', 'cross_slice_consultations'],
+    compare_mode: false,
+    agents: [
+      {
+        idPrefix: 'migrator',
+        namePrefix: 'Migrator',
+        preset: 'migrate-slice',
+        profile: 'codeur',
+        count: 'per-module',
+        perModuleParam: { behavior: 'migrate-slice', key: 'target_slice' },
+        // Each migrator advertises only its own slice as its module so the
+        // coordinator routes slice-targeted threads to the right owner.
+        // Cross-slice collaboration still works because announce_work can
+        // include multiple target_modules (e.g. ["shared", "auth"] for a
+        // shared-types decision).
+        perModuleRegisterOwnOnly: true,
+      },
+    ],
+  },
 };
 
 const AGENT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
@@ -280,16 +323,45 @@ export function buildProjectFromBce(
   const agents: BceMiniProject['agents'] = [];
 
   for (const agentDef of def.agents) {
-    const count =
-      agentDef.count === "dynamic"
-        ? (options?.agentCount ?? Math.max(2, Math.min(context.modules.length || 2, 4)))
-        : (agentDef.count ?? 1);
+    let count: number;
+    if (agentDef.count === "dynamic") {
+      count = options?.agentCount ?? Math.max(2, Math.min(context.modules.length || 2, 4));
+    } else if (agentDef.count === "per-module") {
+      if (context.modules.length === 0) {
+        throw new Error(
+          `Template '${templateId}' uses count: 'per-module' but context.modules is empty. ` +
+          `Provide modules via the project scanner or override via the run config.`,
+        );
+      }
+      count = context.modules.length;
+    } else {
+      count = agentDef.count ?? 1;
+    }
 
     for (let i = 0; i < count; i++) {
-      const suffix = count > 1 ? `-${i + 1}` : '';
-      const nameSuffix = count > 1 ? ` ${AGENT_NAMES[i] || (i + 1)}` : '';
+      // 'per-module' uses the module name as suffix (visible on the dashboard),
+      // others use the numeric / phonetic suffix as before.
+      const moduleForAgent = agentDef.count === "per-module" ? context.modules[i]! : null;
+      const slug = (s: string) => s.replace(/[^a-zA-Z0-9_-]+/g, "-").toLowerCase();
+      const suffix = moduleForAgent !== null
+        ? `-${slug(moduleForAgent)}`
+        : (count > 1 ? `-${i + 1}` : '');
+      const nameSuffix = moduleForAgent !== null
+        ? ` ${moduleForAgent}`
+        : (count > 1 ? ` ${AGENT_NAMES[i] || (i + 1)}` : '');
       const agentId = `${agentDef.idPrefix}${suffix}`;
       const agentName = `${agentDef.namePrefix}${nameSuffix}`;
+
+      // Inject the per-module behavior param (e.g. migrate-slice.target_slice = "auth")
+      // from agentDef.perModuleParam. Merged into the agent's params so the
+      // behavior template can reference {{params.target_slice}}.
+      const perModuleParams: Record<string, Record<string, unknown>> = {};
+      if (agentDef.perModuleParam && moduleForAgent !== null) {
+        perModuleParams[agentDef.perModuleParam.behavior] = {
+          ...(agentDef.params?.[agentDef.perModuleParam.behavior] ?? {}),
+          [agentDef.perModuleParam.key]: moduleForAgent,
+        };
+      }
 
       // Build launch params from context
       const launchParams: Record<string, Record<string, unknown>> = {
@@ -299,6 +371,7 @@ export function buildProjectFromBce(
           modules: context.modules,
         },
         ...(agentDef.params ?? {}),
+        ...perModuleParams,
         ...(options?.setParams ?? {}),
       };
 
@@ -313,20 +386,22 @@ export function buildProjectFromBce(
       };
       const result = runPipeline(agent, getCatalogRoot(), launchParams);
 
+      // Modules registered with the coordinator for respondent matching.
+      // Default = full project list (broad collaboration: every agent is a
+      // respondent for every announce). Per-module templates can opt into
+      // own-only registration (one slice per agent) so consultations route
+      // to the slice owner.
+      const registeredModules = (agentDef.count === "per-module" && agentDef.perModuleRegisterOwnOnly && moduleForAgent !== null)
+        ? [moduleForAgent]
+        : context.modules;
+
       agents.push({
         id: agentId,
         name: agentName,
         prompt: result.output.prompt,
         profile: agentDef.profile,
         role: agentDef.idPrefix,
-        // Pre-register modules so consultation matching picks this agent as a
-        // respondent. Without this, announce_work computes expected_respondents
-        // = [] for every thread → propose_resolution waits for absent voters
-        // → threads only close via the timeout sweeper. Default to the full
-        // project module list (every specialist is relevant to every other
-        // specialist's announces). Per-agent overrides could be added later
-        // via agentDef.modules if a template needs narrower scoping.
-        modules: context.modules,
+        modules: registeredModules,
         launch_delay: agentDef.launch_delay,
         hooks: result.output.hooks,
         envVars: result.output.envVars,
