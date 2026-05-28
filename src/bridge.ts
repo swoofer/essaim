@@ -272,15 +272,36 @@ const TEMPLATE_DEFS: Record<string, TemplateDefinition> = {
   },
   'migrate-phase2': {
     name: 'Migration Phase 2',
-    description: 'N migrateurs en parallèle — un agent par slice (context.modules), chacun porte son slice vers un stack cible en suivant un audit consolidé',
+    description: 'Scaffolder pose web/ + shared/ + lib/supabase, puis N migrateurs (un par slice) attaquent leur slice — vraie collaboration via workspace partagé',
     phase: 2,
-    workspace: 'worktree',
+    // workspace: 'shared' (NOT 'worktree') — the previous 'worktree' design
+    // forced each per-slice agent to re-create the shared scaffold in its
+    // own isolated copy, producing divergent shared/Button.tsx, divergent
+    // lib/supabase.ts, divergent main.tsx that couldn't be merged cleanly.
+    // With 'shared', the scaffolder writes once and the migrators read
+    // (and import) those files directly — no duplication possible.
+    workspace: 'shared',
     stagger: { mode: 'fixed', delay: [0, 0] },
-    timeout_minutes: 90,
+    timeout_minutes: 120,
     metrics: ['slices_migrated', 'tests_ported', 'cross_slice_consultations'],
     compare_mode: false,
     agents: [
       {
+        // Phase 1: one scaffolder owns the scaffold + shared/ slice + lib/.
+        // Runs first (launch_delay 0) and migrators wait ~5 min before
+        // starting so the scaffold is in place when they begin.
+        idPrefix: 'scaffolder',
+        namePrefix: 'Scaffolder',
+        preset: 'migrate-scaffold',
+        profile: 'codeur',
+        count: 1,
+        launch_delay: 0,
+      },
+      {
+        // Phase 2: one migrator per slice (excluding 'shared', owned by the
+        // scaffolder). Wait long enough for scaffold + shared/ to be done.
+        // Each migrator's brief includes a precondition check
+        // (web/src/features/shared/index.ts must exist) before any write.
         idPrefix: 'migrator',
         namePrefix: 'Migrator',
         preset: 'migrate-slice',
@@ -290,9 +311,14 @@ const TEMPLATE_DEFS: Record<string, TemplateDefinition> = {
         // Each migrator advertises only its own slice as its module so the
         // coordinator routes slice-targeted threads to the right owner.
         // Cross-slice collaboration still works because announce_work can
-        // include multiple target_modules (e.g. ["shared", "auth"] for a
-        // shared-types decision).
+        // include multiple target_modules (e.g. ["chat", "shared-infra"]
+        // for a shared-infra decision).
         perModuleRegisterOwnOnly: true,
+        // 5 min for the scaffolder to deliver npm scaffold + shared/.
+        // The migrator brief tells them to wait up to 10 min more if the
+        // scaffold isn't fully there yet, so this is a soft trigger, not a
+        // hard contract.
+        launch_delay: 300,
       },
     ],
   },

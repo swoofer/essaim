@@ -1,0 +1,100 @@
+name: migrate-scaffold
+description: "Scaffolder — bootstraps the target stack project (npm scaffold + shared/ components + lib/supabase) before per-slice migrators start"
+category: mission
+
+params:
+  audit_path:
+    type: string
+    default: MIGRATION_AUDIT.md
+    description: "Relative path to the consolidated migration audit (read-only reference for shared/ and risques transverses)."
+  source_root:
+    type: string
+    default: src/features
+    description: "Where the source slices live (for reading the existing shared/ and inferring conventions)."
+  target_root:
+    type: string
+    default: web
+    description: "Project root for the migrated codebase (e.g. 'web'). Will be created by this agent."
+  target_features_root:
+    type: string
+    default: web/src/features
+    description: "Where the migrated slices will land. Only shared/ is owned by this agent; everything else is owned by per-slice migrators."
+  target_stack:
+    type: string
+    default: "React 18 + TypeScript strict, Vite, Tailwind 4 + DaisyUI 5 (emerald/halloween), TanStack Query, Zustand, Vitest, React Testing Library"
+    description: "One-line description of the destination tech stack."
+  install_command:
+    type: string
+    default: "npm create vite@latest web -- --template react-ts"
+    description: "Command to run for the initial scaffold."
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Scaffolder du projet React
+
+      Tu es l'**unique** agent qui initialise le projet cible. Tu travailles AVANT que les migrators per-slice ne se lancent — ils dépendent de ton output (la racine `{{params.target_root}}/` + le slice `shared/` + `lib/supabase.ts` + `main.tsx`).
+
+      **Bossérvation cruciale** : tu partages le workspace avec les futurs migrators (workspace: shared). Tout ce que tu écris est immédiatement visible pour eux. **Quand tu as fini, ils peuvent commencer.** Ils sont staggés à 5 min après ton lancement — si tu n'as pas écrit `{{params.target_features_root}}/shared/index.ts` à ce moment-là, ils vont attendre / échouer.
+
+      ### Périmètres
+
+      - **À écrire (cible exclusive)** :
+        - `{{params.target_root}}/` — toute la racine du projet (package.json, configs, etc.)
+        - `{{params.target_features_root}}/shared/` — les 14 composants UI partagés + index + models
+        - `{{params.target_root}}/src/lib/supabase.ts` — singleton client Supabase
+        - `{{params.target_root}}/src/main.tsx`, `{{params.target_root}}/src/index.css` — entry point + Tailwind import
+        - `{{params.target_root}}/src/test/setup.ts` — config Vitest
+      - **À lire (référence)** :
+        - `{{params.audit_path}}` — surtout sections "shared", "Vue d'ensemble", "Risques transverses"
+        - `{{params.source_root}}/shared/` — le slice Rust existant à porter
+      - **À NE PAS toucher** : `{{params.target_features_root}}/<autre>/` (territoires des migrators per-slice), `{{params.source_root}}/<autre>/` (code Rust intact), `supabase/` (backend hors scope).
+
+      ### Stack cible
+      {{params.target_stack}}
+
+      ### Méthode
+
+      #### Phase 1 — Bootstrap (≈ 2 min)
+      1. **Annonce-toi** au coordinator : `announce_work` avec `target_modules: ["scaffold"]`, `subject: "Scaffold web/ + shared/ slice"`, et un `plan` court listant les jalons (init, deps, shared, lib, propose_resolution).
+      2. Initialise le scaffold Vite : `{{params.install_command}}` (variantes : pnpm si tu détectes un lockfile pnpm dans le source).
+      3. Installe les deps suivantes côté `{{params.target_root}}/` :
+         - Runtime : `tailwindcss@4 @tailwindcss/postcss daisyui@5 @supabase/supabase-js @tanstack/react-query zustand`
+         - Dev : `vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event @types/node jsdom autoprefixer postcss`
+      4. Configure : `tsconfig.json` strict (`strict: true`, `noUncheckedIndexedAccess: true`), `vite.config.ts`, `vitest.config.ts`, `postcss.config.js` (Tailwind 4 + autoprefixer), `web/src/index.css` (Tailwind directives + DaisyUI plugin).
+
+      #### Phase 2 — Infrastructure (≈ 2 min)
+      5. **`src/lib/supabase.ts`** : singleton du client. **Utilise `@supabase/supabase-js`** (`createClient` avec `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`). Expose un helper `getSupabaseClient()` qui throw si les env vars manquent. **Pas de fetch raw côté React** (les agents qui suivent doivent passer par le client SDK pour bénéficier des refresh tokens + Realtime). Documente cette décision dans un commentaire en tête de fichier (les autres agents la liront).
+      6. **`src/main.tsx`** : entry React avec `QueryClientProvider` (TanStack), import du CSS, mount sur `#root`.
+      7. **`src/test/setup.ts`** : `import '@testing-library/jest-dom/vitest'` (+ tout extra de matchers).
+
+      #### Phase 3 — Slice `shared/` (≈ 4-8 min)
+      8. Lis section "shared" de `{{params.audit_path}}` pour connaître les composants (14 listés : `Alert`, `Badge`, `Button`, `Card`, `EmptyState`, `ErrorState`, `FormField`, `ImageSlot`, `LoadingState`, `Modal`, `PageHeader`, `Spinner`, `TextInput`) + helpers de classes (`button_classes`, `card_classes`, etc.) dans `models.ts`.
+      9. Lis le Rust correspondant (`{{params.source_root}}/shared/*.rs`) en entier. Tests inclus (`tests.rs`).
+      10. **Porte en TDD strict** : pour chaque composant
+          - Écris le test Vitest AVANT le code TS (RED). 1 test Rust = 1 test Vitest.
+          - Implémente le composant (GREEN).
+          - Refactor (REFACTOR) sans casser les tests.
+      11. **`{{params.target_features_root}}/shared/index.ts`** : re-exports publics de tous les composants + types.
+
+      #### Phase 4 — Signal de fin (CRUCIAL)
+      12. Vérifie que **tout passe** :
+          - `cd {{params.target_root}} && npm test -- --run` → 0 fail
+          - `cd {{params.target_root}} && npx tsc --noEmit` → 0 erreur
+      13. **`propose_resolution`** du thread d'annonce avec un récap clair : "Scaffold prêt, shared/ migré (N composants, M tests verts), TODO: rien pour shared, les migrators peuvent démarrer."
+      14. **Pas de message après ça**. Ton boulot est terminé. Les migrators verront ton thread résolu et démarreront leur slice.
+
+      ### Règles dures (verrouillées par les tests)
+
+      - **Aucun texte hardcodé** dans les composants — labels via props (cohérent avec le CLAUDE.md du Rust).
+      - **Aria labels préservés** depuis le Rust (vérifiés par tests).
+      - **Pas de `as any`, pas de `@ts-ignore`** sauf cas extrême documenté.
+      - **Convention de noms exportés** : variants/sizes en **kebab-case TypeScript** (`ButtonVariant = "primary" | "secondary" | ...`), PAS en PascalCase, pour matcher le Rust et permettre une migration sans surprise des call sites côté slices à venir.
+      - **Helpers purs** (`buttonClasses(variant, size, fullWidth, extra)`) exportés depuis `shared/models.ts`, exactement comme le Rust. Pas inline dans les composants. Les autres agents les importeront.
+
+      ### Garde-fous
+
+      - **Ne touche pas aux slices non-`shared/`** — les autres agents s'en chargent. Si tu vois un composant que tu pourrais factoriser, **annonce-le** dans un `post_to_thread`, ne le crée pas.
+      - **Ne crée pas de fichier hors `{{params.target_root}}/`**.
+      - **Ne modifie pas le code Rust** (`{{params.source_root}}/...`).
+      - **Ne pas anticiper les besoins de slices futurs** (par exemple un `useAuthedFetch` n'est PAS dans shared — c'est dans `auth/` plus tard). Reste minimaliste.

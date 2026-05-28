@@ -17,4 +17,5 @@ params:
     # monpikto-specific paths/commands or pass via --set on the CLI.
     audit_path: MIGRATION_AUDIT.md
     source_root: src/features
-    target_root: web/src/features
+    target_root: web
+    target_features_root: web/src/features

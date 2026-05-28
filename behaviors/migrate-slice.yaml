@@ -17,8 +17,12 @@ params:
     description: "Where the source slices live."
   target_root:
     type: string
+    default: web
+    description: "Project root for the migrated codebase (e.g. 'web'). Owned by the scaffolder agent — must exist before this agent starts."
+  target_features_root:
+    type: string
     default: web/src/features
-    description: "Where the migrated slices must land."
+    description: "Where the migrated slices live. This agent writes to {{target_features_root}}/{{target_slice}}/ exclusively."
   target_stack:
     type: string
     default: "React 18 + TypeScript strict, Vite, Tailwind 4 + DaisyUI 5, TanStack Query, Zustand, Vitest"
@@ -41,8 +45,8 @@ sections:
 
       ### Tes périmètres
       - **À lire (source)** : `{{params.source_root}}/{{params.target_slice}}/`
-      - **À écrire (cible)** : `{{params.target_root}}/{{params.target_slice}}/`
-      - **À NE PAS toucher** : tout `{{params.source_root}}/<autre>/` (code source intact), tout `{{params.target_root}}/<autre>/` (territoire d'un autre agent), `supabase/` (backend hors scope).
+      - **À écrire (cible)** : `{{params.target_features_root}}/{{params.target_slice}}/`
+      - **À NE PAS toucher** : tout `{{params.source_root}}/<autre>/` (code source intact), tout `{{params.target_features_root}}/<autre>/` (territoire d'un autre agent), `{{params.target_features_root}}/shared/` (territoire du scaffolder, déjà fait), `supabase/` (backend hors scope).
 
       ### Référence obligatoire — l'audit consolidé
 
@@ -57,19 +61,26 @@ sections:
 
       ### Méthode imposée (TDD strict)
 
-      1. **Setup partagé d'abord** : si `{{params.target_root}}/../` (la racine `web/`) n'existe pas encore, **tu es le premier agent à arriver** — initialise le scaffold (`npm create vite@latest web -- --template react-ts`, install Tailwind 4 + DaisyUI 5 + TanStack Query + Zustand + Vitest, configure `vite.config.ts` + `tsconfig.json`). **Annonce ce setup au coordinator AVANT de commencer** (`announce_work` avec `target_modules` incluant un module commun comme `web-scaffold`) pour que les autres agents ne dupliquent pas.
+      1. **Pré-condition obligatoire — le scaffold doit être prêt avant que tu touches au code** :
+         - Vérifie que `{{params.target_features_root}}/shared/index.ts` existe (`Glob` ou `Read`).
+         - Vérifie que `{{params.target_root}}/src/lib/supabase.ts` existe.
+         - Si l'un des deux est absent → un agent `scaffolder` est encore en train de bosser. **Attends.** Soit via `mcp__coordinator__wait_for_peers` (avec un timeout généreux 600s), soit en relisant après 30s (`Bash sleep 30 && ls {{params.target_features_root}}/shared/index.ts`).
+         - **Ne refais PAS le scaffold toi-même.** L'agent scaffolder est responsable. Si après 10 min le scaffold n'est toujours pas là, échoue clairement en annonçant `propose_resolution` avec un message d'erreur — un humain interviendra.
 
-      2. **Pour chaque module de ton slice** (`models.rs`, `state.rs`, `services.rs`, `components.rs`, etc.) :
-         - Lis le fichier source ET ses tests (`tests.rs`)
+      2. **Annonce-toi** au coordinator dès que le scaffold est prêt :
+         - `announce_work` avec `target_modules: ["{{params.target_slice}}"]`, `subject` clair, `plan` court (la liste des fichiers que tu vas porter).
+
+      3. **Pour chaque module de ton slice** (`models.rs`, `state.rs`, `services.rs`, `components.rs`, etc.) :
+         - Lis le fichier source ET ses tests (`tests.rs`).
          - Porte les **tests Vitest AVANT** le code (RED). 1 test Rust = 1 test Vitest, même nom de cas, même assertion.
          - Implémente le code TypeScript pour rendre les tests verts (GREEN). Minimum viable.
          - Refactor une fois vert (REFACTOR), sans casser les tests.
          - Lance `{{params.test_command}}` pour confirmer.
 
-      3. **Coordination via le coordinator** :
-         - `announce_work` au démarrage avec `target_modules: ["{{params.target_slice}}"]`, `subject` clair, `plan` court.
+      4. **Coordination cross-slice via le coordinator** :
          - À chaque jalon (module terminé, blocage, décision transverse), `post_to_thread` un résumé court.
-         - Si tu touches à un pattern transverse (auth headers, supabase client, idempotency-key helper), annonce-le sur un module commun (ex. `target_modules: ["{{params.target_slice}}", "shared-infra"]`) pour que les autres agents prennent ta convention.
+         - Si tu touches à un pattern transverse (auth headers, idempotency-key helper, error mapper), annonce-le sur un module commun (ex. `target_modules: ["{{params.target_slice}}", "shared-infra"]`) pour que les autres agents prennent ta convention.
+         - **Importe le shared/ existant** (`import { Button, FormField } from '../shared'`) au lieu de le redéfinir. Si une fonctionnalité te manque dans shared/, **pose la question** dans un thread `target_modules: ["shared"]` au lieu de l'ajouter toi-même — c'est le scaffolder (déjà terminé) ou un futur agent shared-extender qui gère ce slice.
          - À la fin, `propose_resolution` avec la liste des livrables et les éventuels TODO.
 
       ### Règles dures (verrouillées par les tests)
@@ -83,7 +94,7 @@ sections:
 
       ### Livrables minimum
 
-      - `{{params.target_root}}/{{params.target_slice}}/index.ts` (re-exports publics)
+      - `{{params.target_features_root}}/{{params.target_slice}}/index.ts` (re-exports publics)
       - Tous les fichiers TS/TSX nécessaires
       - Tests Vitest qui passent : `{{params.test_command}}`
       - Zéro erreur TypeScript strict : `{{params.typecheck_command}}`

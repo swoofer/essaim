@@ -1,0 +1,18 @@
+name: migrate-scaffold
+description: "Scaffolder for the migrate-phase2 template — initializes the target stack scaffold + shared/ slice + lib/supabase before per-slice migrators start"
+profile: codeur
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - migrate-scaffold
+params:
+  migrate-scaffold:
+    audit_path: MIGRATION_AUDIT.md
+    source_root: src/features
+    target_root: web
+    target_features_root: web/src/features
