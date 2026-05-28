@@ -17,6 +17,7 @@ interface BceMiniProject {
     profile: 'codeur' | 'communicant';
     role?: string;
     read_only?: boolean;
+    modules?: string[]; // forwarded to coordinator registration (respondent matching)
     launch_delay?: number;
     // BCE-assembled outputs — consumed by orchestrator to write .claude/ files
     hooks: Record<string, string>;
@@ -318,6 +319,14 @@ export function buildProjectFromBce(
         prompt: result.output.prompt,
         profile: agentDef.profile,
         role: agentDef.idPrefix,
+        // Pre-register modules so consultation matching picks this agent as a
+        // respondent. Without this, announce_work computes expected_respondents
+        // = [] for every thread → propose_resolution waits for absent voters
+        // → threads only close via the timeout sweeper. Default to the full
+        // project module list (every specialist is relevant to every other
+        // specialist's announces). Per-agent overrides could be added later
+        // via agentDef.modules if a template needs narrower scoping.
+        modules: context.modules,
         launch_delay: agentDef.launch_delay,
         hooks: result.output.hooks,
         envVars: result.output.envVars,
