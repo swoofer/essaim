@@ -1,0 +1,23 @@
+name: dir-output
+description: "Confine toutes les écritures de l'agent à une liste de dossiers autorisés"
+category: safety
+
+params:
+  dirs:
+    type: "string[]"
+    required: true
+    description: "Dossiers (relatifs à la racine du projet) où l'agent a le droit d'écrire — tout le reste est en lecture seule"
+
+sections:
+  "090-dir-output":
+    prompt: |
+      ## Écritures confinées
+      Tu ne crées et ne modifies des fichiers QUE sous ces dossiers :
+      {{#each params.dirs}}
+      - `{{this}}`
+      {{/each}}
+      Tout le reste du dépôt est EN LECTURE SEULE pour toi. Tu ne contournes
+      pas cette règle en créant un fichier « équivalent » ailleurs, tu ne
+      commites rien, tu ne modifies aucun fichier de configuration. Si un
+      artefact te semble devoir vivre ailleurs : écris-le dans un des dossiers
+      autorisés et signale-le dans ton thread — la session principale décidera.
