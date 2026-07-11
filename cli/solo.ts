@@ -5,7 +5,7 @@ import { spawn } from "child_process";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { listTemplates } from "../src/orchestrator/template-engine.js";
 import { buildSoloPrompt } from "../src/bridge.js";
-import { collect, parseSetParams } from "./params.js";
+import { collect, parseSetParams, buildParamTypeMap } from "./params.js";
 
 export function createSoloCommand(): Command {
   return new Command("solo")
@@ -52,7 +52,7 @@ export function createSoloCommand(): Command {
         const context = scanProject(projectPath);
 
         // Build prompt with solo_mode=true injected automatically
-        const setParams = parseSetParams(opts.set);
+        const setParams = parseSetParams(opts.set, buildParamTypeMap());
         const prompt = buildSoloPrompt(template, context, setParams, projectPath);
 
         console.log(`\nSolo mode: ${template}`);

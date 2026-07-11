@@ -7,7 +7,7 @@ import {
 } from "../src/orchestrator/template-engine.js";
 import { runProject } from "../src/orchestrator/orchestrator.js";
 import { writeReport } from "../src/orchestrator/reporter.js";
-import { collect, parseSetParams } from "./params.js";
+import { collect, parseSetParams, buildParamTypeMap } from "./params.js";
 import { loadConfig } from "./config.js";
 
 export function createRunCommand(): Command {
@@ -106,7 +106,7 @@ export function createRunCommand(): Command {
           process.exit(1);
         }
 
-        const setParams = parseSetParams(opts.set);
+        const setParams = parseSetParams(opts.set, buildParamTypeMap());
 
         // Resolve coordinator URL: --coordinator-url > --url > COORDINATOR_URL env.
         // When none is set explicitly, runProject will start an in-process
