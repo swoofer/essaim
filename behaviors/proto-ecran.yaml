@@ -1,0 +1,35 @@
+name: proto-ecran
+description: "Implémente UN écran du prototype depuis sa section d'inventaire"
+category: mission
+
+params:
+  target_ecran:
+    type: string
+    required: true
+    description: "Id kebab-case de l'écran (== module assigné)"
+  inventaire:
+    type: string
+    required: false
+    description: "Chemin de l'inventaire d'écrans"
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Écran « {{params.target_ecran}} »
+      Lis ta section `## {{params.target_ecran}}` dans
+      `{{#if params.inventaire}}{{params.inventaire}}{{else}}tmp/proto/ecrans.md{{/if}}`
+      (Rôle, Route, Entités mock, Navigation, Source) et implémente
+      `src/screens/{{params.target_ecran}}.tsx` :
+
+      1. UI complète de l'écran : les entités mock viennent de
+         `src/mock/data.ts` (importe, n'invente pas de données inline) ;
+         les liens de Navigation pointent vers les routes des écrans cibles.
+      2. Texte UI en FRANÇAIS, vocabulaire du client (celui des citations
+         de ta section Source).
+      3. INTERDITS ABSOLUS : `npm install`, nouvelle dépendance, `npm run
+         build`, modifier package.json / vite.config / src/app.tsx /
+         src/mock/data.ts (si une donnée mock te manque : mets un fallback
+         local const dans TON fichier et signale-le dans ton thread).
+      4. Annonce ton scope (target_files: [src/screens/{{params.target_ecran}}.tsx]),
+         commite ton fichier seul (`feat(proto): ecran {{params.target_ecran}}`),
+         propose_resolution, `DONE: ecran {{params.target_ecran}}`.

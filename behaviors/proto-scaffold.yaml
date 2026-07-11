@@ -1,0 +1,33 @@
+name: proto-scaffold
+description: "Pose la base Vite+Preact du prototype + jeu de données mock réaliste"
+category: mission
+
+params:
+  mock_spec:
+    type: string
+    required: false
+    description: "Résumé des entités/vocabulaire client si non fourni via user-brief"
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Scaffold du prototype
+      Tu poses la base du prototype cliquable. TU ES LE SEUL agent autorisé à
+      exécuter `npm install` / créer package.json.
+
+      1. `npm create vite@latest . -- --template preact-ts` (ou structure
+         équivalente minimale : vite + preact + preact-iso pour le routing).
+      2. Crée `src/mock/data.ts` : les entités du brief (vocabulaire EXACT du
+         client, valeurs réalistes de son métier — JAMAIS de lorem ipsum,
+         minimum 3 instances cohérentes par entité).
+      3. Crée `src/app.tsx` avec le routeur : une route par écran listée dans
+         `tmp/proto/ecrans.md` (lis les `## <ecran-id>` et leurs `- **Route :**`),
+         chaque route pointant sur `src/screens/<ecran-id>.tsx` — crée pour
+         chacun un composant PLACEHOLDER d'une ligne (les workers écran les
+         rempliront) pour que le projet compile immédiatement.
+      4. Vérifie `npm run build` vert, commite le scaffold (message
+         `feat(proto): scaffold vite+preact + mock data`), puis
+         propose_resolution et `DONE: scaffold (<n> routes)`.
+
+      Interdits : toucher aux écrans au-delà du placeholder ; dépendances
+      au-delà de vite/preact/preact-iso.

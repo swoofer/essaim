@@ -90,4 +90,12 @@ describe("template-loader", () => {
       "mekova-dec-questions", "mekova-dec-synth",
     ]);
   });
+
+  it("mekova-prototype: scaffolder + per-module écrans", () => {
+    const t = loadTemplates();
+    const agents = t["mekova-prototype"].agents;
+    expect(agents[0].preset).toBe("mekova-proto-scaffold");
+    expect(agents[1].count).toBe("per-module");
+    expect(agents[1].perModuleParam).toEqual({ behavior: "proto-ecran", key: "target_ecran" });
+  });
 });
