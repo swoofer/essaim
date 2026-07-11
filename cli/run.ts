@@ -1,14 +1,8 @@
 import { Command } from "commander";
+import { listTemplates } from "../src/orchestrator/template-engine.js";
 import { resolve } from "path";
-import { scanProject } from "../src/orchestrator/scanner.js";
-import {
-  buildProject,
-  listTemplates,
-} from "../src/orchestrator/template-engine.js";
-import { runProject } from "../src/orchestrator/orchestrator.js";
-import { writeReport } from "../src/orchestrator/reporter.js";
 import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
-import { loadConfig } from "./config.js";
+import { executeRun } from "./run-core.js";
 
 export function createRunCommand(): Command {
   return new Command("run")
@@ -47,14 +41,11 @@ export function createRunCommand(): Command {
           maxQuotaPct?: string;
         },
       ) => {
-        // Resolve projectPath before listing/validating templates so that
-        // project-local .essaim/templates/ entries (new ids, not just
-        // catalog overrides) are recognized at pre-flight.
-        const projectPath = resolve(opts.project);
-
-        // List templates if none specified
-        const templates = listTemplates(projectPath);
+        // List templates if none specified. Resolve projectPath first so that
+        // project-local .essaim/templates/ entries are recognized at pre-flight.
         if (!template) {
+          const projectPath = resolve(opts.project);
+          const templates = listTemplates(projectPath);
           console.log("\nAvailable templates:\n");
           for (const t of templates) {
             console.log(`  ${t.id.padEnd(14)} ${t.name}`);
@@ -64,116 +55,43 @@ export function createRunCommand(): Command {
           return;
         }
 
-        // Validate template
-        if (!templates.find((t) => t.id === template)) {
-          const available = templates.map((t) => t.id).join(", ");
-          console.error(
-            `Unknown template '${template}'. Available: ${available}`,
-          );
-          process.exit(1);
-        }
-
-        const context = scanProject(projectPath);
-
-        // --modules overrides the scanner's discovery. Use when the project
-        // structure doesn't match scanner expectations (e.g. modules are
-        // src/features/<slice> not src/<top>) or when you want to run a
-        // template on a specific subset of modules (e.g. Phase 2 batch V1
-        // targeting only `shared` + `auth`).
-        if (opts.modules) {
-          const overrides = opts.modules.split(",").map((s) => s.trim()).filter(Boolean);
-          if (overrides.length === 0) {
-            console.error("Error: --modules cannot be empty");
-            process.exit(1);
-          }
-          context.modules = overrides;
-        }
-
-        if (!context.has_git) {
-          console.error(
-            "Error: project must be a git repository (needed for worktrees)",
-          );
-          process.exit(1);
-        }
-        if (!context.is_clean) {
-          console.warn(
-            "Warning: project has uncommitted changes. Worktrees will copy dirty state.",
-          );
-        }
-
-        // Parse options
-        const agentCount = opts.agents ? parseInt(opts.agents, 10) : undefined;
-        if (agentCount !== undefined && (isNaN(agentCount) || agentCount < 1)) {
-          console.error("Error: --agents must be at least 1");
-          process.exit(1);
-        }
-
+        // Merge --set + --set-file (set-file wins on conflict).
         const setParams = parseSetParams(opts.set, buildParamTypeMap());
         const setFileParams = parseSetFileParams(opts.setFile);
         for (const [behavior, values] of Object.entries(setFileParams)) {
           setParams[behavior] = { ...setParams[behavior], ...values };
         }
 
-        // Resolve coordinator URL: --coordinator-url > --url > COORDINATOR_URL env.
-        // When none is set explicitly, runProject will start an in-process
-        // coordinator (Strategy A). The loadConfig() default is intentionally
-        // excluded here so that bare `essaim run` triggers Strategy A rather
-        // than assuming an external server at localhost:3100.
-        loadConfig(); // ensure config warning is shown (side-effect only)
+        // Resolve coordinator URL: --coordinator-url > --url (deprecated).
+        // The COORDINATOR_URL env fallback is applied inside executeRun.
         if (opts.url && !opts.coordinatorUrl) {
           console.warn("⚠️  --url is deprecated; use --coordinator-url instead");
         }
-        const resolvedCoordinatorUrl =
-          opts.coordinatorUrl ??
-          opts.url ??
-          process.env.COORDINATOR_URL;
 
-        // Build project — pass projectPath so .essaim/templates/ overrides apply
-        const project = buildProject(template, context, {
-          agentCount,
-          setParams,
-        }, projectPath);
-
-        // Apply overrides
-        if (opts.timeout) {
-          project.timeout_minutes = parseInt(opts.timeout, 10);
-        }
-        if (opts.baseRef) {
-          project.workspace.baseRef = opts.baseRef;
-          console.log(`Sandbox mode: worktrees will snapshot ${opts.baseRef} (not HEAD)`);
+        try {
+          await executeRun({
+            template,
+            project: opts.project,
+            agentCount: opts.agents ? parseInt(opts.agents, 10) : undefined,
+            timeout: opts.timeout ? parseInt(opts.timeout, 10) : undefined,
+            cleanup: opts.cleanup,
+            dryRun: opts.dryRun,
+            modules: opts.modules
+              ? opts.modules.split(",").map((s) => s.trim()).filter(Boolean)
+              : undefined,
+            setParams,
+            coordinatorUrl: opts.coordinatorUrl ?? opts.url,
+            baseRef: opts.baseRef,
+            maxQuotaPct: opts.maxQuotaPct ? Number(opts.maxQuotaPct) : undefined,
+          });
+        } catch (e) {
+          console.error(e instanceof Error ? e.message : String(e));
+          process.exit(1);
         }
 
         if (opts.dryRun) {
-          console.log(`\n=== Dry Run: ${project.name} ===\n`);
-          console.log("Agents:");
-          for (const agent of project.agents) {
-            console.log(
-              `  ${agent.id.padEnd(25)} ${agent.name} (${agent.profile})`,
-            );
-            console.log(
-              `  ${"".padEnd(25)} Prompt: ${agent.prompt.length} chars`,
-            );
-          }
-          console.log(`\nWorkspace:  ${project.workspace.type}`);
-          console.log(
-            `Stagger:    ${project.stagger.mode}${project.stagger.delay ? ` [${project.stagger.delay.join("-")}s]` : ""}`,
-          );
-          console.log(
-            `Timeout:    ${project.timeout_minutes || 15} minutes`,
-          );
           return;
         }
-
-        const result = await runProject(
-          project,
-          "with_coordinator",
-          opts.cleanup,
-          {
-            maxQuotaPct: opts.maxQuotaPct ? Number(opts.maxQuotaPct) : undefined,
-            coordinatorUrl: resolvedCoordinatorUrl,
-          },
-        );
-        writeReport([result], "reports");
         // Force exit to release the in-process coordinator's HTTP server
         // (startServer does not expose a .close() handle).
         process.exit(0);
