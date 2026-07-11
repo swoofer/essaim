@@ -4,6 +4,7 @@ import { execSync, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { createLogger } from "../logger.js";
+import { authHeaders } from "../coordinator-auth.js";
 import { startServer } from "mcp-coordinator";
 type ServerHandle = Awaited<ReturnType<typeof startServer>>;
 const log = createLogger("orchestrator");
@@ -48,7 +49,7 @@ async function postJson(url: string, body: unknown, timeoutMs = 5000): Promise<b
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body ?? {}),
       signal: AbortSignal.timeout(timeoutMs),
     });
