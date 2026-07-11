@@ -605,14 +605,13 @@ export function setupProject(projectPath: string, options: SetupOptions): void {
   // 5. Create .mcp.json if it doesn't exist
   const mcpConfigPath = path.join(absProjectPath, ".mcp.json");
   if (!fs.existsSync(mcpConfigPath)) {
-    const mcpConfig = {
-      mcpServers: {
-        coordinator: {
-          type: "http",
-          url: `${coordinatorUrl}/mcp`,
-        },
-      },
+    const coordinatorServer: Record<string, unknown> = {
+      type: "http",
+      url: `${coordinatorUrl}/mcp`,
     };
+    const auth = authHeaders();
+    if (Object.keys(auth).length > 0) coordinatorServer.headers = auth;
+    const mcpConfig = { mcpServers: { coordinator: coordinatorServer } };
     fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + "\n");
     log.info("Wrote .mcp.json");
   } else {
@@ -632,14 +631,13 @@ export function writeAgentWorkspace(
   agent: AgentConfig,
   coordinatorUrl: string,
 ): string {
-  const mcpConfig = {
-    mcpServers: {
-      coordinator: {
-        type: "http",
-        url: `${coordinatorUrl}/mcp`,
-      },
-    },
+  const coordinatorServer: Record<string, unknown> = {
+    type: "http",
+    url: `${coordinatorUrl}/mcp`,
   };
+  const auth = authHeaders();
+  if (Object.keys(auth).length > 0) coordinatorServer.headers = auth;
+  const mcpConfig = { mcpServers: { coordinator: coordinatorServer } };
   const mcpPath = path.join(workspacePath, ".mcp.json");
   fs.writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
 

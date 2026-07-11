@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { authHeaders, coordinatorToken, patchMcpJsonAuth } from "../../src/coordinator-auth.js";
+import { writeAgentWorkspace } from "../../src/orchestrator/orchestrator.js";
+import type { AgentConfig } from "../../src/orchestrator/types.js";
 
 describe("coordinator-auth", () => {
   const saved = process.env.COORDINATOR_TOKEN;
@@ -53,5 +55,23 @@ describe("coordinator-auth", () => {
   it("patchMcpJsonAuth is a no-op when token set but file missing", () => {
     process.env.COORDINATOR_TOKEN = "tok";
     expect(() => patchMcpJsonAuth(join(tmpdir(), "does-not-exist.json"))).not.toThrow();
+  });
+
+  it("writeAgentWorkspace embeds auth headers when token set", () => {
+    process.env.COORDINATOR_TOKEN = "tok2";
+    const dir = mkdtempSync(join(tmpdir(), "essaim-ws-"));
+    const agent: AgentConfig = {
+      id: "a1",
+      name: "A1",
+      prompt: "x",
+      profile: "codeur",
+      hooks: {},
+      envVars: {},
+      mcpTools: [],
+    };
+    const mcpPath = writeAgentWorkspace(dir, agent, "https://coord.example");
+    const out = JSON.parse(readFileSync(mcpPath, "utf-8"));
+    expect(out.mcpServers.coordinator.headers).toEqual({ Authorization: "Bearer tok2" });
+    rmSync(dir, { recursive: true, force: true });
   });
 });
