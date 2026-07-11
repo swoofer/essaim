@@ -45,8 +45,13 @@ describe("coordinator-auth", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("patchMcpJsonAuth is a no-op without token or missing file", () => {
+  it("patchMcpJsonAuth is a no-op without token", () => {
     delete process.env.COORDINATOR_TOKEN;
+    expect(() => patchMcpJsonAuth(join(tmpdir(), "does-not-exist.json"))).not.toThrow();
+  });
+
+  it("patchMcpJsonAuth is a no-op when token set but file missing", () => {
+    process.env.COORDINATOR_TOKEN = "tok";
     expect(() => patchMcpJsonAuth(join(tmpdir(), "does-not-exist.json"))).not.toThrow();
   });
 });
