@@ -1,0 +1,14 @@
+name: La Melee
+description: "N agents ecrivent des tests en parallele"
+phase: 1
+workspace: worktree
+stagger: { mode: random, delay: [5, 15] }
+timeout_minutes: 20
+metrics: [tests_written, tests_passing]
+compare_mode: true
+agents:
+  - idPrefix: agent
+    namePrefix: Agent
+    preset: melee
+    profile: codeur
+    count: dynamic

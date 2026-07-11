@@ -1,0 +1,33 @@
+name: Le Debat
+description: "3 agents debattent une approche de refactor"
+phase: 3
+workspace: shared
+stagger: { mode: fixed, delay: [0, 0] }
+timeout_minutes: 15
+metrics: [rounds_to_consensus, contestations]
+compare_mode: false
+agents:
+  - idPrefix: agent-separation
+    namePrefix: Agent Separation
+    preset: debat
+    profile: communicant
+    count: 1
+    params:
+      debate-position:
+        position: "Tu favorises le decoupage par responsabilite (un fichier par concern). Argumente la lisibilite et testabilite."
+  - idPrefix: agent-strategy
+    namePrefix: Agent Strategy
+    preset: debat
+    profile: communicant
+    count: 1
+    params:
+      debate-position:
+        position: "Tu favorises le pattern Strategy (interface + implementations). Argumente la configurabilite."
+  - idPrefix: agent-minimal
+    namePrefix: Agent Minimal
+    preset: debat
+    profile: communicant
+    count: 1
+    params:
+      debate-position:
+        position: "Tu favorises le refactor minimal (extraire seulement les helpers). Argumente que le risque depasse le benefice."

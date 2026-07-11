@@ -1,0 +1,21 @@
+name: Le Maitre
+description: "1 lead distribue aux workers"
+phase: 2
+workspace: worktree
+stagger: { mode: random, delay: [8, 12] }
+timeout_minutes: 20
+metrics: [worker_idle_time, task_distribution_quality]
+compare_mode: false
+agents:
+  - idPrefix: tech-lead
+    namePrefix: Tech Lead
+    preset: maitre-lead
+    profile: communicant
+    count: 1
+    launch_delay: 0
+  - idPrefix: worker
+    namePrefix: Worker
+    preset: maitre-worker
+    profile: codeur
+    count: dynamic
+    launch_delay: 10

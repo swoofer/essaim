@@ -118,11 +118,11 @@ export function createRunCommand(): Command {
           opts.url ??
           process.env.COORDINATOR_URL;
 
-        // Build project
+        // Build project — pass projectPath so .essaim/templates/ overrides apply
         const project = buildProject(template, context, {
           agentCount,
           setParams,
-        });
+        }, projectPath);
 
         // Apply overrides
         if (opts.timeout) {

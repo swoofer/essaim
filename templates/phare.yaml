@@ -1,0 +1,39 @@
+name: Le Phare
+description: "4 auditeurs spécialisés en parallèle + 1 réconciliateur — audit multi-angles"
+phase: 2
+workspace: shared
+stagger: { mode: fixed, delay: [0, 0] }
+timeout_minutes: 30
+metrics: [specialists_completed, reconciliations, disagreements_flagged]
+compare_mode: false
+agents:
+  - idPrefix: inventaire
+    namePrefix: Inventaire
+    preset: phare-inventaire
+    profile: communicant
+    count: 1
+    launch_delay: 0
+  - idPrefix: edges
+    namePrefix: Edges
+    preset: phare-edges
+    profile: communicant
+    count: 1
+    launch_delay: 0
+  - idPrefix: deps
+    namePrefix: Deps
+    preset: phare-deps
+    profile: communicant
+    count: 1
+    launch_delay: 0
+  - idPrefix: risques
+    namePrefix: Risques
+    preset: phare-risques
+    profile: communicant
+    count: 1
+    launch_delay: 0
+  - idPrefix: synth
+    namePrefix: Reconciliateur
+    preset: phare-synth
+    profile: communicant
+    count: 1
+    launch_delay: 60

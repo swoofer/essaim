@@ -1,0 +1,20 @@
+name: La Revue
+description: "N auteurs + N reviewers en croisement"
+phase: 2
+workspace: worktree
+stagger: { mode: random, delay: [5, 10] }
+timeout_minutes: 20
+metrics: [review_comments, approvals]
+compare_mode: false
+agents:
+  - idPrefix: auteur
+    namePrefix: Auteur
+    preset: revue-author
+    profile: codeur
+    count: dynamic
+  - idPrefix: reviewer
+    namePrefix: Reviewer
+    preset: revue-reviewer
+    profile: communicant
+    count: dynamic
+    launch_delay: 120

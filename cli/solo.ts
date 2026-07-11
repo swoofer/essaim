@@ -49,7 +49,7 @@ export function createSoloCommand(): Command {
 
         // Build prompt with solo_mode=true injected automatically
         const setParams = parseSetParams(opts.set);
-        const prompt = buildSoloPrompt(template, context, setParams);
+        const prompt = buildSoloPrompt(template, context, setParams, projectPath);
 
         console.log(`\nSolo mode: ${template}`);
         console.log(`  Project:  ${projectPath}`);
