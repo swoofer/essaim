@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { createRunCommand } from "./run.js";
+import { createPipelineCommand } from "./pipeline.js";
 import { createSoloCommand } from "./solo.js";
 import { createScanCommand } from "./scan.js";
 import { createInitCommand } from "./init.js";
@@ -15,6 +16,7 @@ program
   .version(getVersion());
 
 program.addCommand(createRunCommand());
+program.addCommand(createPipelineCommand());
 program.addCommand(createSoloCommand());
 program.addCommand(createScanCommand());
 program.addCommand(createInitCommand());

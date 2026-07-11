@@ -207,6 +207,7 @@ essaim ships a CLI binary. All commands:
 | Command | Description |
 |---------|-------------|
 | `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--set-file k=path] [--dry-run] [--base-ref ref] [--coordinator-url url] [--max-quota-pct pct] [--cleanup]` | Launch coordinated agents using a template. `--dry-run` previews the assembled prompts + agent plan without launching. `--set-file behavior.param=path` reads the param value verbatim from a file (no shell quoting, wins over `--set` on conflict). |
+| `essaim pipeline -f <file> [--coordinator-url url] [--max-quota-pct pct] [--dry-run]` | Run a sequence of template runs across per-step repos, strictly sequential, stop on first failure. See [Pipelines](#pipelines). |
 | `essaim solo <template> [-p path] [--timeout min] [--set k=v] [--set-file k=path]` | Launch a single agent without orchestration |
 | `essaim scan <path>` | Auto-detect project language, structure, test framework |
 | `essaim init [path] [--url url] [--name name] [--modules list]` | Install hooks + MCP config on a project |
@@ -223,6 +224,49 @@ essaim run swarm -p ~/my-project --agents 4         # refactoring
 essaim solo gardien -p ~/my-project                 # read-only audit
 essaim run raid -p ~/my-project --set bug-hunting.modules='["src/auth"]'
 ```
+
+---
+
+## Pipelines
+
+Chain several template runs across different repos in one command. Each step is an
+`essaim run` on its own project path (same `--set` / `--set-file` / `--modules`
+handling), with optional shell hooks around it. Steps run **strictly sequentially**
+and the pipeline **stops on the first failure** (a non-zero step, before-hook, or
+after-hook); remaining steps are recorded as `skipped`.
+
+```yaml
+# pipeline.yaml — paths are relative to this file's directory
+name: decouverte-complete
+steps:
+  - name: analyse
+    template: mekova-decouverte
+    project: ../specs
+    set:
+      discovery-synth.projet: commandes-boulangerie
+    set_file:
+      user-brief.brief: tmp/brief-decouverte.txt   # value read verbatim, wins over set
+    timeout_minutes: 20
+  - name: proto
+    template: mekova-prototype
+    project: ../code
+    modules_file: tmp/proto/modules.txt            # one id per line — or modules: [a, b]
+    set_file:
+      user-brief.brief: tmp/brief-proto.txt
+    hooks:
+      before: ["cp ../specs/specs/x/ecrans.md tmp/proto/ecrans.md"]
+      after: ["npm run build"]                      # non-zero after-hook fails the step
+```
+
+```bash
+essaim pipeline -f pipeline.yaml --dry-run                    # preview every step, no launch
+essaim pipeline -f pipeline.yaml --coordinator-url http://localhost:3100
+```
+
+Hooks run with `cwd` = the step's `project`. A consolidated report
+(`reports/pipeline-<name>-<timestamp>.md`, next to the pipeline file) lists each
+step's status, duration, and hook failures; the command exits `1` if any step failed.
+Not in v1: parallel steps, conditionals, artifact templating — that judgment stays in the caller.
 
 ---
 
