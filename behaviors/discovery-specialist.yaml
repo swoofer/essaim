@@ -6,7 +6,6 @@ params:
   transcript:
     type: string
     required: true
-    default: ""
     description: "Chemin (relatif au repo) du transcript de la rencontre — fourni via --set par le skill invocateur"
   angle:
     type: string

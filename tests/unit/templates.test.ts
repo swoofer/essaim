@@ -40,6 +40,14 @@ describe("listTemplates (via BCE)", () => {
   });
 });
 
+// Templates whose required params are genuine per-run user input (no preset-time value possible)
+const SMOKE_SET_PARAMS: Record<string, Record<string, Record<string, unknown>>> = {
+  "mekova-decouverte": {
+    "discovery-specialist": { transcript: "notes/rencontres/test.md" },
+    "discovery-synth": { transcript: "notes/rencontres/test.md", projet: "test" },
+  },
+};
+
 describe("buildProject (via BCE)", () => {
   it("throws on unknown template", () => {
     expect(() => buildProject("nonexistent-legacy-template", MOCK_CONTEXT)).toThrow();
@@ -47,7 +55,7 @@ describe("buildProject (via BCE)", () => {
 
   it("builds a valid MiniProject for each registered template", () => {
     for (const t of listTemplates()) {
-      const project = buildProject(t.id, MOCK_CONTEXT);
+      const project = buildProject(t.id, MOCK_CONTEXT, { setParams: SMOKE_SET_PARAMS[t.id] });
       expect(project.id).toBeTruthy();
       expect(project.agents.length).toBeGreaterThan(0);
       for (const agent of project.agents) {

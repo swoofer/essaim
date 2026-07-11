@@ -6,12 +6,10 @@ params:
   transcript:
     type: string
     required: true
-    default: ""
     description: "Chemin du transcript (pour arbitrer les contradictions entre angles) — fourni via --set par le skill invocateur"
   projet:
     type: string
     required: true
-    default: ""
     description: "Nom kebab-case du prototype (ex: commandes-boulangerie) — fourni via --set par le skill invocateur"
 
 sections:
