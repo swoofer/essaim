@@ -7,7 +7,7 @@ import {
 } from "../src/orchestrator/template-engine.js";
 import { runProject } from "../src/orchestrator/orchestrator.js";
 import { writeReport } from "../src/orchestrator/reporter.js";
-import { collect, parseSetParams, buildParamTypeMap } from "./params.js";
+import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
 import { loadConfig } from "./config.js";
 
 export function createRunCommand(): Command {
@@ -21,6 +21,7 @@ export function createRunCommand(): Command {
     .option("--dry-run", "Preview agents and prompts without launching")
     .option("--modules <list>", "Comma-separated module list, overrides scanner discovery. Required for templates using count: 'per-module' when the project layout doesn't match the scanner's expectations.")
     .option("--set <key=value>", "BCE parameter (repeatable)", collect, [])
+    .option("--set-file <behavior.param>=<path>", "BCE parameter, value read verbatim from a file (repeatable, wins over --set on conflict)", collect, [])
     .option("--url <url>", "Coordinator URL (override config, deprecated: use --coordinator-url)")
     .option(
       "--coordinator-url <url>",
@@ -39,6 +40,7 @@ export function createRunCommand(): Command {
           dryRun?: boolean;
           modules?: string;
           set: string[];
+          setFile: string[];
           url?: string;
           coordinatorUrl?: string;
           baseRef?: string;
@@ -107,6 +109,10 @@ export function createRunCommand(): Command {
         }
 
         const setParams = parseSetParams(opts.set, buildParamTypeMap());
+        const setFileParams = parseSetFileParams(opts.setFile);
+        for (const [behavior, values] of Object.entries(setFileParams)) {
+          setParams[behavior] = { ...setParams[behavior], ...values };
+        }
 
         // Resolve coordinator URL: --coordinator-url > --url > COORDINATOR_URL env.
         // When none is set explicitly, runProject will start an in-process

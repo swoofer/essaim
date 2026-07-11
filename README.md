@@ -206,8 +206,8 @@ essaim ships a CLI binary. All commands:
 
 | Command | Description |
 |---------|-------------|
-| `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--dry-run] [--base-ref ref] [--coordinator-url url] [--max-quota-pct pct] [--cleanup]` | Launch coordinated agents using a template. `--dry-run` previews the assembled prompts + agent plan without launching. |
-| `essaim solo <template> [-p path] [--timeout min] [--set k=v]` | Launch a single agent without orchestration |
+| `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--set-file k=path] [--dry-run] [--base-ref ref] [--coordinator-url url] [--max-quota-pct pct] [--cleanup]` | Launch coordinated agents using a template. `--dry-run` previews the assembled prompts + agent plan without launching. `--set-file behavior.param=path` reads the param value verbatim from a file (no shell quoting, wins over `--set` on conflict). |
+| `essaim solo <template> [-p path] [--timeout min] [--set k=v] [--set-file k=path]` | Launch a single agent without orchestration |
 | `essaim scan <path>` | Auto-detect project language, structure, test framework |
 | `essaim init [path] [--url url] [--name name] [--modules list]` | Install hooks + MCP config on a project |
 | `essaim list` | List the templates the CLI ships with |

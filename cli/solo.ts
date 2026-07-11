@@ -5,7 +5,7 @@ import { spawn } from "child_process";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { listTemplates } from "../src/orchestrator/template-engine.js";
 import { buildSoloPrompt } from "../src/bridge.js";
-import { collect, parseSetParams, buildParamTypeMap } from "./params.js";
+import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
 
 export function createSoloCommand(): Command {
   return new Command("solo")
@@ -14,6 +14,7 @@ export function createSoloCommand(): Command {
     .option("-p, --project <path>", "Target project path", ".")
     .option("-t, --timeout <min>", "Timeout in minutes", "15")
     .option("--set <key=value>", "BCE parameter (repeatable)", collect, [])
+    .option("--set-file <behavior.param>=<path>", "BCE parameter, value read verbatim from a file (repeatable, wins over --set on conflict)", collect, [])
     .option(
       "--coordinator-url <url>",
       "Use an external coordinator at this URL instead of starting one in-process",
@@ -21,7 +22,13 @@ export function createSoloCommand(): Command {
     .action(
       (
         template: string | undefined,
-        opts: { project: string; timeout: string; set: string[]; coordinatorUrl?: string },
+        opts: {
+          project: string;
+          timeout: string;
+          set: string[];
+          setFile: string[];
+          coordinatorUrl?: string;
+        },
       ) => {
         // Resolve projectPath before listing/validating templates so that
         // project-local .essaim/templates/ entries (new ids, not just
@@ -53,6 +60,10 @@ export function createSoloCommand(): Command {
 
         // Build prompt with solo_mode=true injected automatically
         const setParams = parseSetParams(opts.set, buildParamTypeMap());
+        const setFileParams = parseSetFileParams(opts.setFile);
+        for (const [behavior, values] of Object.entries(setFileParams)) {
+          setParams[behavior] = { ...setParams[behavior], ...values };
+        }
         const prompt = buildSoloPrompt(template, context, setParams, projectPath);
 
         console.log(`\nSolo mode: ${template}`);

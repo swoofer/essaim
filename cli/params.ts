@@ -54,3 +54,25 @@ export function parseSetParams(
   }
   return params;
 }
+
+/** Parse --set-file entries: "<behavior>.<param>=<path>" — the file's raw
+ * content becomes the param value (no JSON.parse, no shell interpretation). */
+export function parseSetFileParams(
+  setFiles: string[],
+  readFile: (p: string) => string = (p) => readFileSync(p, "utf-8"),
+): Record<string, Record<string, unknown>> {
+  const params: Record<string, Record<string, unknown>> = {};
+  for (const s of setFiles) {
+    const eqIdx = s.indexOf("=");
+    if (eqIdx === -1) continue;
+    const path = s.substring(0, eqIdx);
+    const file = s.substring(eqIdx + 1);
+    const dotIdx = path.indexOf(".");
+    if (dotIdx === -1) continue;
+    const behavior = path.substring(0, dotIdx);
+    const param = path.substring(dotIdx + 1);
+    if (!params[behavior]) params[behavior] = {};
+    params[behavior][param] = readFile(file);
+  }
+  return params;
+}
