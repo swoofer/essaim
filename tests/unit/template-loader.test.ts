@@ -65,4 +65,12 @@ describe("template-loader", () => {
     ]);
     expect(t["mekova-implement"].agents[1].count).toBe("dynamic");
   });
+
+  it("mekova-review has one agent with preset mekova-review", () => {
+    const t = loadTemplates();
+    expect(t["mekova-review"]).toBeDefined();
+    expect(t["mekova-review"].agents.length).toBe(1);
+    expect(t["mekova-review"].agents[0].preset).toBe("mekova-review");
+    expect(t["mekova-review"].agents[0].count).toBe(1);
+  });
 });
