@@ -81,4 +81,13 @@ describe("template-loader", () => {
     expect(t["mekova-bughunt"].agents[0].preset).toBe("mekova-bughunt");
     expect(t["mekova-bughunt"].agents[0].count).toBe("dynamic");
   });
+
+  it("mekova-decouverte: 4 angles + synth", () => {
+    const t = loadTemplates();
+    expect(t["mekova-decouverte"].agents).toHaveLength(5);
+    expect(t["mekova-decouverte"].agents.map((a) => a.preset)).toEqual([
+      "mekova-dec-features", "mekova-dec-risques", "mekova-dec-roi",
+      "mekova-dec-questions", "mekova-dec-synth",
+    ]);
+  });
 });

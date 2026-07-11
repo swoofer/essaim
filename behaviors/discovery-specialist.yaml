@@ -1,0 +1,43 @@
+name: discovery-specialist
+description: "Analyse un transcript de rencontre découverte selon UN angle paramétré"
+category: mission
+
+params:
+  transcript:
+    type: string
+    required: true
+    default: ""
+    description: "Chemin (relatif au repo) du transcript de la rencontre — fourni via --set par le skill invocateur"
+  angle:
+    type: string
+    required: true
+    description: "Angle d'analyse: features | risques | roi | questions"
+  angle_mission:
+    type: string
+    required: true
+    description: "Description détaillée de la mission de cet angle"
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Analyse découverte, angle « {{params.angle}} »
+      Lis intégralement le transcript `{{params.transcript}}` (langage naturel,
+      conversation client — AUCUN outil d'analyse de code, pas de grep/LOC).
+
+      {{params.angle_mission}}
+
+      Règles :
+      1. Chaque affirmation s'appuie sur une CITATION du client (verbatim court
+         + repère temporel/section si présent). Pas de citation = hypothèse,
+         marquée comme telle.
+      2. Distingue l'exprimé (le client l'a dit) de l'implicite (déduit) —
+         champ `origine: exprime | implicite` sur chaque item.
+      3. Annonce ton scope via announce_work (subject: "Analyse découverte:
+         {{params.angle}}"), travaille, puis propose_resolution avec un résumé.
+      4. Écris ton résultat UNIQUEMENT dans `tmp/decouverte/{{params.angle}}.yaml`,
+         une liste d'items:
+         - titre: <court>
+           detail: <2-4 phrases>
+           citation: "<verbatim client>"
+           origine: exprime|implicite
+      5. Termine par `DONE: <n> items ({{params.angle}})`.

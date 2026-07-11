@@ -1,0 +1,50 @@
+name: discovery-synth
+description: "Consolide les 4 angles de découverte en sorties structurées pour le skill"
+category: mission
+
+params:
+  transcript:
+    type: string
+    required: true
+    default: ""
+    description: "Chemin du transcript (pour arbitrer les contradictions entre angles) — fourni via --set par le skill invocateur"
+  projet:
+    type: string
+    required: true
+    default: ""
+    description: "Nom kebab-case du prototype (ex: commandes-boulangerie) — fourni via --set par le skill invocateur"
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Synthèse de découverte
+      Les 4 angles ont posé leurs résultats dans `tmp/decouverte/*.yaml`
+      (features, risques, roi, questions). Lis-les tous, arbitre les
+      recoupements/contradictions en retournant au transcript
+      `{{params.transcript}}` au besoin, puis écris UN SEUL fichier
+      `tmp/decouverte/synthese.yaml` avec exactement ces clés :
+
+      notes:            # propositions de notes pour l'inbox (le skill les écrira)
+        - type: feature|decision|risque|question
+          titre: <court, kebab possible>
+          corps: |
+            <markdown complet de la note, format des notes du repo>
+      spec_draft: |     # squelette LITTÉRAL /start-discovery, statut Brouillon
+        <frontmatter titre/statut: Brouillon/date/sources, puis les sections
+         EXACTES du squelette start-discovery :
+         ## Probleme, ## Objectif, ## Scope du prototype (### Inclus,
+         ### Exclu), ## ROI (Levier, Métriques, **Baseline actuelle :**),
+         ## Questions ouvertes — chaque section générée entourée de
+         <!-- généré: rencontre-1 --> ... <!-- /généré -->>
+      ecrans: |         # inventaire d'écrans, schéma contractuel §2.4 du design
+        <## <ecran-id> par écran avec puces exactes :
+         - **Rôle :** ... / - **Route :** ... / - **Entités mock :** ... /
+         - **Navigation :** ... / - **Source :** citations du transcript>
+      synthese: |       # la passe de validation humaine
+        <ce qui a été compris par angle, trous éventuels (angle manquant =
+         section « ANGLE NON COUVERT » explicite), questions pour la rencontre 2>
+
+      Règles : si un fichier d'angle MANQUE dans tmp/decouverte/, tu ne
+      l'inventes pas — tu écris la section « ANGLE NON COUVERT: <angle> » dans
+      synthese. Chaque écran de `ecrans` doit être justifié par au moins une
+      citation. Termine par `DONE: synthese (<n> notes, <n> ecrans)`.
