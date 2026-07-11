@@ -36,6 +36,15 @@ describe("buildProject", () => {
     const pLarge = buildProject("melee", large);
     expect(pSmall.agents.length).toBeLessThanOrEqual(pLarge.agents.length);
   });
+
+  it("per-module accepte une liste --modules explicite sans dossiers existants (greenfield)", () => {
+    // bridge.ts fait l'expansion depuis context.modules SANS scan disque —
+    // ce test est un VERROU de non-régression (comportement déjà correct).
+    const ctx = { ...mockContext, modules: ["ecran-a", "ecran-b"] };
+    const project = buildProject("migrate-phase2", ctx);
+    const migrators = project.agents.filter((a) => a.id.startsWith("migrator"));
+    expect(migrators.map((a) => a.id)).toEqual(["migrator-ecran-a", "migrator-ecran-b"]);
+  });
 });
 
 describe("listTemplates", () => {
