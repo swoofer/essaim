@@ -56,4 +56,13 @@ describe("template-loader", () => {
 
     rmSync(proj, { recursive: true, force: true });
   });
+
+  it("mekova-implement wires lead + workers", () => {
+    const t = loadTemplates();
+    expect(t["mekova-implement"].agents.map((a) => a.preset)).toEqual([
+      "mekova-implement-lead",
+      "mekova-implement-worker",
+    ]);
+    expect(t["mekova-implement"].agents[1].count).toBe("dynamic");
+  });
 });
