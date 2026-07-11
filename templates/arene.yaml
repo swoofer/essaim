@@ -1,0 +1,32 @@
+name: L'Arene
+description: "Jeu de trivia sur la base de code"
+phase: 1
+workspace: shared
+stagger: { mode: fixed, delay: [0, 0] }
+timeout_minutes: 10
+metrics: [questions_asked, correct_answers]
+compare_mode: false
+agents:
+  - idPrefix: agent-quizmaster
+    namePrefix: Quizmaster
+    preset: arene-quizmaster
+    profile: communicant
+    count: 1
+  - idPrefix: agent-joueur-a
+    namePrefix: Joueur A
+    preset: arene-player
+    profile: communicant
+    count: 1
+    params:
+      quiz-player:
+        player_name: Joueur A
+        focus_area: structure du projet
+  - idPrefix: agent-joueur-b
+    namePrefix: Joueur B
+    preset: arene-player
+    profile: communicant
+    count: 1
+    params:
+      quiz-player:
+        player_name: Joueur B
+        focus_area: patterns et architecture

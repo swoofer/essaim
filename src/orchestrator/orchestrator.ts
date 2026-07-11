@@ -4,6 +4,7 @@ import { execSync, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { createLogger } from "../logger.js";
+import { authHeaders, mcpAuthHeaders } from "../coordinator-auth.js";
 import { startServer } from "mcp-coordinator";
 type ServerHandle = Awaited<ReturnType<typeof startServer>>;
 const log = createLogger("orchestrator");
@@ -36,6 +37,32 @@ const CLAUDE_HOOK_EVENT_MAP: Record<string, string> = {
 };
 
 const POST_TOOL_USE_MATCHER = "Edit|Write|NotebookEdit";
+
+/**
+ * Cross-platform replacement for `execSync(\`curl -d '...'\`)`. The shell-quoted
+ * form silently breaks under Windows cmd.exe (single quotes aren't grouping
+ * tokens there → curl receives mangled JSON, the request never reaches the
+ * server, the `try/catch {}` swallows the failure and downstream code wrongly
+ * believes the agent was registered). Returns true on 2xx, false otherwise.
+ */
+async function postJson(url: string, body: unknown, timeoutMs = 5000): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body ?? {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      log.warn(`POST ${url} → HTTP ${res.status}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    log.warn(`POST ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
 
 function readBceAsset(relativePath: string): string {
   return readFileSync(resolve(getCatalogRoot(), relativePath), 'utf-8');
@@ -79,9 +106,14 @@ export async function runProject(
   // Effective coordinator URL for this run: from opts (external or just-started in-process)
   // or fall back to the env/default for backward-compat with without_coordinator mode.
   const effectiveCoordinatorUrl = runOpts.coordinatorUrl ?? COORDINATOR_URL;
+  // Skip /api/reset when we just spawned the coordinator in-process: its DB is
+  // empty and a curl --max-time 2 that gives up before the server finishes
+  // wiping causes a race where the agents pre-registered by the orchestrator
+  // get wiped *after* registration → SQLITE_CONSTRAINT_FOREIGNKEY on announce.
+  const coordinatorJustSpawned = coordinatorHandle !== null;
 
   try {
-    return await _runProjectBody(project, mode, cleanup, runOpts, effectiveCoordinatorUrl);
+    return await _runProjectBody(project, mode, cleanup, runOpts, effectiveCoordinatorUrl, coordinatorJustSpawned);
   } finally {
     if (coordinatorHandle) {
       try {
@@ -100,6 +132,7 @@ async function _runProjectBody(
   cleanup: boolean,
   runOpts: RunProjectOptions,
   effectiveCoordinatorUrl: string,
+  coordinatorJustSpawned: boolean,
 ): Promise<RunResult> {
   const runDir = path.resolve("runs", `${project.id}-${mode}-${Date.now()}`);
   fs.mkdirSync(runDir, { recursive: true });
@@ -128,28 +161,30 @@ async function _runProjectBody(
   // Agents reuse the same ceiling so their in-raid check matches the pre-flight.
   const agentLoopMaxQuotaPct = mode === "with_coordinator" ? maxQuotaPct : undefined;
 
-  // 1. Reset coordinator state
-  try {
-    execSync(`curl -s --max-time 2 -X POST "${effectiveCoordinatorUrl}/api/reset" -H "Content-Type: application/json"`, { stdio: "pipe" });
-    log.info("Coordinator state reset");
-  } catch {
-    log.warn("Could not reset coordinator");
+  // 1. Reset coordinator state — only when reusing an external coordinator.
+  // For in-process spawns the DB is empty; calling reset there races with
+  // the orchestrator's own pre-register step (curl --max-time 2 gives up,
+  // but the server keeps wiping; pre-registered agents get nuked just
+  // before they POST /api/announce → SQLITE_CONSTRAINT_FOREIGNKEY).
+  if (!coordinatorJustSpawned) {
+    if (await postJson(`${effectiveCoordinatorUrl}/api/reset`, {})) {
+      log.info("Coordinator state reset");
+    } else {
+      log.warn("Could not reset coordinator");
+    }
   }
 
   // 1b. Push run config to dashboard
-  try {
-    const configPayload = JSON.stringify({
-      name: project.name,
-      description: project.description,
-      phase: project.phase,
-      agents: project.agents.map(a => ({ name: a.name, profile: a.profile, role: a.role })),
-      workspace: project.workspace,
-      stagger: project.stagger,
-      timeout_minutes: project.timeout_minutes,
-      compare_mode: project.compare_mode,
-    });
-    execSync(`curl -s --max-time 2 -X POST "${effectiveCoordinatorUrl}/api/run-config" -H "Content-Type: application/json" -d '${configPayload.replace(/'/g, "'\\''")}'`, { stdio: "pipe" });
-  } catch {}
+  await postJson(`${effectiveCoordinatorUrl}/api/run-config`, {
+    name: project.name,
+    description: project.description,
+    phase: project.phase,
+    agents: project.agents.map(a => ({ name: a.name, profile: a.profile, role: a.role })),
+    workspace: project.workspace,
+    stagger: project.stagger,
+    timeout_minutes: project.timeout_minutes,
+    compare_mode: project.compare_mode,
+  });
 
   // 2. Create workspaces (resetBase FIRST, then setup, then worktrees)
   const basePath = project.workspace.base || DEFAULT_BASE;
@@ -213,16 +248,26 @@ async function _runProjectBody(
 
   // Pre-register all agents via REST (don't rely on LLMs to register correctly)
   if (isCoordinated) {
+    let registered = 0;
     for (const agent of project.agents) {
-      try {
-        execSync(`curl -s --max-time 2 -X POST "${effectiveCoordinatorUrl}/api/register" -H "Content-Type: application/json" -d '${JSON.stringify({
-          agent_id: agent.id,
-          name: agent.name,
-          modules: [], // will be overridden by agent's announce_work
-        }).replace(/'/g, "'\\''")}'`, { stdio: "pipe" });
-      } catch {}
+      // Use the agent's declared modules so consultation.ts can match it as a
+      // respondent. With `[]` here, target_modules.some()/agentModules.some()
+      // is always false → expected_respondents = [] → propose_resolution can
+      // never reach quorum → threads only close via the periodic timeout
+      // sweeper, defeating the whole collaboration layer.
+      const modules = agent.modules ?? [];
+      if (await postJson(`${effectiveCoordinatorUrl}/api/register`, {
+        agent_id: agent.id,
+        name: agent.name,
+        modules,
+      })) {
+        registered++;
+      }
     }
-    log.info(`Pre-registered ${project.agents.length} agents`);
+    log.info(`Pre-registered ${registered}/${project.agents.length} agents`);
+    if (registered < project.agents.length) {
+      log.error(`Pre-registration incomplete (${registered}/${project.agents.length}); /api/announce will fail with FK violations.`);
+    }
   }
 
   function setupAndLaunch(agent: typeof project.agents[0]): ChildProcess | null {
@@ -560,14 +605,13 @@ export function setupProject(projectPath: string, options: SetupOptions): void {
   // 5. Create .mcp.json if it doesn't exist
   const mcpConfigPath = path.join(absProjectPath, ".mcp.json");
   if (!fs.existsSync(mcpConfigPath)) {
-    const mcpConfig = {
-      mcpServers: {
-        coordinator: {
-          type: "http",
-          url: `${coordinatorUrl}/mcp`,
-        },
-      },
+    const coordinatorServer: Record<string, unknown> = {
+      type: "http",
+      url: `${coordinatorUrl}/mcp`,
     };
+    const auth = mcpAuthHeaders();
+    if (Object.keys(auth).length > 0) coordinatorServer.headers = auth;
+    const mcpConfig = { mcpServers: { coordinator: coordinatorServer } };
     fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + "\n");
     log.info("Wrote .mcp.json");
   } else {
@@ -587,14 +631,13 @@ export function writeAgentWorkspace(
   agent: AgentConfig,
   coordinatorUrl: string,
 ): string {
-  const mcpConfig = {
-    mcpServers: {
-      coordinator: {
-        type: "http",
-        url: `${coordinatorUrl}/mcp`,
-      },
-    },
+  const coordinatorServer: Record<string, unknown> = {
+    type: "http",
+    url: `${coordinatorUrl}/mcp`,
   };
+  const auth = mcpAuthHeaders();
+  if (Object.keys(auth).length > 0) coordinatorServer.headers = auth;
+  const mcpConfig = { mcpServers: { coordinator: coordinatorServer } };
   const mcpPath = path.join(workspacePath, ".mcp.json");
   fs.writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
 

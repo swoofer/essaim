@@ -1,6 +1,7 @@
 // client/agent-loop/work-stealing.ts
 
 import { createLogger } from "../logger.js";
+import { authHeaders } from "../coordinator-auth.js";
 const log = createLogger("work-stealing");
 
 export interface Task {
@@ -52,7 +53,7 @@ class HttpError extends Error {
 async function coordinatorPost(url: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   let resp: Response;
   try {
-    resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
   } catch (err) {
     throw new Error(`Cannot reach coordinator at ${url}: ${(err as Error).message}`);
   }
@@ -110,7 +111,7 @@ export async function claimNextTask(
   try {
     const resp = await fetch(`${coordinatorUrl}/api/threads-active`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: "{}",
     });
     if (!resp.ok) { log.warn("claimNextTask: threads-active failed", { status: resp.status }); return null; }
@@ -249,7 +250,7 @@ export async function fetchExistingThreads(coordinatorUrl: string): Promise<stri
   try {
     const resp = await fetch(`${coordinatorUrl}/api/threads-active`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: "{}",
     });
     if (!resp.ok) return "(aucun thread actif)";

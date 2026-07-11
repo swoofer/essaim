@@ -59,7 +59,34 @@ export function cleanupWorkspaces(workspace: WorkspaceResult): void {
   }
 }
 
+/**
+ * "Reset" the worktree base directory by discarding uncommitted changes and
+ * deleting untracked files. DESTRUCTIVE — it nukes the user's `.claude/`,
+ * any local config, any in-progress edits.
+ *
+ * Worktrees do NOT need a clean source: `git worktree add` snapshots from a
+ * ref, independent of the source tree's working state. So this is opt-in
+ * only: set ESSAIM_RESET_BASE=1 if you really want it (typical use: a
+ * dedicated sandbox dir under `/tmp/essaim-sandbox/`, never your real
+ * project). Without the opt-in, we just log a warning if there's dirt and
+ * return — let `git worktree add` do its thing from the committed state.
+ */
 export function resetBase(basePath: string): void {
+  if (process.env.ESSAIM_RESET_BASE !== "1") {
+    let dirty = "";
+    try {
+      dirty = execSync("git status --porcelain", { cwd: basePath, encoding: "utf8" }).trim();
+    } catch { /* not a git repo? defer to caller */ }
+    if (dirty) {
+      const lines = dirty.split("\n");
+      console.warn(
+        `[workspace] base has ${lines.length} dirty/untracked entr${lines.length === 1 ? "y" : "ies"} — leaving them alone (set ESSAIM_RESET_BASE=1 to git clean -fd + git checkout -- .).\n` +
+        `            worktrees snapshot from a git ref so this is fine; your local files stay safe.`,
+      );
+    }
+    return;
+  }
+  console.warn("[workspace] ESSAIM_RESET_BASE=1 — running destructive git checkout -- . + git clean -fd on " + basePath);
   execSync("git checkout -- .", { cwd: basePath, stdio: "pipe" });
   execSync("git clean -fd", { cwd: basePath, stdio: "pipe" });
 }

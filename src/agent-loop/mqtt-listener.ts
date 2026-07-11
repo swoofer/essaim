@@ -1,6 +1,7 @@
 import mqtt from "mqtt";
 import { Duplex } from "stream";
 import { createLogger } from "../logger.js";
+import { coordinatorToken } from "../coordinator-auth.js";
 const log = createLogger("mqtt-listener");
 
 const isBun = !!(process.versions as Record<string, string>)?.bun;
@@ -208,12 +209,23 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
 
         const clientId = `agent-loop-${agentId}-${Date.now()}`;
 
+        // Coordinator token (when set) travels as MQTT credentials in the
+        // CONNECT packet — in-protocol, so it works through the WS bridge
+        // too. The deployed coordinator's aedes authenticate hook reads the
+        // JWT from the password field (username is ignored there).
+        const token = coordinatorToken();
+        const mqttOpts: mqtt.IClientOptions = { clientId, clean: true };
+        if (token) {
+          mqttOpts.username = "agent";
+          mqttOpts.password = token;
+        }
+
         if (isBun && url.startsWith("ws")) {
           // Bun: ws package Receiver is broken — use native WebSocket + Duplex bridge
           const stream = createBunWsStream(url);
-          client = new mqtt.MqttClient(() => stream, { clientId, clean: true });
+          client = new mqtt.MqttClient(() => stream, mqttOpts);
         } else {
-          client = mqtt.connect(url, { clientId, clean: true });
+          client = mqtt.connect(url, mqttOpts);
         }
 
         client.on("connect", () => {

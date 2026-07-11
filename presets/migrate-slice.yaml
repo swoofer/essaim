@@ -1,0 +1,21 @@
+name: migrate-slice
+description: "Port one source-slice into a target tech stack — paired with template migrate-phase2"
+profile: codeur
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - check-interrupt
+  - activity-tracking
+  - shared-workspace
+  - migrate-slice
+params:
+  migrate-slice:
+    # target_slice is set per-agent by the orchestrator from context.modules.
+    # All other params take their behavior-defined defaults; override here for
+    # monpikto-specific paths/commands or pass via --set on the CLI.
+    audit_path: MIGRATION_AUDIT.md
+    source_root: src/features
+    target_root: web
+    target_features_root: web/src/features

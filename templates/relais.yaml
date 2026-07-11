@@ -1,0 +1,24 @@
+name: Le Relais
+description: "3 coureurs se relaient sequentiellement"
+phase: 2
+workspace: worktree
+stagger: { mode: sequential }
+timeout_minutes: 25
+metrics: [improvements_per_runner, tests_passing]
+compare_mode: false
+agents:
+  - idPrefix: agent-coureur-1
+    namePrefix: Coureur 1
+    preset: relais-1
+    profile: codeur
+    count: 1
+  - idPrefix: agent-coureur-2
+    namePrefix: Coureur 2
+    preset: relais-2
+    profile: codeur
+    count: 1
+  - idPrefix: agent-coureur-3
+    namePrefix: Coureur 3
+    preset: relais-3
+    profile: codeur
+    count: 1

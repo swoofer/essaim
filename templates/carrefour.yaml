@@ -1,0 +1,14 @@
+name: Le Carrefour
+description: "Agents croisent leurs intentions sur les memes fichiers"
+phase: 3
+workspace: worktree
+stagger: { mode: random, delay: [3, 8] }
+timeout_minutes: 15
+metrics: [conflicts_detected, conflicts_resolved, consultations_opened]
+compare_mode: false
+agents:
+  - idPrefix: agent
+    namePrefix: Agent
+    preset: carrefour
+    profile: codeur
+    count: dynamic

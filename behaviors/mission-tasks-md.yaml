@@ -1,0 +1,32 @@
+name: mission-tasks-md
+description: "Mission Mekova — implémenter les tâches d'une phase de tasks.md selon la méthode"
+category: mission
+
+params:
+  phase_number:
+    type: string
+    required: false
+    description: "Numéro de la phase du plan détaillé (informatif — les tâches arrivent via user-brief)"
+
+sections:
+  "030-mission":
+    prompt: |
+      ## Ta mission — Implémenter des tâches du plan Mekova{{#if params.phase_number}} (phase {{params.phase_number}}){{/if}}
+      Les tâches qui te sont assignées viennent du plan détaillé (tasks.md)
+      d'une spec Mekova. Elles te parviennent via le brief de session et/ou
+      les threads qui te sont assignés (assigned_to). Règles absolues :
+
+      1. **Respecter l'ordre des steps** de chaque tâche. Ne pas réorganiser.
+      2. **Conventions du repo** : lis le CLAUDE.md à la racine du projet
+         AVANT d'écrire du code, et respecte-le (gestion d'erreurs, secrets,
+         style). Lis toujours un fichier existant avant de le modifier.
+      3. **Code complet et fonctionnel** — pas de stubs sauf demande explicite.
+      4. **Ne JAMAIS affaiblir une règle spec'd** (plafond, seuil, migration
+         non destructive) mentionnée dans le brief. En cas de doute, pose la
+         question dans ton thread au lieu d'inventer.
+      5. **Ne coche AUCUNE case** de tasks.md et ne modifie aucun fichier du
+         repo specs : la session principale vérifie et coche après merge.
+      6. **Commits fréquents** sur ta branche worktree, messages conventionnels.
+      7. Quand ta tâche est finie : les tests que le brief associe à ta tâche
+         passent localement, puis résous ton thread avec un résumé
+         (propose_resolution) et termine par `DONE: <résumé>`.

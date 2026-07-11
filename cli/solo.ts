@@ -23,8 +23,13 @@ export function createSoloCommand(): Command {
         template: string | undefined,
         opts: { project: string; timeout: string; set: string[]; coordinatorUrl?: string },
       ) => {
+        // Resolve projectPath before listing/validating templates so that
+        // project-local .essaim/templates/ entries (new ids, not just
+        // catalog overrides) are recognized at pre-flight.
+        const projectPath = resolve(opts.project);
+
         // List templates if none specified
-        const templates = listTemplates();
+        const templates = listTemplates(projectPath);
         if (!template) {
           console.log("\nAvailable templates:\n");
           for (const t of templates) {
@@ -44,12 +49,11 @@ export function createSoloCommand(): Command {
           process.exit(1);
         }
 
-        const projectPath = resolve(opts.project);
         const context = scanProject(projectPath);
 
         // Build prompt with solo_mode=true injected automatically
         const setParams = parseSetParams(opts.set);
-        const prompt = buildSoloPrompt(template, context, setParams);
+        const prompt = buildSoloPrompt(template, context, setParams, projectPath);
 
         console.log(`\nSolo mode: ${template}`);
         console.log(`  Project:  ${projectPath}`);

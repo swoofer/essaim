@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 
 // Mock mqtt module before importing the listener
@@ -15,6 +15,7 @@ vi.mock("mqtt", () => ({
   },
 }));
 
+import mqtt from "mqtt";
 import { createMqttListener, type MqttInterrupt } from "../../src/agent-loop/mqtt-listener.js";
 
 const OPTIONS = {
@@ -250,6 +251,31 @@ describe("MqttListener", () => {
       const listener = await connectListener();
       simulateMessage("coordinator/unknown/something", { agent_id: "a2" });
       expect(listener.peek()).toBe(0);
+    });
+  });
+
+  describe("coordinator token credentials", () => {
+    const originalToken = process.env.COORDINATOR_TOKEN;
+
+    afterEach(() => {
+      if (originalToken === undefined) delete process.env.COORDINATOR_TOKEN;
+      else process.env.COORDINATOR_TOKEN = originalToken;
+    });
+
+    it("connects without username/password when no token is set", async () => {
+      delete process.env.COORDINATOR_TOKEN;
+      await connectListener();
+      const opts = (mqtt.connect as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(opts.username).toBeUndefined();
+      expect(opts.password).toBeUndefined();
+    });
+
+    it("passes the coordinator token as MQTT credentials when set", async () => {
+      process.env.COORDINATOR_TOKEN = "test-jwt-token";
+      await connectListener();
+      const opts = (mqtt.connect as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(opts.username).toBe("agent");
+      expect(opts.password).toBe("test-jwt-token");
     });
   });
 

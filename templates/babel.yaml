@@ -1,0 +1,19 @@
+name: Babel
+description: "Traducteur + reviseur traduisent la documentation"
+phase: 1
+workspace: worktree
+stagger: { mode: sequential }
+timeout_minutes: 15
+metrics: [files_translated, review_issues]
+compare_mode: false
+agents:
+  - idPrefix: agent-traducteur
+    namePrefix: Traducteur
+    preset: babel-translator
+    profile: communicant
+    count: 1
+  - idPrefix: agent-reviseur
+    namePrefix: Reviseur
+    preset: babel-reviewer
+    profile: communicant
+    count: 1

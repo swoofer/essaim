@@ -1,0 +1,14 @@
+name: L'Essaim
+description: "N agents refactorisent en parallele"
+phase: 2
+workspace: worktree
+stagger: { mode: random, delay: [3, 8] }
+timeout_minutes: 20
+metrics: [files_refactored, tests_passing]
+compare_mode: false
+agents:
+  - idPrefix: agent-refacteur
+    namePrefix: Refacteur
+    preset: swarm
+    profile: codeur
+    count: dynamic

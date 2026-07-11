@@ -1,0 +1,26 @@
+name: La Chaine
+description: "Pipeline sequentiel: implementer, reviewer, tester"
+phase: 2
+workspace: worktree
+stagger: { mode: sequential }
+timeout_minutes: 25
+metrics: [pipeline_stages_completed, tests_passing]
+compare_mode: false
+agents:
+  - idPrefix: agent-implementeur
+    namePrefix: Implementeur
+    preset: chaine-implement
+    profile: codeur
+    count: 1
+  - idPrefix: agent-reviewer
+    namePrefix: Reviewer
+    preset: chaine-review
+    profile: communicant
+    count: 1
+    launch_delay: 5
+  - idPrefix: agent-testeur
+    namePrefix: Testeur
+    preset: chaine-test
+    profile: codeur
+    count: 1
+    launch_delay: 10

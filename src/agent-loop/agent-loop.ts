@@ -10,6 +10,7 @@ import {
 import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, unclaimTask, parseReviewActions, fetchExistingThreads, processReviewActions } from "./work-stealing.js";
 import { createLogger } from "../logger.js";
 import { resolveEffort, upgradeEffort, parseSeverity, EFFORT_PROFILES, isThinkingLevel, type EffortLevel, type ConcreteEffortLevel, type ThinkingLevel } from "./effort.js";
+import { authHeaders } from "../coordinator-auth.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -218,7 +219,7 @@ async function coordinatorPost(
   try {
     resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     });
   } catch (err) {
@@ -376,7 +377,7 @@ export async function runAgentLoop(
   async function quotaBlocksNextTask(): Promise<string | null> {
     if (config.maxQuotaPct === undefined) return null;  // guardrail disabled
     try {
-      const resp = await fetch(`${config.coordinatorUrl}/api/quota`);
+      const resp = await fetch(`${config.coordinatorUrl}/api/quota`, { headers: authHeaders() });
       if (resp.status === 503 || !resp.ok) return null;  // unknown = proceed
       const data = await resp.json() as {
         five_hour?: { utilization: number; minutesUntilReset: number };
@@ -427,7 +428,7 @@ export async function runAgentLoop(
     try {
       await fetch(`${config.coordinatorUrl}/api/token-usage`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           agent_id: config.agentId,
           agent_name: config.agentName,

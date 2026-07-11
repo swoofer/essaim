@@ -7,12 +7,13 @@ export function buildProject(
   templateId: string,
   context: ProjectContext,
   options?: { agentCount?: number; setParams?: Record<string, Record<string, unknown>> },
+  projectPath?: string,
 ): MiniProject {
-  return buildProjectFromBce(templateId, context, options) as unknown as MiniProject;
+  return buildProjectFromBce(templateId, context, options, projectPath) as unknown as MiniProject;
 }
 
-export function listTemplates(): { id: string; name: string; description: string }[] {
-  return listBceTemplates();
+export function listTemplates(projectPath?: string): { id: string; name: string; description: string }[] {
+  return listBceTemplates(projectPath);
 }
 
 

@@ -1,0 +1,14 @@
+name: Le Raid
+description: "Agents chassent les bugs et edge cases manquants"
+phase: 2
+workspace: worktree
+stagger: { mode: random, delay: [5, 10] }
+timeout_minutes: 20
+metrics: [bugs_found, tests_added]
+compare_mode: false
+agents:
+  - idPrefix: agent-chasseur
+    namePrefix: Chasseur
+    preset: raid
+    profile: codeur
+    count: dynamic

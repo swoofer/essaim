@@ -19,6 +19,7 @@ export function createRunCommand(): Command {
     .option("-t, --timeout <min>", "Timeout in minutes")
     .option("--cleanup", "Remove worktrees after execution")
     .option("--dry-run", "Preview agents and prompts without launching")
+    .option("--modules <list>", "Comma-separated module list, overrides scanner discovery. Required for templates using count: 'per-module' when the project layout doesn't match the scanner's expectations.")
     .option("--set <key=value>", "BCE parameter (repeatable)", collect, [])
     .option("--url <url>", "Coordinator URL (override config, deprecated: use --coordinator-url)")
     .option(
@@ -36,6 +37,7 @@ export function createRunCommand(): Command {
           timeout?: string;
           cleanup?: boolean;
           dryRun?: boolean;
+          modules?: string;
           set: string[];
           url?: string;
           coordinatorUrl?: string;
@@ -43,8 +45,13 @@ export function createRunCommand(): Command {
           maxQuotaPct?: string;
         },
       ) => {
+        // Resolve projectPath before listing/validating templates so that
+        // project-local .essaim/templates/ entries (new ids, not just
+        // catalog overrides) are recognized at pre-flight.
+        const projectPath = resolve(opts.project);
+
         // List templates if none specified
-        const templates = listTemplates();
+        const templates = listTemplates(projectPath);
         if (!template) {
           console.log("\nAvailable templates:\n");
           for (const t of templates) {
@@ -64,8 +71,21 @@ export function createRunCommand(): Command {
           process.exit(1);
         }
 
-        const projectPath = resolve(opts.project);
         const context = scanProject(projectPath);
+
+        // --modules overrides the scanner's discovery. Use when the project
+        // structure doesn't match scanner expectations (e.g. modules are
+        // src/features/<slice> not src/<top>) or when you want to run a
+        // template on a specific subset of modules (e.g. Phase 2 batch V1
+        // targeting only `shared` + `auth`).
+        if (opts.modules) {
+          const overrides = opts.modules.split(",").map((s) => s.trim()).filter(Boolean);
+          if (overrides.length === 0) {
+            console.error("Error: --modules cannot be empty");
+            process.exit(1);
+          }
+          context.modules = overrides;
+        }
 
         if (!context.has_git) {
           console.error(
@@ -102,11 +122,11 @@ export function createRunCommand(): Command {
           opts.url ??
           process.env.COORDINATOR_URL;
 
-        // Build project
+        // Build project — pass projectPath so .essaim/templates/ overrides apply
         const project = buildProject(template, context, {
           agentCount,
           setParams,
-        });
+        }, projectPath);
 
         // Apply overrides
         if (opts.timeout) {

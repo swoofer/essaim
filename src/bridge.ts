@@ -17,6 +17,7 @@ interface BceMiniProject {
     profile: 'codeur' | 'communicant';
     role?: string;
     read_only?: boolean;
+    modules?: string[]; // forwarded to coordinator registration (respondent matching)
     launch_delay?: number;
     // BCE-assembled outputs — consumed by orchestrator to write .claude/ files
     hooks: Record<string, string>;
@@ -38,221 +39,7 @@ interface BceMiniProject {
 }
 
 import { getCatalogRoot } from "../cli/bce-resolver.js";
-
-// Template definitions map template IDs to BCE presets + orchestration config
-interface TemplateDefinition {
-  name: string;
-  description: string;
-  phase: number;
-  workspace: 'worktree' | 'shared';
-  stagger: { mode: 'fixed' | 'random' | 'sequential'; delay?: [number, number] };
-  timeout_minutes: number;
-  metrics: string[];
-  compare_mode: boolean;
-  // Each agent role in this template
-  agents: Array<{
-    idPrefix: string;
-    namePrefix: string;
-    preset: string;
-    profile: 'codeur' | 'communicant';
-    role?: string;
-    launch_delay?: number;
-    count?: number | 'dynamic'; // 'dynamic' = based on modules/files
-    params?: Record<string, Record<string, unknown>>;
-  }>;
-}
-
-const TEMPLATE_DEFS: Record<string, TemplateDefinition> = {
-  raid: {
-    name: 'Le Raid',
-    description: 'Agents chassent les bugs et edge cases manquants',
-    phase: 2,
-    workspace: 'worktree',
-    stagger: { mode: 'random', delay: [5, 10] },
-    timeout_minutes: 20,
-    metrics: ['bugs_found', 'tests_added'],
-    compare_mode: false,
-    agents: [{
-      idPrefix: 'agent-chasseur', namePrefix: 'Chasseur', preset: 'raid',
-      profile: 'codeur', count: 'dynamic',
-    }],
-  },
-  melee: {
-    name: 'La Melee',
-    description: 'N agents ecrivent des tests en parallele',
-    phase: 1,
-    workspace: 'worktree',
-    stagger: { mode: 'random', delay: [5, 15] },
-    timeout_minutes: 20,
-    metrics: ['tests_written', 'tests_passing'],
-    compare_mode: true,
-    agents: [{
-      idPrefix: 'agent', namePrefix: 'Agent', preset: 'melee',
-      profile: 'codeur', count: 'dynamic',
-    }],
-  },
-  swarm: {
-    name: "L'Essaim",
-    description: 'N agents refactorisent en parallele',
-    phase: 2,
-    workspace: 'worktree',
-    stagger: { mode: 'random', delay: [3, 8] },
-    timeout_minutes: 20,
-    metrics: ['files_refactored', 'tests_passing'],
-    compare_mode: false,
-    agents: [{
-      idPrefix: 'agent-refacteur', namePrefix: 'Refacteur', preset: 'swarm',
-      profile: 'codeur', count: 'dynamic',
-    }],
-  },
-  revue: {
-    name: 'La Revue',
-    description: 'N auteurs + N reviewers en croisement',
-    phase: 2,
-    workspace: 'worktree',
-    stagger: { mode: 'random', delay: [5, 10] },
-    timeout_minutes: 20,
-    metrics: ['review_comments', 'approvals'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'auteur', namePrefix: 'Auteur', preset: 'revue-author', profile: 'codeur', count: 'dynamic' },
-      { idPrefix: 'reviewer', namePrefix: 'Reviewer', preset: 'revue-reviewer', profile: 'communicant', count: 'dynamic', launch_delay: 120 },
-    ],
-  },
-  maitre: {
-    name: 'Le Maitre',
-    description: '1 lead distribue aux workers',
-    phase: 2,
-    workspace: 'worktree',
-    stagger: { mode: 'random', delay: [8, 12] },
-    timeout_minutes: 20,
-    metrics: ['worker_idle_time', 'task_distribution_quality'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'tech-lead', namePrefix: 'Tech Lead', preset: 'maitre-lead', profile: 'communicant', count: 1, launch_delay: 0 },
-      { idPrefix: 'worker', namePrefix: 'Worker', preset: 'maitre-worker', profile: 'codeur', count: 'dynamic', launch_delay: 10 },
-    ],
-  },
-  gardien: {
-    name: 'Le Gardien',
-    description: '1 agent analyse la qualite du projet',
-    phase: 1,
-    workspace: 'shared',
-    stagger: { mode: 'fixed', delay: [0, 0] },
-    timeout_minutes: 10,
-    metrics: ['issues_found', 'categories_scanned'],
-    compare_mode: false,
-    agents: [{
-      idPrefix: 'agent-gardien', namePrefix: 'Le Gardien', preset: 'gardien',
-      profile: 'communicant', count: 1,
-    }],
-  },
-  relais: {
-    name: 'Le Relais',
-    description: '3 coureurs se relaient sequentiellement',
-    phase: 2,
-    workspace: 'worktree',
-    stagger: { mode: 'sequential' },
-    timeout_minutes: 25,
-    metrics: ['improvements_per_runner', 'tests_passing'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'agent-coureur-1', namePrefix: 'Coureur 1', preset: 'relais-1', profile: 'codeur', count: 1 },
-      { idPrefix: 'agent-coureur-2', namePrefix: 'Coureur 2', preset: 'relais-2', profile: 'codeur', count: 1 },
-      { idPrefix: 'agent-coureur-3', namePrefix: 'Coureur 3', preset: 'relais-3', profile: 'codeur', count: 1 },
-    ],
-  },
-  chaine: {
-    name: 'La Chaine',
-    description: 'Pipeline sequentiel: implementer, reviewer, tester',
-    phase: 2,
-    workspace: 'worktree',
-    stagger: { mode: 'sequential' },
-    timeout_minutes: 25,
-    metrics: ['pipeline_stages_completed', 'tests_passing'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'agent-implementeur', namePrefix: 'Implementeur', preset: 'chaine-implement', profile: 'codeur', count: 1 },
-      { idPrefix: 'agent-reviewer', namePrefix: 'Reviewer', preset: 'chaine-review', profile: 'communicant', count: 1, launch_delay: 5 },
-      { idPrefix: 'agent-testeur', namePrefix: 'Testeur', preset: 'chaine-test', profile: 'codeur', count: 1, launch_delay: 10 },
-    ],
-  },
-  debat: {
-    name: 'Le Debat',
-    description: '3 agents debattent une approche de refactor',
-    phase: 3,
-    workspace: 'shared',
-    stagger: { mode: 'fixed', delay: [0, 0] },
-    timeout_minutes: 15,
-    metrics: ['rounds_to_consensus', 'contestations'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'agent-separation', namePrefix: 'Agent Separation', preset: 'debat', profile: 'communicant', count: 1, params: { 'debate-position': { position: 'Tu favorises le decoupage par responsabilite (un fichier par concern). Argumente la lisibilite et testabilite.' } } },
-      { idPrefix: 'agent-strategy', namePrefix: 'Agent Strategy', preset: 'debat', profile: 'communicant', count: 1, params: { 'debate-position': { position: 'Tu favorises le pattern Strategy (interface + implementations). Argumente la configurabilite.' } } },
-      { idPrefix: 'agent-minimal', namePrefix: 'Agent Minimal', preset: 'debat', profile: 'communicant', count: 1, params: { 'debate-position': { position: 'Tu favorises le refactor minimal (extraire seulement les helpers). Argumente que le risque depasse le benefice.' } } },
-    ],
-  },
-  babel: {
-    name: 'Babel',
-    description: 'Traducteur + reviseur traduisent la documentation',
-    phase: 1,
-    workspace: 'worktree',
-    stagger: { mode: 'sequential' },
-    timeout_minutes: 15,
-    metrics: ['files_translated', 'review_issues'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'agent-traducteur', namePrefix: 'Traducteur', preset: 'babel-translator', profile: 'communicant', count: 1 },
-      { idPrefix: 'agent-reviseur', namePrefix: 'Reviseur', preset: 'babel-reviewer', profile: 'communicant', count: 1 },
-    ],
-  },
-  arene: {
-    name: "L'Arene",
-    description: 'Jeu de trivia sur la base de code',
-    phase: 1,
-    workspace: 'shared',
-    stagger: { mode: 'fixed', delay: [0, 0] },
-    timeout_minutes: 10,
-    metrics: ['questions_asked', 'correct_answers'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'agent-quizmaster', namePrefix: 'Quizmaster', preset: 'arene-quizmaster', profile: 'communicant', count: 1 },
-      { idPrefix: 'agent-joueur-a', namePrefix: 'Joueur A', preset: 'arene-player', profile: 'communicant', count: 1, params: { 'quiz-player': { player_name: 'Joueur A', focus_area: 'structure du projet' } } },
-      { idPrefix: 'agent-joueur-b', namePrefix: 'Joueur B', preset: 'arene-player', profile: 'communicant', count: 1, params: { 'quiz-player': { player_name: 'Joueur B', focus_area: 'patterns et architecture' } } },
-    ],
-  },
-  carrefour: {
-    name: 'Le Carrefour',
-    description: 'Agents croisent leurs intentions sur les memes fichiers',
-    phase: 3,
-    workspace: 'worktree',
-    stagger: { mode: 'random', delay: [3, 8] },
-    timeout_minutes: 15,
-    metrics: ['conflicts_detected', 'conflicts_resolved', 'consultations_opened'],
-    compare_mode: false,
-    agents: [{
-      idPrefix: 'agent', namePrefix: 'Agent', preset: 'carrefour',
-      profile: 'codeur', count: 'dynamic',
-    }],
-  },
-  phare: {
-    name: 'Le Phare',
-    description: '4 auditeurs spécialisés en parallèle + 1 réconciliateur — audit multi-angles',
-    phase: 2,
-    workspace: 'shared',
-    stagger: { mode: 'fixed', delay: [0, 0] },
-    timeout_minutes: 30,
-    metrics: ['specialists_completed', 'reconciliations', 'disagreements_flagged'],
-    compare_mode: false,
-    agents: [
-      { idPrefix: 'inventaire', namePrefix: 'Inventaire', preset: 'phare-inventaire', profile: 'communicant', count: 1, launch_delay: 0 },
-      { idPrefix: 'edges', namePrefix: 'Edges', preset: 'phare-edges', profile: 'communicant', count: 1, launch_delay: 0 },
-      { idPrefix: 'deps', namePrefix: 'Deps', preset: 'phare-deps', profile: 'communicant', count: 1, launch_delay: 0 },
-      { idPrefix: 'risques', namePrefix: 'Risques', preset: 'phare-risques', profile: 'communicant', count: 1, launch_delay: 0 },
-      { idPrefix: 'synth', namePrefix: 'Reconciliateur', preset: 'phare-synth', profile: 'communicant', count: 1, launch_delay: 60 },
-    ],
-  },
-};
+import { loadTemplates } from "./template-loader.js";
 
 const AGENT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
 
@@ -260,10 +47,12 @@ export function buildProjectFromBce(
   templateId: string,
   context: { path: string; language: string; test_command: string; modules: string[]; source_files: string[] },
   options?: { agentCount?: number; setParams?: Record<string, Record<string, unknown>> },
+  projectPath?: string,
 ): BceMiniProject {
-  const def = TEMPLATE_DEFS[templateId];
+  const templates = loadTemplates(projectPath);
+  const def = templates[templateId];
   if (!def) {
-    const available = Object.keys(TEMPLATE_DEFS).join(', ');
+    const available = Object.keys(templates).join(', ');
     throw new Error(`Unknown BCE template: "${templateId}". Available: ${available}`);
   }
 
@@ -279,16 +68,45 @@ export function buildProjectFromBce(
   const agents: BceMiniProject['agents'] = [];
 
   for (const agentDef of def.agents) {
-    const count =
-      agentDef.count === "dynamic"
-        ? (options?.agentCount ?? Math.max(2, Math.min(context.modules.length || 2, 4)))
-        : (agentDef.count ?? 1);
+    let count: number;
+    if (agentDef.count === "dynamic") {
+      count = options?.agentCount ?? Math.max(2, Math.min(context.modules.length || 2, 4));
+    } else if (agentDef.count === "per-module") {
+      if (context.modules.length === 0) {
+        throw new Error(
+          `Template '${templateId}' uses count: 'per-module' but context.modules is empty. ` +
+          `Provide modules via the project scanner or override via the run config.`,
+        );
+      }
+      count = context.modules.length;
+    } else {
+      count = agentDef.count ?? 1;
+    }
 
     for (let i = 0; i < count; i++) {
-      const suffix = count > 1 ? `-${i + 1}` : '';
-      const nameSuffix = count > 1 ? ` ${AGENT_NAMES[i] || (i + 1)}` : '';
+      // 'per-module' uses the module name as suffix (visible on the dashboard),
+      // others use the numeric / phonetic suffix as before.
+      const moduleForAgent = agentDef.count === "per-module" ? context.modules[i]! : null;
+      const slug = (s: string) => s.replace(/[^a-zA-Z0-9_-]+/g, "-").toLowerCase();
+      const suffix = moduleForAgent !== null
+        ? `-${slug(moduleForAgent)}`
+        : (count > 1 ? `-${i + 1}` : '');
+      const nameSuffix = moduleForAgent !== null
+        ? ` ${moduleForAgent}`
+        : (count > 1 ? ` ${AGENT_NAMES[i] || (i + 1)}` : '');
       const agentId = `${agentDef.idPrefix}${suffix}`;
       const agentName = `${agentDef.namePrefix}${nameSuffix}`;
+
+      // Inject the per-module behavior param (e.g. migrate-slice.target_slice = "auth")
+      // from agentDef.perModuleParam. Merged into the agent's params so the
+      // behavior template can reference {{params.target_slice}}.
+      const perModuleParams: Record<string, Record<string, unknown>> = {};
+      if (agentDef.perModuleParam && moduleForAgent !== null) {
+        perModuleParams[agentDef.perModuleParam.behavior] = {
+          ...(agentDef.params?.[agentDef.perModuleParam.behavior] ?? {}),
+          [agentDef.perModuleParam.key]: moduleForAgent,
+        };
+      }
 
       // Build launch params from context
       const launchParams: Record<string, Record<string, unknown>> = {
@@ -298,6 +116,7 @@ export function buildProjectFromBce(
           modules: context.modules,
         },
         ...(agentDef.params ?? {}),
+        ...perModuleParams,
         ...(options?.setParams ?? {}),
       };
 
@@ -312,12 +131,22 @@ export function buildProjectFromBce(
       };
       const result = runPipeline(agent, getCatalogRoot(), launchParams);
 
+      // Modules registered with the coordinator for respondent matching.
+      // Default = full project list (broad collaboration: every agent is a
+      // respondent for every announce). Per-module templates can opt into
+      // own-only registration (one slice per agent) so consultations route
+      // to the slice owner.
+      const registeredModules = (agentDef.count === "per-module" && agentDef.perModuleRegisterOwnOnly && moduleForAgent !== null)
+        ? [moduleForAgent]
+        : context.modules;
+
       agents.push({
         id: agentId,
         name: agentName,
         prompt: result.output.prompt,
         profile: agentDef.profile,
         role: agentDef.idPrefix,
+        modules: registeredModules,
         launch_delay: agentDef.launch_delay,
         hooks: result.output.hooks,
         envVars: result.output.envVars,
@@ -341,8 +170,8 @@ export function buildProjectFromBce(
   };
 }
 
-export function listBceTemplates(): { id: string; name: string; description: string }[] {
-  return Object.entries(TEMPLATE_DEFS).map(([id, def]) => ({
+export function listBceTemplates(projectPath?: string): { id: string; name: string; description: string }[] {
+  return Object.entries(loadTemplates(projectPath)).map(([id, def]) => ({
     id, name: def.name, description: def.description,
   }));
 }
@@ -351,10 +180,12 @@ export function buildSoloPrompt(
   templateId: string,
   context: { language: string; test_command: string; modules: string[] },
   setParams?: Record<string, Record<string, unknown>>,
+  projectPath?: string,
 ): string {
-  const def = TEMPLATE_DEFS[templateId];
+  const templates = loadTemplates(projectPath);
+  const def = templates[templateId];
   if (!def) {
-    const available = Object.keys(TEMPLATE_DEFS).join(", ");
+    const available = Object.keys(templates).join(", ");
     throw new Error(
       `Unknown BCE template: "${templateId}". Available: ${available}`,
     );

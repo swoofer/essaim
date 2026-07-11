@@ -1,0 +1,14 @@
+name: Le Gardien
+description: "1 agent analyse la qualite du projet"
+phase: 1
+workspace: shared
+stagger: { mode: fixed, delay: [0, 0] }
+timeout_minutes: 10
+metrics: [issues_found, categories_scanned]
+compare_mode: false
+agents:
+  - idPrefix: agent-gardien
+    namePrefix: Le Gardien
+    preset: gardien
+    profile: communicant
+    count: 1

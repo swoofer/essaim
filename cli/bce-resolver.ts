@@ -54,3 +54,6 @@ export function getCompositionsDir(): string {
 export function getScriptsDir(): string {
   return resolve(getCatalogRoot(), "scripts");
 }
+export function getTemplatesDir(): string {
+  return resolve(getCatalogRoot(), "templates");
+}
