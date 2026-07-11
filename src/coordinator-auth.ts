@@ -16,12 +16,24 @@ export function authHeaders(): Record<string, string> {
 }
 
 /**
+ * Headers for GENERATED CONFIG FILES (.mcp.json): reference the token via
+ * ${COORDINATOR_TOKEN} so the secret never lands on disk — Claude Code
+ * expands env vars in .mcp.json at load time. Still conditional on the
+ * token being set, so no-token output is unchanged.
+ */
+export function mcpAuthHeaders(): Record<string, string> {
+  return coordinatorToken()
+    ? { Authorization: "Bearer ${COORDINATOR_TOKEN}" }
+    : {};
+}
+
+/**
  * Post-write patch for .mcp.json files produced by essaim or promptweave:
  * adds Authorization headers to every http server whose url ends in /mcp
  * (the coordinator), leaving other servers untouched.
  */
 export function patchMcpJsonAuth(mcpJsonPath: string): void {
-  const headers = authHeaders();
+  const headers = mcpAuthHeaders();
   if (Object.keys(headers).length === 0) return;
   if (!existsSync(mcpJsonPath)) return;
   let doc: { mcpServers?: Record<string, Record<string, unknown>> };

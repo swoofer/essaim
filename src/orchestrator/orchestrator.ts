@@ -4,7 +4,7 @@ import { execSync, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { createLogger } from "../logger.js";
-import { authHeaders } from "../coordinator-auth.js";
+import { authHeaders, mcpAuthHeaders } from "../coordinator-auth.js";
 import { startServer } from "mcp-coordinator";
 type ServerHandle = Awaited<ReturnType<typeof startServer>>;
 const log = createLogger("orchestrator");
@@ -609,7 +609,7 @@ export function setupProject(projectPath: string, options: SetupOptions): void {
       type: "http",
       url: `${coordinatorUrl}/mcp`,
     };
-    const auth = authHeaders();
+    const auth = mcpAuthHeaders();
     if (Object.keys(auth).length > 0) coordinatorServer.headers = auth;
     const mcpConfig = { mcpServers: { coordinator: coordinatorServer } };
     fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + "\n");
@@ -635,7 +635,7 @@ export function writeAgentWorkspace(
     type: "http",
     url: `${coordinatorUrl}/mcp`,
   };
-  const auth = authHeaders();
+  const auth = mcpAuthHeaders();
   if (Object.keys(auth).length > 0) coordinatorServer.headers = auth;
   const mcpConfig = { mcpServers: { coordinator: coordinatorServer } };
   const mcpPath = path.join(workspacePath, ".mcp.json");
