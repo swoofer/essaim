@@ -45,8 +45,13 @@ export function createRunCommand(): Command {
           maxQuotaPct?: string;
         },
       ) => {
+        // Resolve projectPath before listing/validating templates so that
+        // project-local .essaim/templates/ entries (new ids, not just
+        // catalog overrides) are recognized at pre-flight.
+        const projectPath = resolve(opts.project);
+
         // List templates if none specified
-        const templates = listTemplates();
+        const templates = listTemplates(projectPath);
         if (!template) {
           console.log("\nAvailable templates:\n");
           for (const t of templates) {
@@ -66,7 +71,6 @@ export function createRunCommand(): Command {
           process.exit(1);
         }
 
-        const projectPath = resolve(opts.project);
         const context = scanProject(projectPath);
 
         // --modules overrides the scanner's discovery. Use when the project

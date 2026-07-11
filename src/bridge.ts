@@ -170,8 +170,8 @@ export function buildProjectFromBce(
   };
 }
 
-export function listBceTemplates(): { id: string; name: string; description: string }[] {
-  return Object.entries(loadTemplates()).map(([id, def]) => ({
+export function listBceTemplates(projectPath?: string): { id: string; name: string; description: string }[] {
+  return Object.entries(loadTemplates(projectPath)).map(([id, def]) => ({
     id, name: def.name, description: def.description,
   }));
 }

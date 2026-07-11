@@ -12,8 +12,8 @@ export function buildProject(
   return buildProjectFromBce(templateId, context, options, projectPath) as unknown as MiniProject;
 }
 
-export function listTemplates(): { id: string; name: string; description: string }[] {
-  return listBceTemplates();
+export function listTemplates(projectPath?: string): { id: string; name: string; description: string }[] {
+  return listBceTemplates(projectPath);
 }
 
 
