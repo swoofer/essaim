@@ -73,4 +73,12 @@ describe("template-loader", () => {
     expect(t["mekova-review"].agents[0].preset).toBe("mekova-review");
     expect(t["mekova-review"].agents[0].count).toBe(1);
   });
+
+  it("mekova-bughunt has one agent with preset mekova-bughunt and count dynamic", () => {
+    const t = loadTemplates();
+    expect(t["mekova-bughunt"]).toBeDefined();
+    expect(t["mekova-bughunt"].agents.length).toBe(1);
+    expect(t["mekova-bughunt"].agents[0].preset).toBe("mekova-bughunt");
+    expect(t["mekova-bughunt"].agents[0].count).toBe("dynamic");
+  });
 });
