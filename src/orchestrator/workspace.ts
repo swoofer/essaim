@@ -11,6 +11,15 @@ export function createWorkspaces(
   const basePath = workspace.base || process.cwd();
   const ref = workspace.baseRef || "HEAD";
 
+  // Pin the commit the worktrees branch off. The report needs it to measure what
+  // an agent actually produced: agents are told to COMMIT their work, so a plain
+  // `git diff HEAD` in the worktree shows nothing and every agent looked like it
+  // changed nothing (#29). Diffing against this base captures commits too.
+  let baseSha: string | undefined;
+  try {
+    baseSha = execSync(`git rev-parse ${ref}`, { cwd: basePath, encoding: "utf-8" }).trim();
+  } catch { /* not a git repo — diff stats degrade to unavailable */ }
+
   if (workspace.type === "worktree") {
     // Prune stale worktree references from previous runs
     try { execSync(`git worktree prune`, { cwd: basePath, stdio: "pipe" }); } catch {}
@@ -47,7 +56,7 @@ export function createWorkspaces(
     }
   }
 
-  return { type: workspace.type, basePath, paths };
+  return { type: workspace.type, basePath, paths, baseSha };
 }
 
 export function cleanupWorkspaces(workspace: WorkspaceResult): void {

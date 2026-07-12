@@ -4,8 +4,36 @@ import { existsSync } from "fs";
 import { spawn } from "child_process";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { listTemplates } from "../src/orchestrator/template-engine.js";
-import { buildSoloPrompt } from "../src/bridge.js";
+import { buildSolo } from "../src/bridge.js";
+import { buildAllowedTools } from "../src/orchestrator/agent-launcher.js";
+import type { AgentConfig } from "../src/orchestrator/types.js";
 import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
+
+/**
+ * Build the argv for `claude -p`.
+ *
+ * Headless mode cannot answer a permission prompt: without an explicit
+ * --allowedTools allowlist the agent's Write hits a prompt nobody can approve
+ * and the artifact is silently never written (#34 — `solo gardien` produced its
+ * audit in stdout but no AUDIT.md). `run` mode always passed an allowlist; solo
+ * did not.
+ *
+ * Passing `tools` (even empty) rather than `mcpTools` is deliberate: it keeps
+ * buildAllowedTools from falling back to the full coordinator tool list for a
+ * solo agent that has no coordinator at all.
+ */
+export function buildSoloArgs(
+  prompt: string,
+  mcpTools: string[],
+  mcpConfigPath: string | null,
+): string[] {
+  const args = ["-p", prompt];
+  if (mcpConfigPath) {
+    args.push("--mcp-config", mcpConfigPath);
+  }
+  args.push("--allowedTools", buildAllowedTools({ tools: mcpTools } as AgentConfig));
+  return args;
+}
 
 export function createSoloCommand(): Command {
   return new Command("solo")
@@ -64,20 +92,21 @@ export function createSoloCommand(): Command {
         for (const [behavior, values] of Object.entries(setFileParams)) {
           setParams[behavior] = { ...setParams[behavior], ...values };
         }
-        const prompt = buildSoloPrompt(template, context, setParams, projectPath);
+        const { prompt, mcpTools } = buildSolo(template, context, setParams, projectPath);
+
+        const mcpConfigPath = resolve(projectPath, ".mcp.json");
+        const args = buildSoloArgs(
+          prompt,
+          mcpTools,
+          existsSync(mcpConfigPath) ? mcpConfigPath : null,
+        );
 
         console.log(`\nSolo mode: ${template}`);
         console.log(`  Project:  ${projectPath}`);
         console.log(`  Timeout:  ${opts.timeout} minutes`);
         console.log(`  Prompt:   ${prompt.length} chars`);
+        console.log(`  Tools:    ${args[args.indexOf("--allowedTools") + 1]}`);
         console.log(`\nLaunching Claude Code...\n`);
-
-        // Build claude args
-        const args = ["-p", prompt];
-        const mcpConfigPath = resolve(projectPath, ".mcp.json");
-        if (existsSync(mcpConfigPath)) {
-          args.push("--mcp-config", mcpConfigPath);
-        }
 
         const child = spawn("claude", args, {
           stdio: "inherit",

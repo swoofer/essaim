@@ -176,12 +176,19 @@ export function listBceTemplates(projectPath?: string): { id: string; name: stri
   }));
 }
 
-export function buildSoloPrompt(
+/**
+ * Assemble a solo agent: the prompt AND the tools it is allowed to use.
+ *
+ * `claude -p` (headless) cannot answer a permission prompt, so the caller must
+ * forward `mcpTools` to an explicit --allowedTools allowlist — otherwise the
+ * agent's writes silently never land (#34).
+ */
+export function buildSolo(
   templateId: string,
   context: { language: string; test_command: string; modules: string[] },
   setParams?: Record<string, Record<string, unknown>>,
   projectPath?: string,
-): string {
+): { prompt: string; mcpTools: string[] } {
   const templates = loadTemplates(projectPath);
   const def = templates[templateId];
   if (!def) {
@@ -211,6 +218,16 @@ export function buildSoloPrompt(
     params: {} as Record<string, Record<string, unknown>>,
   };
   const result = runPipeline(agent, getCatalogRoot(), launchParams);
-  return result.output.prompt;
+  return { prompt: result.output.prompt, mcpTools: result.output.mcpTools };
+}
+
+/** @deprecated Prefer buildSolo() — this drops the tool allowlist (see #34). */
+export function buildSoloPrompt(
+  templateId: string,
+  context: { language: string; test_command: string; modules: string[] },
+  setParams?: Record<string, Record<string, unknown>>,
+  projectPath?: string,
+): string {
+  return buildSolo(templateId, context, setParams, projectPath).prompt;
 }
 

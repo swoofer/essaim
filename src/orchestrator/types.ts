@@ -61,6 +61,7 @@ export interface WorkspaceResult {
   type: "worktree" | "shared" | "none";
   basePath: string;
   paths: Map<string, string>; // agent_id → workspace path
+  baseSha?: string; // commit the worktrees branch off — diff baseline (#29)
 }
 
 export interface CoordinatorMetrics {
@@ -93,6 +94,9 @@ export interface AgentResult {
   agent_name: string;
   exit_code: number;
   diff: string;
+  // False when the workspace is shared: every agent edits the same tree, so a
+  // per-agent diff is not attributable. Reported as N/A rather than a fake 0/1.
+  diff_measured?: boolean;
   compilation_ok?: boolean;
   stdout_length: number;
   // Token + cost diagnostics (populated from AgentLoopResult when available)
