@@ -923,8 +923,21 @@ export async function runAgentLoop(
                 logger.debug(`Effort: ${upgraded} (model=${execProfile.model}, maxTurns=${execProfile.maxTurns})`);
               }
 
-              // Execute one task
-              const taskPrompt = phase.prompt.replace(/\{\{params\.current_task\}\}/g, task.description);
+              // Execute one task. When work already landed on this file, say so:
+              // an agent is otherwise blind to its peers, which is how three
+              // hunters each committed a near-identical repro test for one bug
+              // (#30). The file-level claim exclusion stops the concurrent case;
+              // this covers the sequential one.
+              let taskPrompt = phase.prompt.replace(/\{\{params\.current_task\}\}/g, task.description);
+              if (task.relatedDone?.length) {
+                taskPrompt += `\n\n## Déjà livré sur ce fichier (par un autre agent, ce run)\n`
+                  + task.relatedDone.map((s) => `- ${s}`).join("\n")
+                  + `\n\nAvant d'écrire quoi que ce soit : lis ce qui existe déjà.\n`
+                  + `- Même cause racine que ta tâche ? Alors c'est un DOUBLON : ne commite RIEN, `
+                  + `résous ton thread en disant « DUP de <ce qui existe> » et passe à la suite.\n`
+                  + `- Cause réellement différente ? Alors ÉTENDS le test existant plutôt que d'en `
+                  + `créer un quasi identique à côté.`;
+              }
               const execTools = toolsForMode(phase.toolsMode, config.allowedTools);
               const execBlocked = disallowedForMode(phase.toolsMode);
               const freshExec = config.freshSessionPerTask === true;
