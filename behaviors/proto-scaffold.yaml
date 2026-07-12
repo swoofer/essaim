@@ -15,9 +15,16 @@ sections:
       Tu poses la base du prototype cliquable. TU ES LE SEUL agent autorisé à
       exécuter `npm install` / créer package.json.
 
+      {{#if params.mock_spec}}
+      ### Entités à mocker (extraites de l'inventaire d'écrans)
+      {{params.mock_spec}}
+
+      Ce vocabulaire vient du client, pas d'une supposition : utilise-le tel quel.
+      {{/if}}
+
       1. `npm create vite@latest . -- --template preact-ts` (ou structure
          équivalente minimale : vite + preact + preact-iso pour le routing).
-      2. Crée `src/mock/data.ts` : les entités du brief (vocabulaire EXACT du
+      2. Crée `src/mock/data.ts` : les entités {{#if params.mock_spec}}ci-dessus{{else}}du brief{{/if}} (vocabulaire EXACT du
          client, valeurs réalistes de son métier — JAMAIS de lorem ipsum,
          minimum 3 instances cohérentes par entité).
       3. Crée `src/app.tsx` avec le routeur : une route par écran listée dans

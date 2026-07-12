@@ -62,14 +62,29 @@ export function collectAgentResults(workspace: WorkspaceResult): AgentResult[] {
   return results;
 }
 
+/**
+ * A report basename that is free for every extension it will be written under.
+ *
+ * `Date.now()` alone is not unique: two reports produced in the same millisecond
+ * (pipeline steps, notably) silently overwrote each other — the second run's
+ * report simply replaced the first, and nobody was told.
+ */
+export function uniqueReportBase(dir: string, prefix: string, extensions: string[]): string {
+  let base = prefix;
+  for (let n = 2; extensions.some((ext) => fs.existsSync(path.join(dir, base + ext))); n++) {
+    base = `${prefix}-${n}`;
+  }
+  return base;
+}
+
 export function writeReport(results: RunResult[], outputDir: string): string {
   fs.mkdirSync(outputDir, { recursive: true });
-  const ts = Date.now();
+  const base = uniqueReportBase(outputDir, `report-${Date.now()}`, [".json", ".md"]);
 
-  const jsonPath = path.join(outputDir, `report-${ts}.json`);
+  const jsonPath = path.join(outputDir, `${base}.json`);
   fs.writeFileSync(jsonPath, JSON.stringify(results, null, 2));
 
-  const mdPath = path.join(outputDir, `report-${ts}.md`);
+  const mdPath = path.join(outputDir, `${base}.md`);
   let md = `# Mini-projet Report\n\n*${new Date().toISOString()}*\n\n`;
 
   for (const r of results) {

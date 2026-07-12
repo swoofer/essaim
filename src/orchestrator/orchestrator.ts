@@ -23,7 +23,6 @@ import { fetchCoordinatorMetrics } from "./metrics.js";
 import { collectAgentResults } from "./reporter.js";
 import type { AgentConfig, MiniProject, AgentProcess, RunResult } from "./types.js";
 import { scanProject } from "./scanner.js";
-import { buildProject, listTemplates } from "./template-engine.js";
 
 import { getCatalogRoot, getScriptsDir } from "../../cli/bce-resolver.js";
 import { runPipeline } from "@swoofer/promptweave";

@@ -60,6 +60,33 @@ function loadDir(dir: string, out: Record<string, TemplateDefinition>): void {
     if (!Array.isArray(doc.agents) || doc.agents.length === 0) {
       throw new Error(`template ${f}: "agents" must be a non-empty array`);
     }
+    // Validate each agent HERE, where we still know the file and the index.
+    // Left unchecked, a template with a typo'd agent fails much later and much
+    // further away — a missing `preset` surfaces as an opaque registry lookup
+    // error, with nothing pointing back at the template that caused it.
+    doc.agents.forEach((agent: unknown, i: number) => {
+      const where = `template ${f}: agents[${i}]`;
+      if (typeof agent !== "object" || agent === null) {
+        throw new Error(`${where} must be an object`);
+      }
+      const a = agent as Record<string, unknown>;
+      for (const key of ["idPrefix", "namePrefix", "preset", "profile"]) {
+        if (typeof a[key] !== "string" || !a[key]) {
+          throw new Error(`${where}: missing or invalid "${key}" (expected a non-empty string)`);
+        }
+      }
+      if (a.profile !== "codeur" && a.profile !== "communicant") {
+        throw new Error(`${where}: "profile" must be "codeur" or "communicant", got "${String(a.profile)}"`);
+      }
+      if (
+        a.count !== undefined &&
+        typeof a.count !== "number" &&
+        a.count !== "dynamic" &&
+        a.count !== "per-module"
+      ) {
+        throw new Error(`${where}: "count" must be a number, "dynamic" or "per-module", got "${String(a.count)}"`);
+      }
+    });
     out[basename(f).replace(/\.ya?ml$/, "")] = doc as unknown as TemplateDefinition;
   }
 }
