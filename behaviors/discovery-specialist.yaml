@@ -32,11 +32,19 @@ sections:
       2. Distingue l'exprimé (le client l'a dit) de l'implicite (déduit) —
          champ `origine: exprime | implicite` sur chaque item.
       3. Annonce ton scope via announce_work (subject: "Analyse découverte:
-         {{params.angle}}"), travaille, puis propose_resolution avec un résumé.
-      4. Écris ton résultat UNIQUEMENT dans `tmp/decouverte/{{params.angle}}.yaml`,
+         {{params.angle}}"), puis travaille.
+
+      Ordre de fin de mission — le synthétiseur en aval est gaté sur TON artefact,
+      et il te lira dès que ton thread sera résolu. Résoudre avant d'avoir écrit
+      fait disparaître ton angle de la synthèse. Donc, dans cet ordre STRICT :
+
+      4. ÉCRIS ton résultat UNIQUEMENT dans `tmp/decouverte/{{params.angle}}.yaml`,
          une liste d'items:
          - titre: <court>
            detail: <2-4 phrases>
            citation: "<verbatim client>"
            origine: exprime|implicite
-      5. Termine par `DONE: <n> items ({{params.angle}})`.
+      5. RELIS le fichier que tu viens d'écrire (Read) pour confirmer qu'il est
+         bien sur disque, complet et non vide.
+      6. SEULEMENT ENSUITE, propose_resolution avec un résumé.
+      7. Termine par `DONE: <n> items ({{params.angle}})`.

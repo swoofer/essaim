@@ -17,6 +17,11 @@ params:
   sequential-wait:
     predecessor_description: "les 4 spécialistes (inventaire, edges, deps, risques) — vérifie list_threads que leurs sessions sont terminées"
     wait_for_status: "resolved"
+    expect_files:
+      - "tmp/audit/inventaire.yaml"
+      - "tmp/audit/edges.yaml"
+      - "tmp/audit/deps.yaml"
+      - "tmp/audit/risques.yaml"
   audit-output:
     paths:
       - "MIGRATION_AUDIT.md"

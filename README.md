@@ -140,6 +140,26 @@ Three rules adapt behaviors automatically based on what's assembled.
 | `sequential-then-announce` | `sequential-wait` + `announce-before-write` | Injects section 012: "wait -> announce -> code" |
 | `solo-mode-strip` | `coordinator-rules.solo_mode = true` | Strips announce / conflict-resolution entirely; agent works alone |
 
+### Gating a sequential pipeline on artifacts
+
+A resolved thread does not prove the predecessor's file is on disk: resolution and
+writing are not ordered, and the coordinator's timeout sweeper can resolve a thread
+that produced nothing at all. Gate on the artifact, not the status — give
+`sequential-wait` the files you expect and it will poll for them before treating an
+input as missing:
+
+```yaml
+params:
+  sequential-wait:
+    expect_files: ["tmp/decouverte/features.yaml", "tmp/decouverte/risques.yaml"]
+    retry_attempts: 3        # default
+    retry_delay_seconds: 10  # default
+```
+
+The producing side owes the other half of the contract: **write the artifact, read it
+back, and only then resolve** — a mission prompt that resolves before it writes will
+have its output silently dropped by the consumer.
+
 List the templates the CLI ships with via `essaim list`. To preview what a template assembles (prompt + agent plan) without burning tokens, use `essaim run <template> --dry-run`. Behaviors, presets, and composition rules live under [`behaviors/`](./behaviors/), [`presets/`](./presets/), and [`compositions/`](./compositions/) in this repo — browse them directly to author or edit.
 
 ### Read-only audits with a fixed write surface
