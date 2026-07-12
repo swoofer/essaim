@@ -14,6 +14,21 @@ params:
     type: string
     required: false
     description: "Description of who we wait for"
+  expect_files:
+    type: "string[]"
+    required: false
+    description: >
+      Artefacts que le prédécesseur doit avoir produits. Fournis-les et le gate
+      porte sur les FICHIERS, pas seulement sur le statut de thread (voir #38).
+      Vide = gate sur le statut de thread seul (comportement historique).
+  retry_attempts:
+    type: number
+    default: 3
+    description: "Nombre de vérifications des artefacts avant de les déclarer absents"
+  retry_delay_seconds:
+    type: number
+    default: 10
+    description: "Délai entre deux vérifications des artefacts"
 
 sections:
   "011-wait-predecessor":
@@ -23,5 +38,26 @@ sections:
       AVANT de commencer, vérifie avec list_threads(status: "{{params.wait_for_status}}") que l'agent précédent a terminé.
       {{#if params.predecessor_description}}Attends: {{params.predecessor_description}}.{{/if}}
       Ne commence PAS tant que l'étape précédente n'est pas résolue.
+      {{#if params.expect_files}}
+
+      ### Gate sur artefacts
+      Un thread résolu ne garantit PAS que les fichiers du prédécesseur sont sur
+      disque : la résolution et l'écriture ne sont pas ordonnées, et un thread
+      peut même être résolu par le balayage de timeout du coordinateur sans
+      qu'aucun artefact n'ait été produit. Le statut de thread est un indice, le
+      fichier est la preuve.
+
+      Une fois les threads résolus, vérifie que CHACUN de ces artefacts existe et
+      est non vide :
+      {{#each params.expect_files}}
+      - `{{this}}`
+      {{/each}}
+
+      S'il en manque un : attends `sleep {{params.retry_delay_seconds}}` puis
+      re-vérifie — jusqu'à {{params.retry_attempts}} tentatives. Un artefact
+      encore absent après la dernière tentative est réellement absent : traite-le
+      comme tel (dégradation prévue par ta mission) et dis explicitement lequel
+      manquait dans ta sortie. N'invente jamais le contenu d'un artefact absent.
+      {{/if}}
 
 mcp_tools: [list_threads]

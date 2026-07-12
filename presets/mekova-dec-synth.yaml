@@ -21,3 +21,8 @@ params:
       les 4 angles de découverte (features, risques, roi, questions) —
       vérifie via list_threads que leurs QUATRE sessions sont resolved
       avant de commencer ta synthèse
+    expect_files:
+      - "tmp/decouverte/features.yaml"
+      - "tmp/decouverte/risques.yaml"
+      - "tmp/decouverte/roi.yaml"
+      - "tmp/decouverte/questions.yaml"

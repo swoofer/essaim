@@ -191,6 +191,56 @@ describe('Parity: BCE presets produce complete prompts', () => {
     });
   });
 
+  // Régression #38 — sequential-wait gatait sur le statut de thread seul, qui ne
+  // dit RIEN du système de fichiers : un thread « resolved » peut précéder le
+  // flush de l'artefact du prédécesseur (voire ne rien produire du tout, quand
+  // c'est le balayage de timeout du coordinateur qui l'a résolu). Les deux côtés
+  // du contrat sont testés : le producteur écrit avant de résoudre, le
+  // consommateur gate sur les fichiers avec retry borné.
+  describe('Artifact gate (#38)', () => {
+    // Params réellement fournis par le skill invocateur via --set (cf. SMOKE_SET_PARAMS)
+    const DEC_PARAMS = {
+      'discovery-specialist': { transcript: 'notes/rencontres/test.md' },
+      'discovery-synth': { transcript: 'notes/rencontres/test.md', projet: 'test' },
+    };
+
+    it('producer writes and verifies its artifact BEFORE proposing resolution', () => {
+      // Scopé à la section mission : d'autres behaviors mentionnent
+      // propose_resolution plus haut dans le prompt assemblé.
+      const result = buildPreset('mekova-dec-risques', DEC_PARAMS);
+      const mission = result.sectionTrace.find(
+        s => s.behaviorName === 'discovery-specialist' && s.key === '030-mission',
+      );
+      expect(mission).toBeDefined();
+      const write = mission!.prompt.indexOf('tmp/decouverte/risques.yaml');
+      const resolveIdx = mission!.prompt.indexOf('propose_resolution');
+      expect(write).toBeGreaterThan(-1);
+      expect(resolveIdx).toBeGreaterThan(-1);
+      expect(write).toBeLessThan(resolveIdx);
+    });
+
+    it('consumer gates on the expected files, not just thread status', () => {
+      const prompt = buildPreset('mekova-dec-synth', DEC_PARAMS).output.prompt;
+      for (const angle of ['features', 'risques', 'roi', 'questions']) {
+        expect(prompt).toContain(`tmp/decouverte/${angle}.yaml`);
+      }
+      expect(prompt).toContain('Séquencement');
+      expect(prompt).toContain('sleep');
+    });
+
+    it('a resolved thread is explicitly not proof the artifact exists', () => {
+      const prompt = buildPreset('mekova-dec-synth', DEC_PARAMS).output.prompt;
+      expect(prompt).toMatch(/ne (garantit|prouve) PAS/);
+    });
+
+    it('presets without expect_files render with no gate (strict-mode safe)', () => {
+      const prompt = buildPreset('relais-2').output.prompt;
+      expect(prompt).toContain('Séquencement');
+      expect(prompt).not.toContain('Gate sur artefacts');
+      expect(prompt).not.toContain('sleep');
+    });
+  });
+
   describe('Solo mode', () => {
     it('strips coordination from any preset', () => {
       const result = buildPreset('raid', { 'coordinator-rules': { solo_mode: true } });
