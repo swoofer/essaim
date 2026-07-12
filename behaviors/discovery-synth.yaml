@@ -32,7 +32,9 @@ sections:
          EXACTES du squelette start-discovery :
          ## Probleme, ## Objectif, ## Scope du prototype (### Inclus,
          ### Exclu), ## ROI (Levier, Métriques, **Baseline actuelle :**),
-         ## Questions ouvertes — chaque section générée entourée de
+         ## Questions ouvertes — GRAPHIE EXACTE des titres de sections,
+         SANS accents (« Probleme », pas « Problème ») : la reconnaissance
+         par les skills aval en dépend — chaque section générée entourée de
          <!-- généré: rencontre-1 --> ... <!-- /généré -->>
       ecrans: |         # inventaire d'écrans, schéma contractuel §2.4 du design
         <## <ecran-id> par écran avec puces exactes :
