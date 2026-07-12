@@ -10,6 +10,7 @@ import {
   type StepOutcome,
 } from "../src/pipeline/runner.js";
 import { executeRun } from "./run-core.js";
+import { uniqueReportBase } from "../src/orchestrator/reporter.js";
 import { parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
 
 export function createPipelineCommand(): Command {
@@ -115,8 +116,10 @@ function writePipelineReport(
 ): string {
   const outDir = join(pipelineDir, "reports");
   mkdirSync(outDir, { recursive: true });
-  const ts = Date.now();
-  const mdPath = join(outDir, `pipeline-${pipelineName}-${ts}.md`);
+  // Two steps finishing in the same millisecond used to overwrite each other's
+  // report — the timestamp alone is not a unique name.
+  const base = uniqueReportBase(outDir, `pipeline-${pipelineName}-${Date.now()}`, [".md"]);
+  const mdPath = join(outDir, `${base}.md`);
 
   const total = outcomes.reduce((a, o) => a + o.durationMs, 0);
   const okCount = outcomes.filter((o) => o.status === "ok").length;
