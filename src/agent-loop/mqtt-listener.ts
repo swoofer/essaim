@@ -171,11 +171,32 @@ function buildInterrupt(
   return interrupt;
 }
 
+// mqtt.js defaults to reconnectPeriod=1000 and retries FOREVER. When the WS
+// upgrade through the ingress fails, that turns into a "disconnected" log every
+// second for the whole run (#33). Push notifications are a nice-to-have — the
+// loop already degrades gracefully without them — so back off and then give up
+// rather than spin. Giving up is announced once, loudly.
+const RECONNECT_PERIOD_MS = 5_000;
+const MAX_RECONNECT_ATTEMPTS = 5;
+
 export function createMqttListener(options: MqttListenerOptions): MqttListener {
   const { url, agentId } = options;
   let client: mqtt.MqttClient | null = null;
   let isConnected = false;
+  let reconnectAttempts = 0;
+  let gaveUp = false;
   const queue: MqttInterrupt[] = [];
+
+  /** Tear the client down for good — stops mqtt.js's endless auto-reconnect. */
+  function giveUp(reason: string): void {
+    if (gaveUp) return;
+    gaveUp = true;
+    isConnected = false;
+    log.warn(`giving up on MQTT — running without push notifications (${reason})`, { url });
+    try {
+      client?.end(true);
+    } catch { /* already gone */ }
+  }
 
   function handleMessage(topic: string, message: Buffer): void {
     let payload: Record<string, unknown>;
@@ -204,6 +225,9 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
     connect(): Promise<void> {
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
+          // Same teardown as on error: a client left alive here would retry
+          // forever behind a caller that has already degraded (#33).
+          giveUp("connection timeout");
           reject(new Error("MQTT connection timeout"));
         }, 5000);
 
@@ -214,7 +238,12 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         // too. The deployed coordinator's aedes authenticate hook reads the
         // JWT from the password field (username is ignored there).
         const token = coordinatorToken();
-        const mqttOpts: mqtt.IClientOptions = { clientId, clean: true };
+        const mqttOpts: mqtt.IClientOptions = {
+          clientId,
+          clean: true,
+          reconnectPeriod: RECONNECT_PERIOD_MS,
+          connectTimeout: 5000,
+        };
         if (token) {
           mqttOpts.username = "agent";
           mqttOpts.password = token;
@@ -231,6 +260,7 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         client.on("connect", () => {
           clearTimeout(timeout);
           isConnected = true;
+          reconnectAttempts = 0; // a successful connect earns a fresh budget
           client!.subscribe(TOPICS, (err) => {
             if (err) {
               reject(err);
@@ -246,16 +276,23 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         client.on("error", (err) => {
           clearTimeout(timeout);
           log.warn("connection failed", { error: (err as Error).message });
+          // Without this teardown the client keeps auto-reconnecting in the
+          // background for the entire run, even though the caller has already
+          // been told the connection failed and moved on (#33).
+          giveUp((err as Error).message);
           reject(err);
         });
 
         client.on("close", () => {
           isConnected = false;
-          log.info("disconnected");
+          log.debug("disconnected");
         });
 
         client.on("reconnect", () => {
           isConnected = false;
+          if (++reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+            giveUp(`${MAX_RECONNECT_ATTEMPTS} reconnect attempts failed`);
+          }
         });
       });
     },

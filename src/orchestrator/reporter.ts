@@ -3,13 +3,46 @@ import fs from "fs";
 import path from "path";
 import type { RunResult, AgentResult, WorkspaceResult } from "./types.js";
 
+/**
+ * Changed lines (+/-) in a unified diff, ignoring headers and context.
+ *
+ * `"".split("\n")` is `[""]`, i.e. length 1 — which is why an empty diff used to
+ * report "1 line changed" for every single agent (#29).
+ */
+export function countDiffLines(diff: string): number {
+  if (!diff.trim()) return 0;
+  let changed = 0;
+  for (const line of diff.split("\n")) {
+    const added = line.startsWith("+") && !line.startsWith("+++");
+    const removed = line.startsWith("-") && !line.startsWith("---");
+    if (added || removed) changed++;
+  }
+  return changed;
+}
+
+/**
+ * Under a subscription (OAuth) the SDK reports no per-call price. Zero cost
+ * alongside real token usage means "unknown", not "free" — printing $0.0000
+ * there is a lie the report tells about itself (#29).
+ */
+export function formatCost(costUsd: number | undefined, hasTokens: boolean): string {
+  if (hasTokens && (costUsd ?? 0) === 0) return "N/A";
+  return `$${(costUsd ?? 0).toFixed(4)}`;
+}
+
 export function collectAgentResults(workspace: WorkspaceResult): AgentResult[] {
   const results: AgentResult[] = [];
 
   for (const [agentId, wsPath] of workspace.paths) {
-    const diff = workspace.type === "worktree"
-      ? safeExec("git diff HEAD", wsPath)
-      : "";
+    // Agents commit their work, so `git diff HEAD` (uncommitted only) is empty by
+    // construction. Diff against the commit the worktree branched off instead —
+    // that covers committed AND uncommitted changes (#29).
+    const diffMeasured = workspace.type === "worktree";
+    const diff = !diffMeasured
+      ? ""
+      : workspace.baseSha
+        ? safeExec(`git diff ${workspace.baseSha}`, wsPath)
+        : safeExec("git diff HEAD", wsPath);
 
     const compilationOk = workspace.type !== "none"
       ? !safeExec("npx tsc --noEmit 2>&1", wsPath).includes("error")
@@ -20,6 +53,7 @@ export function collectAgentResults(workspace: WorkspaceResult): AgentResult[] {
       agent_name: agentId,
       exit_code: 0,
       diff,
+      diff_measured: diffMeasured,
       compilation_ok: compilationOk,
       stdout_length: 0,
     });
@@ -67,8 +101,8 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `\n### Agents\n\n`;
     md += `| Agent | Exit | Compilation | Diff (lignes) |\n|-------|------|-------------|---------------|\n`;
     for (const a of r.agent_results) {
-      const diffLines = a.diff.split("\n").length;
-      md += `| ${a.agent_name} | ${a.exit_code} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffLines} |\n`;
+      const diffCell = a.diff_measured === false ? "N/A" : countDiffLines(a.diff);
+      md += `| ${a.agent_name} | ${a.exit_code} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffCell} |\n`;
     }
 
     // Token + cost breakdown (populated from agent-loop runs)
@@ -82,7 +116,7 @@ export function writeReport(results: RunResult[], outputDir: string): string {
         const t = a.tokens!;
         const totalIn = t.input + t.cacheRead + t.cacheCreation;
         const hit = totalIn > 0 ? Math.round((t.cacheRead / totalIn) * 100) : 0;
-        md += `| ${a.agent_name} | ${a.turns_count ?? "-"} | $${(a.total_cost_usd ?? 0).toFixed(4)} | ${fmtTokens(t.input)} | ${fmtTokens(t.output)} | ${fmtTokens(t.cacheRead)} | ${fmtTokens(t.cacheCreation)} | ${hit}% |\n`;
+        md += `| ${a.agent_name} | ${a.turns_count ?? "-"} | ${formatCost(a.total_cost_usd, totalIn + t.output > 0)} | ${fmtTokens(t.input)} | ${fmtTokens(t.output)} | ${fmtTokens(t.cacheRead)} | ${fmtTokens(t.cacheCreation)} | ${hit}% |\n`;
         sumCost += a.total_cost_usd ?? 0;
         sumIn += t.input;
         sumOut += t.output;
@@ -91,7 +125,12 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       }
       const totalInAll = sumIn + sumCacheR + sumCacheW;
       const totalHit = totalInAll > 0 ? Math.round((sumCacheR / totalInAll) * 100) : 0;
-      md += `| **Total** | - | **$${sumCost.toFixed(4)}** | ${fmtTokens(sumIn)} | ${fmtTokens(sumOut)} | ${fmtTokens(sumCacheR)} | ${fmtTokens(sumCacheW)} | **${totalHit}%** |\n`;
+      const anyTokens = totalInAll + sumOut > 0;
+      md += `| **Total** | - | **${formatCost(sumCost, anyTokens)}** | ${fmtTokens(sumIn)} | ${fmtTokens(sumOut)} | ${fmtTokens(sumCacheR)} | ${fmtTokens(sumCacheW)} | **${totalHit}%** |\n`;
+
+      if (anyTokens && sumCost === 0) {
+        md += `\n> Coût **N/A** : sous abonnement (OAuth), l'API ne renvoie aucun prix par appel.\n> Les compteurs de tokens ci-dessus restent, eux, fiables.\n`;
+      }
 
       // Per-phase breakdown across all agents
       const phaseTotals: Record<string, number> = {};
@@ -104,7 +143,9 @@ export function writeReport(results: RunResult[], outputDir: string): string {
           modelTotals[m] = (modelTotals[m] || 0) + c;
         }
       }
-      if (Object.keys(phaseTotals).length > 0) {
+      // Skip the cost breakdowns entirely when no price is available (OAuth):
+      // a table of $0.0000 / 0.0% says nothing and reads as "these phases were free".
+      if (sumCost > 0 && Object.keys(phaseTotals).length > 0) {
         md += `\n**Coût par phase** (agents agrégés):\n\n`;
         md += `| Phase | Cost | % |\n|-------|------|---|\n`;
         const sortedPhases = Object.entries(phaseTotals).sort(([, a], [, b]) => b - a);
@@ -113,7 +154,7 @@ export function writeReport(results: RunResult[], outputDir: string): string {
           md += `| ${phase} | $${cost.toFixed(4)} | ${pct}% |\n`;
         }
       }
-      if (Object.keys(modelTotals).length > 0) {
+      if (sumCost > 0 && Object.keys(modelTotals).length > 0) {
         md += `\n**Coût par modèle** (agents agrégés):\n\n`;
         md += `| Modèle | Cost | % |\n|--------|------|---|\n`;
         const sortedModels = Object.entries(modelTotals).sort(([, a], [, b]) => b - a);

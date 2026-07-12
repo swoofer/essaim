@@ -115,9 +115,36 @@ export interface AgentLoopLogger {
 }
 
 const DEFAULT_MAX_TURNS = 50;
-const DONE_MARKER = "DONE:";
 const RESPONSE_WAIT_MS = 30_000;
 const APPROVAL_WAIT_MS = 20_000;
+
+// The DONE marker is how an agent tells the loop it has finished. Detection has
+// to tolerate how an LLM actually types it, not how the prompt spells it:
+// essaim's prompts are all in French, and French typography puts a space before
+// a colon ("DONE : résumé", often a non-breaking one). Models also emphasise the
+// marker in markdown. A literal `includes("DONE:")` misses every one of those —
+// the agent has delivered, nobody hears it say so, and the loop spins to its
+// maxTurns cap before exiting non-zero (#31).
+const DONE_PATTERN = /\bDONE\b[ \t  ]*[*_`]*[ \t  ]*:/i;
+
+export function hasDoneMarker(content: string): boolean {
+  return DONE_PATTERN.test(content);
+}
+
+/**
+ * Text after the marker. The LAST marker wins: an agent routinely echoes its
+ * instruction ("je terminerai par DONE: <résumé>") before doing the work, and
+ * the first match would capture the echo instead of the real summary.
+ */
+export function extractDoneSummary(content: string, fallback: string): string {
+  const scan = new RegExp(DONE_PATTERN.source, "gi");
+  let last: RegExpExecArray | null = null;
+  for (let m = scan.exec(content); m !== null; m = scan.exec(content)) {
+    last = m;
+  }
+  if (!last) return fallback;
+  return content.slice(last.index + last[0].length).replace(/^[*_`\s]+/, "").trim() || fallback;
+}
 
 // Interrupt types that are handled silently (state update only, no LLM call)
 const SILENT_INTERRUPT_TYPES: Set<InterruptType> = new Set([
@@ -763,8 +790,8 @@ export async function runAgentLoop(
                 }
               }
 
-              if (resp.content.includes(DONE_MARKER)) {
-                summary = resp.content.split(DONE_MARKER)[1]?.trim() || "Phase complete";
+              if (hasDoneMarker(resp.content)) {
+                summary = extractDoneSummary(resp.content, "Phase complete");
               }
             } else if (phase.name === "review") {
               // Fetch existing threads for comparison
@@ -812,8 +839,8 @@ export async function runAgentLoop(
               const otherBlocked = disallowedForMode(phase.toolsMode);
               logger.info(`Phase ${phase.name}: effort=${otherProfile.level} (model=${otherProfile.model}, thinking=${otherProfile.thinking}, maxTurns=${otherProfile.maxTurns}, tools=${otherTools?.length ?? "all"}, blocked=${otherBlocked.length})`);
               const resp = await send(phase.prompt, { model: otherProfile.model, thinking: otherProfile.thinking, maxTurns: otherProfile.maxTurns, allowedTools: otherTools, disallowedTools: otherBlocked });
-              if (resp.content.includes(DONE_MARKER)) {
-                summary = resp.content.split(DONE_MARKER)[1]?.trim() || "Phase complete";
+              if (hasDoneMarker(resp.content)) {
+                summary = extractDoneSummary(resp.content, "Phase complete");
               }
             }
           } else {
@@ -948,8 +975,8 @@ export async function runAgentLoop(
                 // Re-execute the same task (it was claimed but not completed)
                 const retryResp = await send(taskPrompt, { model: execProfile.model, thinking: execProfile.thinking, maxTurns: execProfile.maxTurns, allowedTools: execTools, disallowedTools: execBlocked, freshSession: freshExec });
                 if (!retryResp.rateLimited) {
-                  if (retryResp.content.includes(DONE_MARKER)) {
-                    const taskSummary = retryResp.content.split(DONE_MARKER)[1]?.trim() || "Done";
+                  if (hasDoneMarker(retryResp.content)) {
+                    const taskSummary = extractDoneSummary(retryResp.content, "Done");
                     logger.info(`Work-stealing: completed after retry — "${taskSummary.slice(0, 80)}"`);
                     await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
                     tasksDone++;
@@ -970,8 +997,8 @@ export async function runAgentLoop(
               // "summary" and marked complete anyway — which resolved threads
               // with partial/unrelated content (e.g. "Je vais explorer..."),
               // blocking the real work from ever happening.
-              if (resp.content.includes(DONE_MARKER)) {
-                const taskSummary = resp.content.split(DONE_MARKER)[1]?.trim() || "Done";
+              if (hasDoneMarker(resp.content)) {
+                const taskSummary = extractDoneSummary(resp.content, "Done");
                 logger.info(`Work-stealing: completed — "${taskSummary.slice(0, 80)}"`);
                 await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
                 tasksDone++;
@@ -1010,8 +1037,8 @@ export async function runAgentLoop(
         // ③ WORK LOOP — send initial prompt, then iterate
         logger.info(`Phase 3: work loop (protocol.phase=${protocol.phase})`);
         const initialResp = await send(config.prompt);
-        if (initialResp.content.includes(DONE_MARKER)) {
-          summary = initialResp.content.split(DONE_MARKER)[1]?.trim() || "Complete";
+        if (hasDoneMarker(initialResp.content)) {
+          summary = extractDoneSummary(initialResp.content, "Complete");
           exitReason = "done";
         } else {
           // Iterate: drain MQTT, ask for next action
@@ -1032,8 +1059,8 @@ export async function runAgentLoop(
 
             const resp = await send("Continue. Prochaine action?");
 
-            if (resp.content.includes(DONE_MARKER)) {
-              summary = resp.content.split(DONE_MARKER)[1]?.trim() || "Complete";
+            if (hasDoneMarker(resp.content)) {
+              summary = extractDoneSummary(resp.content, "Complete");
               exitReason = "done";
               break;
             }
