@@ -10,6 +10,15 @@ export interface Task {
   file?: string;
   line?: number;
   severity?: string;
+  // Summaries of work ALREADY resolved on the same file this run. The executing
+  // agent is blind to its peers otherwise — this is what lets it recognise its
+  // finding as a duplicate instead of committing a near-identical repro (#30).
+  relatedDone?: string[];
+}
+
+function threadFiles(thread: Record<string, unknown>): string[] {
+  const files = thread.target_files;
+  return Array.isArray(files) ? (files as string[]).filter((f) => typeof f === "string" && f) : [];
 }
 
 const DISCOVERY_MARKER = "DISCOVERY:";
@@ -126,10 +135,43 @@ export async function claimNextTask(
   const unclaimed = open.filter((t) => !t.claimed_by);
   log.debug(`claimNextTask: ${threads.length} active, ${open.length} open, ${unclaimed.length} unclaimed`);
 
+  // One agent per file (#30). Three hunters that each posted their own discovery
+  // for a single bug produce three threads on the same file; claiming is atomic
+  // per THREAD, so each hunter took one and all three wrote a near-identical
+  // repro test. Excluding files another agent is actively working makes the
+  // de-duplication structural instead of asking the LLM to notice — which is
+  // also, exactly, what the coordinator exists to do.
+  const busyFiles = new Set<string>();
+  for (const t of open) {
+    const owner = t.claimed_by as string | null | undefined;
+    if (owner && owner !== agentId) {
+      for (const f of threadFiles(t)) busyFiles.add(f);
+    }
+  }
+
+  // What has already LANDED on each file this run, so the executing agent can
+  // recognise a duplicate rather than re-committing it.
+  const doneByFile = new Map<string, string[]>();
+  for (const t of threads) {
+    if (t.status === "open") continue;
+    const subject = (t.subject as string) || "";
+    if (!subject) continue;
+    for (const f of threadFiles(t)) {
+      doneByFile.set(f, [...(doneByFile.get(f) ?? []), subject]);
+    }
+  }
+
   // Try to claim each open, unclaimed thread
   for (const thread of threads) {
     if (thread.status !== "open") continue;
     if (thread.claimed_by) continue;
+
+    const files = threadFiles(thread);
+    const conflict = files.find((f) => busyFiles.has(f));
+    if (conflict) {
+      log.info(`skipping thread=${thread.id} — ${conflict} is already being worked by another agent`);
+      continue;
+    }
     // Directed-dispatch: a thread with assigned_to set is only claimable by
     // that named agent. Skipping here avoids hitting claim-task just to get
     // a polite 'success: false, assigned_to: otherAgent'. For workers in a
@@ -147,11 +189,16 @@ export async function claimNextTask(
       });
       if ((result as Record<string, unknown>).success === true) {
         log.info(`claimed thread=${threadId}: ${subject.slice(0, 80)}`);
+        const relatedDone = files.flatMap((f) => doneByFile.get(f) ?? []);
+        if (relatedDone.length > 0) {
+          log.info(`thread=${threadId}: ${relatedDone.length} résolution(s) déjà livrée(s) sur ${files.join(", ")} — contexte injecté`);
+        }
         return {
           id: threadId,
           description: subject,
-          file: undefined,
+          file: files[0],
           severity: undefined,
+          relatedDone: relatedDone.length > 0 ? relatedDone : undefined,
         };
       }
       log.info(`claim race lost thread=${threadId} to ${(result as Record<string, unknown>).claimed_by as string}: ${subject.slice(0, 60)}`);
