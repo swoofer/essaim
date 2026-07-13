@@ -2,6 +2,7 @@
 
 import { createLogger } from "../logger.js";
 import { authHeaders } from "../coordinator-auth.js";
+import { currentRunId } from "../run-id.js";
 const log = createLogger("work-stealing");
 
 export interface Task {
@@ -94,6 +95,8 @@ export async function postDiscoveries(
         target_modules: [],
         target_files: task.file ? [task.file] : [],
         keep_open: true,
+        // Stamps the thread with this run so the NEXT run doesn't inherit it (#32).
+        run_id: currentRunId(),
       });
       task.id = (data.thread_id as string) || "";
       log.info(`posted thread=${task.id}: ${subject.slice(0, 80)}`);
@@ -121,7 +124,10 @@ export async function claimNextTask(
     const resp = await fetch(`${coordinatorUrl}/api/threads-active`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: "{}",
+      // Scope the pool to this run: the threads of an aborted earlier run must
+      // not be claimable here (#32). Un-scoped threads (a human session) stay
+      // visible — the coordinator's filter keeps them on purpose.
+      body: JSON.stringify({ run_id: currentRunId() }),
     });
     if (!resp.ok) { log.warn("claimNextTask: threads-active failed", { status: resp.status }); return null; }
     const data = await resp.json();
@@ -298,7 +304,9 @@ export async function fetchExistingThreads(coordinatorUrl: string): Promise<stri
     const resp = await fetch(`${coordinatorUrl}/api/threads-active`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: "{}",
+      // The review phase compares its findings against these threads. Feeding it
+      // a dead run's threads is how a lead ends up consulting a stale id (#32).
+      body: JSON.stringify({ run_id: currentRunId() }),
     });
     if (!resp.ok) return "(aucun thread actif)";
     const threads = (await resp.json()) as Array<Record<string, unknown>>;

@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { createLogger } from "../logger.js";
 import { authHeaders, mcpAuthHeaders } from "../coordinator-auth.js";
+import { ensureRunId } from "../run-id.js";
 import { startServer } from "mcp-coordinator";
 type ServerHandle = Awaited<ReturnType<typeof startServer>>;
 const log = createLogger("orchestrator");
@@ -136,7 +137,12 @@ async function _runProjectBody(
   const runDir = path.resolve("runs", `${project.id}-${mode}-${Date.now()}`);
   fs.mkdirSync(runDir, { recursive: true });
 
-  log.info(`=== ${project.name} (${mode}, ${project.agents.length} agents) ===`);
+  // Mint the run id BEFORE any agent starts, so every thread this swarm opens
+  // carries it and the next run doesn't inherit our leftovers (#32). Published
+  // to the environment, which in-process loops and `claude -p` children share.
+  const runId = ensureRunId(project.id);
+
+  log.info(`=== ${project.name} (${mode}, ${project.agents.length} agents, run=${runId}) ===`);
 
   // 0. Pre-flight quota check — abort the raid before we commit to worktrees
   // if the Anthropic quota is already above the configured max. Fail-open if
