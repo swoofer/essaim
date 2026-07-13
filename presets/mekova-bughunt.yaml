@@ -32,7 +32,23 @@ params:
       Pour la cause que tu as claimée : écris un test de reproduction qui
       ÉCHOUE, dans la suite de tests du projet, avec un commentaire
       « comportement attendu vs observé ». NE CORRIGE PAS le bug — le fix est
-      planifié ailleurs (flow RCA Mekova). Commite le test sur ta branche,
-      puis poste dans ton thread un résumé de cause racine en 3-5 lignes
+      planifié ailleurs (flow RCA Mekova).
+
+
+      Commite le test sur ta branche. Le message de commit DOIT se terminer par
+      une ligne seule :
+
+
+      `Essaim-Target: <chemin du fichier SOURCE fautif>`
+
+
+      (ex. `Essaim-Target: src/report.ts` — le fichier qui CONTIENT le bug, pas
+      ton fichier de test.) C'est la seule clé stable dont dispose l'outillage
+      aval pour reconnaître un finding déjà signalé : le titre de ton commit et
+      le nom de ton test, eux, varient d'un agent à l'autre pour un même bug.
+      Sans cette ligne, ton finding sera re-signalé en doublon à chaque exécution.
+
+
+      Puis poste dans ton thread un résumé de cause racine en 3-5 lignes
       (la cause, pas le symptôme) + hypothèses écartées (1 ligne chacune).
     effort: mid

@@ -241,6 +241,23 @@ describe('Parity: BCE presets produce complete prompts', () => {
     });
   });
 
+  // Le contrat de sortie appartient au PRESET, pas à l'appelant. Un consommateur
+  // aval (le runner nocturne, mais aussi n'importe quel autre) doit pouvoir
+  // reconnaître un finding déjà signalé. La clé ne peut pas être le titre du
+  // commit — le même bug est reformulé autrement d'un agent/d'une nuit à l'autre.
+  // Le seul signal stable est le FICHIER FAUTIF, d'où le trailer.
+  describe('Bughunt — contrat de sortie Essaim-Target', () => {
+    it('exige le trailer nommant le fichier source fautif', () => {
+      const prompt = buildPreset('mekova-bughunt').output.prompt;
+      expect(prompt).toContain('Essaim-Target:');
+    });
+
+    it('demande le fichier SOURCE fautif, pas le fichier de test', () => {
+      const prompt = buildPreset('mekova-bughunt').output.prompt;
+      expect(prompt).toMatch(/Essaim-Target[\s\S]{0,200}source/i);
+    });
+  });
+
   describe('Solo mode', () => {
     it('strips coordination from any preset', () => {
       const result = buildPreset('raid', { 'coordinator-rules': { solo_mode: true } });
