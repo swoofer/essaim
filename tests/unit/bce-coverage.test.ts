@@ -26,6 +26,7 @@ function makeBehavior(overrides: Partial<Behavior> & { name: string; sections: B
     params: {},
     hooks: {},
     mcp_tools: [],
+    side_car_files: {},
     ...overrides,
   };
 }
@@ -76,6 +77,7 @@ describe('writer.ts — writeOutput', () => {
     hooks: {},
     mcpTools: [],
     envVars: {},
+      sideCarFiles: {},
   };
 
   it('writes prompt, mcp json, and env file to target dir', () => {
@@ -231,6 +233,7 @@ describe('writer.ts — writeOutput', () => {
       hooks: {},
       mcpTools: circularObj as unknown as string[],
       envVars: {},
+      sideCarFiles: {},
     };
 
     expect(() => writeOutput(targetDir, output)).toThrow();

@@ -25,7 +25,7 @@ import { collectAgentResults } from "./reporter.js";
 import type { AgentConfig, MiniProject, AgentProcess, RunResult } from "./types.js";
 import { scanProject } from "./scanner.js";
 
-import { getCatalogRoot, getScriptsDir } from "../../cli/bce-resolver.js";
+import { getCatalogRoots, getScriptsDirs } from "../../cli/bce-resolver.js";
 import { runPipeline } from "@swoofer/promptweave";
 import { preflightQuotaCheck, resolveMaxUtilizationPct } from "./preflight.js";
 
@@ -62,10 +62,6 @@ async function postJson(url: string, body: unknown, timeoutMs = 5000): Promise<b
     log.warn(`POST ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
-}
-
-function readBceAsset(relativePath: string): string {
-  return readFileSync(resolve(getCatalogRoot(), relativePath), 'utf-8');
 }
 
 const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://localhost:3100";
@@ -507,7 +503,17 @@ export function writeClaudeHooksDir(params: {
   const writtenFiles: string[] = [];
   const writtenHookFiles: Record<string, string> = {};
   for (const [lifecycle, script] of Object.entries(hooks)) {
-    const resolvedScript = script.replace(/\$BCE_SCRIPTS_DIR/g, getScriptsDir());
+    // Un behavior d'un catalogue EXTERNE peut déclarer un hook `$BCE_SCRIPTS_DIR/x.sh`.
+    // Résoudre systématiquement vers le scripts/ bundlé pointerait sur un fichier
+    // absent — et Claude Code n'échoue PAS fort sur un hook manquant. On prend donc
+    // le premier dossier scripts/ qui contient réellement le script, en partant de
+    // la racine la plus locale.
+    const scriptDirs = getScriptsDirs();
+    const scriptsDir = [...scriptDirs].reverse().find((d) => {
+      const m = script.match(/\$BCE_SCRIPTS_DIR\/([\w.-]+)/);
+      return m ? fs.existsSync(path.join(d, m[1])) : false;
+    }) ?? scriptDirs[0] ?? "";
+    const resolvedScript = script.replace(/\$BCE_SCRIPTS_DIR/g, scriptsDir);
     const filename = `${lifecycle}.sh`;
     const hookPath = path.join(hooksDir, filename);
     fs.writeFileSync(hookPath, resolvedScript, { mode: 0o755 });
@@ -580,7 +586,7 @@ export function setupProject(projectPath: string, options: SetupOptions): void {
     remove: [] as string[],
     params: {} as Record<string, Record<string, unknown>>,
   };
-  const result = runPipeline(bceAgent, getCatalogRoot(), launchParams);
+  const result = runPipeline(bceAgent, getCatalogRoots(), launchParams);
 
   // 2. Merge BCE envVars with init-time values
   const envVars: Record<string, string> = {

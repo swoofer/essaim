@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { buildProject, listTemplates } from "../src/orchestrator/template-engine.js";
+import { getCatalogRoots } from "./bce-resolver.js";
 import { runProject } from "../src/orchestrator/orchestrator.js";
 import { writeReport } from "../src/orchestrator/reporter.js";
 import { loadConfig } from "./config.js";
@@ -25,6 +26,8 @@ export interface ExecuteRunOptions {
   coordinatorUrl?: string;
   baseRef?: string;
   maxQuotaPct?: number;
+  /** Catalogues externes (--catalog, répétable). */
+  catalogs?: string[];
 }
 
 /**
@@ -40,10 +43,18 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunResult | u
   // overrides) are recognized at pre-flight.
   const projectPath = resolve(opts.project);
 
-  const templates = listTemplates(projectPath);
+  const catalogs = opts.catalogs;
+  const templates = listTemplates(projectPath, { catalogs });
   if (!templates.find((t) => t.id === opts.template)) {
     const available = templates.map((t) => t.id).join(", ");
-    throw new Error(`Unknown template '${opts.template}'. Available: ${available}`);
+    // Lister les catalogues consultés : sans ça, un catalogue oublié (ou mal
+    // orthographié dans ESSAIM_CATALOG) ressort en « Unknown template » et on
+    // cherche le bug dans le template, jamais dans la résolution.
+    const roots = getCatalogRoots({ catalogs, projectPath }).join(", ");
+    throw new Error(
+      `Unknown template '${opts.template}'. Available: ${available}
+Catalogues consultés : ${roots}`,
+    );
   }
 
   const context = scanProject(projectPath);
@@ -81,7 +92,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunResult | u
   const project = buildProject(
     opts.template,
     context,
-    { agentCount, setParams },
+    { agentCount, setParams, catalogs },
     projectPath,
   );
 

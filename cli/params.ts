@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { parse } from "yaml";
-import { getBehaviorsDir } from "./bce-resolver.js";
+import { getBehaviorsDirs, type CatalogOptions } from "./bce-resolver.js";
 
 export function collect(val: string, prev: string[]): string[] {
   return prev.concat([val]);
@@ -10,17 +10,21 @@ export function collect(val: string, prev: string[]): string[] {
 export type ParamType = "string" | "number" | "boolean" | "string[]" | "unknown";
 
 /** Types déclarés du catalogue : clé "<behavior>.<param>" → type. */
-export function buildParamTypeMap(): Record<string, ParamType> {
+export function buildParamTypeMap(opts: CatalogOptions = {}): Record<string, ParamType> {
   const map: Record<string, ParamType> = {};
-  const dir = getBehaviorsDir();
-  for (const f of readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
-    const doc = parse(readFileSync(join(dir, f), "utf-8")) as {
-      name?: string;
-      params?: Record<string, { type?: string }>;
-    };
-    if (!doc?.name || !doc.params) continue;
-    for (const [p, def] of Object.entries(doc.params)) {
-      map[`${doc.name}.${p}`] = (def?.type as ParamType) ?? "unknown";
+  // Toutes les racines, pas seulement la bundlée : sinon le type déclaré d'un param
+  // d'un behavior EXTERNE est perdu, et `--set mon-behavior.projet=2026` passerait
+  // par JSON.parse — le slug "2026" deviendrait le NOMBRE 2026, sans un mot.
+  for (const dir of getBehaviorsDirs(opts)) {
+    for (const f of readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
+      const doc = parse(readFileSync(join(dir, f), "utf-8")) as {
+        name?: string;
+        params?: Record<string, { type?: string }>;
+      };
+      if (!doc?.name || !doc.params) continue;
+      for (const [p, def] of Object.entries(doc.params)) {
+        map[`${doc.name}.${p}`] = (def?.type as ParamType) ?? "unknown";
+      }
     }
   }
   return map;

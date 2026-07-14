@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, existsSync } from "fs";
 import { join, basename } from "path";
 import { parse } from "yaml";
-import { getTemplatesDir } from "../cli/bce-resolver.js";
+import { getTemplatesDirs, type CatalogOptions } from "../cli/bce-resolver.js";
 
 // Template definitions map template IDs to BCE presets + orchestration config.
 export interface TemplateDefinition {
@@ -96,9 +96,15 @@ function loadDir(dir: string, out: Record<string, TemplateDefinition>): void {
  * project's .essaim/templates/ — project entries override catalog ones.
  * No cache: called once per run, and tests need fresh reads.
  */
-export function loadTemplates(projectPath?: string): Record<string, TemplateDefinition> {
+export function loadTemplates(
+  projectPath?: string,
+  opts: CatalogOptions = {},
+): Record<string, TemplateDefinition> {
   const out: Record<string, TemplateDefinition> = {};
-  loadDir(getTemplatesDir(), out);
-  if (projectPath) loadDir(join(projectPath, ".essaim", "templates"), out);
+  // Precedence order — the last root wins, and `.essaim/templates/` of the target
+  // project is already the last root when projectPath is given.
+  for (const dir of getTemplatesDirs({ ...opts, projectPath })) {
+    loadDir(dir, out);
+  }
   return out;
 }
