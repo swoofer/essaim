@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.7.0](https://github.com/swoofer/essaim/compare/v0.6.0...v0.7.0) (2026-07-14)
+
+
+### Features
+
+* **bughunt:** contrat de sortie Essaim-Target — clé stable de dédup des findings ([#44](https://github.com/swoofer/essaim/issues/44)) ([4dc9df5](https://github.com/swoofer/essaim/commit/4dc9df5d61ce914d158c6d0e1500b8fad599d281))
+* **catalog:** catalogues externes — --catalog, ESSAIM_CATALOG, .essaim/ projet ([#45](https://github.com/swoofer/essaim/issues/45)) ([9f89cf9](https://github.com/swoofer/essaim/commit/9f89cf93e5992b3b72bf202bfce277bc66c85eaf))
+* **catalog:** safety behavior dir-output — writes confined to an allowlist of directories ([a60ff5d](https://github.com/swoofer/essaim/commit/a60ff5df25a730e470d11ea1aff5079d8440318e))
+* **catalog:** template mekova-decouverte — 4 angles transcript + synthétiseur (Phase 3a) ([c4d27af](https://github.com/swoofer/essaim/commit/c4d27afc818a42a87cb28307fb1e57f75250b8ff))
+* **catalog:** template mekova-prototype — scaffold-first + 1 worker par écran (Phase 3a) ([339a38e](https://github.com/swoofer/essaim/commit/339a38ed67d99aa7855f2fbb1ad54878e3ee8e4c))
+* **cli:** --set-file — param values read verbatim from files ([#35](https://github.com/swoofer/essaim/issues/35)) ([d89f07b](https://github.com/swoofer/essaim/commit/d89f07b4699796a6dda972de9ce639ef911f4862))
+* **pipeline:** essaim pipeline CLI command + docs ([#36](https://github.com/swoofer/essaim/issues/36)) ([93fe549](https://github.com/swoofer/essaim/commit/93fe5490b9cc8dac07a395634e87586678181859))
+* **pipeline:** schema loader + sequential runner ([#36](https://github.com/swoofer/essaim/issues/36)) ([fc19d01](https://github.com/swoofer/essaim/commit/fc19d01d0a7f6e834d9724c695391266a83bdceb))
+* **work-stealing:** estampille le run_id — le pool ne voit plus les runs morts ([#32](https://github.com/swoofer/essaim/issues/32)) ([#43](https://github.com/swoofer/essaim/issues/43)) ([b47acfb](https://github.com/swoofer/essaim/commit/b47acfb8f10cffa0e52f09b31f83b5965dea438b))
+
+
+### Bug Fixes
+
+* **catalog:** discovery-synth — consigne explicite de graphie sans accents des titres du squelette (le LLM accentuait « Problème », finding pilote 3a [#4](https://github.com/swoofer/essaim/issues/4)) ([afab644](https://github.com/swoofer/essaim/commit/afab6446ad7386dc100f23013452595504fab86c))
+* **catalog:** restore fail-fast on discovery params — smoke test provides per-template setParams instead of weakening required ([3cf9b9a](https://github.com/swoofer/essaim/commit/3cf9b9accc27f7330c117ede5cb2245833e2b62e))
+* **cli:** --set coerces per declared catalog type — string params keep numeric-looking values ([#28](https://github.com/swoofer/essaim/issues/28)) ([0d8237f](https://github.com/swoofer/essaim/commit/0d8237f73e4b913ed0442bcac31e68fd692ab4c6))
+* **coordination:** gate sequential pipelines on artifacts, not thread status ([#38](https://github.com/swoofer/essaim/issues/38)) ([#39](https://github.com/swoofer/essaim/issues/39)) ([eb8660a](https://github.com/swoofer/essaim/commit/eb8660ad3afce5a8703e7e05e741d07417b1a68f))
+* **pilote:** 4 bugs du backlog — auth métriques, marqueur DONE, allowlist solo, boucle MQTT ([#40](https://github.com/swoofer/essaim/issues/40)) ([80d7038](https://github.com/swoofer/essaim/commit/80d7038a3e6a56f9649cb38badfe2b4f68325823))
+* **work-stealing:** un seul agent par fichier — dédup structurelle des findings ([#30](https://github.com/swoofer/essaim/issues/30)) ([#41](https://github.com/swoofer/essaim/issues/41)) ([a5973f8](https://github.com/swoofer/essaim/commit/a5973f879761fbce7bb64db9a7d3974b0499ad16))
+
+
+### Code Refactoring
+
+* **run:** extract executeRun into run-core for reuse ([73c662f](https://github.com/swoofer/essaim/commit/73c662faa70d52253635f7089d7d8fe03ee078c1))
+
 ## [0.6.0](https://github.com/swoofer/essaim/compare/v0.5.0...v0.6.0) (2026-07-11)
 
 
