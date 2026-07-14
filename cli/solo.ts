@@ -41,6 +41,7 @@ export function createSoloCommand(): Command {
     .argument("[template]", "Template to use (raid, melee, swarm, ...)")
     .option("-p, --project <path>", "Target project path", ".")
     .option("-t, --timeout <min>", "Timeout in minutes", "15")
+        .option("--catalog <path>", "Catalogue externe (behaviors/presets/compositions/templates) — répétable, le dernier gagne", collect, [])
     .option("--set <key=value>", "BCE parameter (repeatable)", collect, [])
     .option("--set-file <behavior.param>=<path>", "BCE parameter, value read verbatim from a file (repeatable, wins over --set on conflict)", collect, [])
     .option(
@@ -56,6 +57,7 @@ export function createSoloCommand(): Command {
           set: string[];
           setFile: string[];
           coordinatorUrl?: string;
+          catalog: string[];
         },
       ) => {
         // Resolve projectPath before listing/validating templates so that
@@ -64,7 +66,7 @@ export function createSoloCommand(): Command {
         const projectPath = resolve(opts.project);
 
         // List templates if none specified
-        const templates = listTemplates(projectPath);
+        const templates = listTemplates(projectPath, { catalogs: opts.catalog });
         if (!template) {
           console.log("\nAvailable templates:\n");
           for (const t of templates) {
@@ -87,12 +89,12 @@ export function createSoloCommand(): Command {
         const context = scanProject(projectPath);
 
         // Build prompt with solo_mode=true injected automatically
-        const setParams = parseSetParams(opts.set, buildParamTypeMap());
+        const setParams = parseSetParams(opts.set, buildParamTypeMap({ catalogs: opts.catalog, projectPath }));
         const setFileParams = parseSetFileParams(opts.setFile);
         for (const [behavior, values] of Object.entries(setFileParams)) {
           setParams[behavior] = { ...setParams[behavior], ...values };
         }
-        const { prompt, mcpTools } = buildSolo(template, context, setParams, projectPath);
+        const { prompt, mcpTools } = buildSolo(template, context, setParams, projectPath, opts.catalog);
 
         const mcpConfigPath = resolve(projectPath, ".mcp.json");
         const args = buildSoloArgs(

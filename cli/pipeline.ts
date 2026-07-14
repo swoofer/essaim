@@ -85,6 +85,7 @@ export function createPipelineCommand(): Command {
               coordinatorUrl: sh.coordinatorUrl,
               maxQuotaPct: sh.maxQuotaPct,
               dryRun: sh.dryRun,
+              catalogs: def.catalog,
             });
           },
           execHook: (cmd, cwd) => {

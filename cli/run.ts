@@ -14,6 +14,7 @@ export function createRunCommand(): Command {
     .option("--cleanup", "Remove worktrees after execution")
     .option("--dry-run", "Preview agents and prompts without launching")
     .option("--modules <list>", "Comma-separated module list, overrides scanner discovery. Required for templates using count: 'per-module' when the project layout doesn't match the scanner's expectations.")
+        .option("--catalog <path>", "Catalogue externe (behaviors/presets/compositions/templates) — répétable, le dernier gagne", collect, [])
     .option("--set <key=value>", "BCE parameter (repeatable)", collect, [])
     .option("--set-file <behavior.param>=<path>", "BCE parameter, value read verbatim from a file (repeatable, wins over --set on conflict)", collect, [])
     .option("--url <url>", "Coordinator URL (override config, deprecated: use --coordinator-url)")
@@ -39,13 +40,14 @@ export function createRunCommand(): Command {
           coordinatorUrl?: string;
           baseRef?: string;
           maxQuotaPct?: string;
+          catalog: string[];
         },
       ) => {
         // List templates if none specified. Resolve projectPath first so that
         // project-local .essaim/templates/ entries are recognized at pre-flight.
         if (!template) {
           const projectPath = resolve(opts.project);
-          const templates = listTemplates(projectPath);
+          const templates = listTemplates(projectPath, { catalogs: opts.catalog });
           console.log("\nAvailable templates:\n");
           for (const t of templates) {
             console.log(`  ${t.id.padEnd(14)} ${t.name}`);
@@ -56,7 +58,7 @@ export function createRunCommand(): Command {
         }
 
         // Merge --set + --set-file (set-file wins on conflict).
-        const setParams = parseSetParams(opts.set, buildParamTypeMap());
+        const setParams = parseSetParams(opts.set, buildParamTypeMap({ catalogs: opts.catalog, projectPath: resolve(opts.project) }));
         const setFileParams = parseSetFileParams(opts.setFile);
         for (const [behavior, values] of Object.entries(setFileParams)) {
           setParams[behavior] = { ...setParams[behavior], ...values };
@@ -83,6 +85,7 @@ export function createRunCommand(): Command {
             coordinatorUrl: opts.coordinatorUrl ?? opts.url,
             baseRef: opts.baseRef,
             maxQuotaPct: opts.maxQuotaPct ? Number(opts.maxQuotaPct) : undefined,
+            catalogs: opts.catalog,
           });
         } catch (e) {
           console.error(e instanceof Error ? e.message : String(e));

@@ -38,7 +38,7 @@ interface BceMiniProject {
   compare_mode: boolean;
 }
 
-import { getCatalogRoot } from "../cli/bce-resolver.js";
+import { getCatalogRoots, type CatalogOptions } from "../cli/bce-resolver.js";
 import { loadTemplates } from "./template-loader.js";
 
 const AGENT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
@@ -46,10 +46,11 @@ const AGENT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
 export function buildProjectFromBce(
   templateId: string,
   context: { path: string; language: string; test_command: string; modules: string[]; source_files: string[] },
-  options?: { agentCount?: number; setParams?: Record<string, Record<string, unknown>> },
+  options?: { agentCount?: number; setParams?: Record<string, Record<string, unknown>>; catalogs?: string[] },
   projectPath?: string,
 ): BceMiniProject {
-  const templates = loadTemplates(projectPath);
+  const catalogOpts: CatalogOptions = { catalogs: options?.catalogs, projectPath };
+  const templates = loadTemplates(projectPath, catalogOpts);
   const def = templates[templateId];
   if (!def) {
     const available = Object.keys(templates).join(', ');
@@ -129,7 +130,7 @@ export function buildProjectFromBce(
         remove: [],
         params: {},
       };
-      const result = runPipeline(agent, getCatalogRoot(), launchParams);
+      const result = runPipeline(agent, getCatalogRoots(catalogOpts), launchParams);
 
       // Modules registered with the coordinator for respondent matching.
       // Default = full project list (broad collaboration: every agent is a
@@ -170,8 +171,8 @@ export function buildProjectFromBce(
   };
 }
 
-export function listBceTemplates(projectPath?: string): { id: string; name: string; description: string }[] {
-  return Object.entries(loadTemplates(projectPath)).map(([id, def]) => ({
+export function listBceTemplates(projectPath?: string, opts?: CatalogOptions): { id: string; name: string; description: string }[] {
+  return Object.entries(loadTemplates(projectPath, { ...opts, projectPath })).map(([id, def]) => ({
     id, name: def.name, description: def.description,
   }));
 }
@@ -188,8 +189,11 @@ export function buildSolo(
   context: { language: string; test_command: string; modules: string[] },
   setParams?: Record<string, Record<string, unknown>>,
   projectPath?: string,
+  catalogs?: string[],
 ): { prompt: string; mcpTools: string[] } {
-  const templates = loadTemplates(projectPath);
+  // catalogs en DERNIER argument, jamais réordonné : c'est de la surface publique.
+  const catalogOpts: CatalogOptions = { catalogs, projectPath };
+  const templates = loadTemplates(projectPath, catalogOpts);
   const def = templates[templateId];
   if (!def) {
     const available = Object.keys(templates).join(", ");
@@ -217,7 +221,7 @@ export function buildSolo(
     remove: [] as string[],
     params: {} as Record<string, Record<string, unknown>>,
   };
-  const result = runPipeline(agent, getCatalogRoot(), launchParams);
+  const result = runPipeline(agent, getCatalogRoots(catalogOpts), launchParams);
   return { prompt: result.output.prompt, mcpTools: result.output.mcpTools };
 }
 
@@ -227,7 +231,8 @@ export function buildSoloPrompt(
   context: { language: string; test_command: string; modules: string[] },
   setParams?: Record<string, Record<string, unknown>>,
   projectPath?: string,
+  catalogs?: string[],
 ): string {
-  return buildSolo(templateId, context, setParams, projectPath).prompt;
+  return buildSolo(templateId, context, setParams, projectPath, catalogs).prompt;
 }
 

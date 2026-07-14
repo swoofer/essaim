@@ -22,9 +22,16 @@ export interface PipelineStep {
 export interface PipelineDef {
   name: string;
   steps: PipelineStep[];
+  /**
+   * Catalogues externes appliqués à TOUS les steps (chemins relatifs au fichier
+   * pipeline). Sans ça, un pipeline dont les templates vivent hors du catalogue
+   * bundlé dépendrait d'une variable d'environnement — et un `catalog:` écrit dans
+   * le YAML serait silencieusement jeté en « unknown key (ignored) ».
+   */
+  catalog?: string[];
 }
 
-const KNOWN_TOP_KEYS = new Set(["name", "steps"]);
+const KNOWN_TOP_KEYS = new Set(["name", "steps", "catalog"]);
 const KNOWN_STEP_KEYS = new Set([
   "name",
   "template",
@@ -69,7 +76,19 @@ export function loadPipeline(filePath: string): PipelineDef {
     parseStep(s, i, baseDir),
   );
 
-  return { name: doc.name, steps };
+  // Chemins relatifs au FICHIER pipeline, pas au cwd : un pipeline doit rester
+  // lançable depuis n'importe où.
+  const rawCatalog = (doc as Record<string, unknown>).catalog;
+  const catalog = rawCatalog === undefined
+    ? undefined
+    : (Array.isArray(rawCatalog) ? rawCatalog : [rawCatalog]).map((c) => {
+        if (typeof c !== "string" || !c.trim()) {
+          throw new Error(`'catalog' must be a path (or a list of paths)`);
+        }
+        return resolve(baseDir, c);
+      });
+
+  return { name: doc.name, steps, catalog };
 }
 
 function parseStep(raw: unknown, index: number, baseDir: string): PipelineStep {
