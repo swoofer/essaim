@@ -92,10 +92,13 @@ export function launchAgent(
  * Derive the MQTT WebSocket URL from the coordinator HTTP URL.
  * http://localhost:3100 → ws://localhost:3100/mqtt
  */
-function mqttWsUrl(coordinatorUrl: string): string {
+export function mqttWsUrl(coordinatorUrl: string): string {
   const u = new URL(coordinatorUrl);
   const protocol = u.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${u.host}/mqtt`;
+  // Preserve any path prefix (coordinator served under a sub-path behind an
+  // ingress); strip a trailing slash so we don't emit `//mqtt`.
+  const base = u.pathname.replace(/\/+$/, "");
+  return `${protocol}//${u.host}${base}/mqtt`;
 }
 
 /**
