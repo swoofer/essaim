@@ -13,9 +13,9 @@ export interface ScanResult {
 }
 
 /** Register the v1 engines (Strix). Widen here as engines ship. */
-export function createDefaultRegistry(deps: { runId: string; envFile?: string }): AdapterRegistry {
+export function createDefaultRegistry(deps: { runId: string; secrets?: Record<string, string> }): AdapterRegistry {
   const reg = createRegistry();
-  reg.register(createStrixAdapter({ runId: deps.runId, envFile: deps.envFile }));
+  reg.register(createStrixAdapter({ runId: deps.runId, secrets: deps.secrets }));
   return reg;
 }
 

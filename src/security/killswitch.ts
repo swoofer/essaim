@@ -12,7 +12,15 @@ export function isHaltRequested(projectPath: string): boolean {
   return existsSync(join(projectPath, "reports", "security", "STOP"));
 }
 
-/** Kill any container still named essaim-security-<runId>. Returns how many were killed. */
+/**
+ * Kill any container still named essaim-security-<runId>. Returns how many were killed.
+ *
+ * NOTE: this targets the OLD `essaim-security-<runId>` naming from the removed `docker run` model.
+ * Strix now creates + owns its sandbox container internally (via the Docker SDK), so essaim has no
+ * handle to it — this sweep is a best-effort legacy backstop and does NOT target Strix-managed
+ * sandbox containers. Real label-based cleanup for Strix sandboxes is pending live validation (see
+ * docs/superpowers/specs/2026-07-23-strix-adapter-real-invocation-design.md §7).
+ */
 export async function sweepOrphanContainers(runId: string, opts: { spawnFn?: SpawnFn } = {}): Promise<number> {
   const filter = `name=essaim-security-${runId}`;
   const ps = await spawnCaptured("docker", ["ps", "-q", "--filter", filter], { spawnFn: opts.spawnFn }).catch(() => ({
