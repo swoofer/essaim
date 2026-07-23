@@ -20,7 +20,7 @@ const __dirname = path.dirname(__filename);
 import { createWorkspaces, cleanupWorkspaces, resetBase } from "./workspace.js";
 import { launchAgent, launchAgentLoop, waitForProcess, randomDelay, fixedDelay } from "./agent-launcher.js";
 import type { AgentLoopResult } from "../agent-loop/agent-loop.js";
-import { fetchCoordinatorMetrics } from "./metrics.js";
+import { fetchCoordinatorMetrics, fetchLatestEventId } from "./metrics.js";
 import { collectAgentResults } from "./reporter.js";
 import type { AgentConfig, MiniProject, AgentProcess, RunResult } from "./types.js";
 import { scanProject } from "./scanner.js";
@@ -66,6 +66,15 @@ async function postJson(url: string, body: unknown, timeoutMs = 5000): Promise<b
 
 const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://localhost:3100";
 const DEFAULT_BASE = process.cwd(); // default to current working directory
+
+// On a run-level timeout, agent-loop promises are raced against the deadline
+// (see the "Wait for all agents" section) — the race settles the instant the
+// deadline fires, but the underlying agent-loop is still mid-abort (SIGKILLing
+// its claude children, posting a final coordinator update). This is the
+// bounded window given to let that teardown actually drain before the
+// coordinator gets stopped out from under it (#112). Deliberately small: this
+// only fires on the timeout path, where the run has already blown its budget.
+const AGENT_DRAIN_GRACE_MS = 5000;
 
 export interface RunProjectOptions {
   /** Override max quota utilization % for the pre-flight check. */
@@ -162,6 +171,18 @@ async function _runProjectBody(
   // Agents reuse the same ceiling so their in-raid check matches the pre-flight.
   const agentLoopMaxQuotaPct = mode === "with_coordinator" ? maxQuotaPct : undefined;
 
+  // Capture the coordinator's current max event id as a baseline BEFORE any
+  // agent starts (#108). fetchCoordinatorMetrics below cursors its SSE replay
+  // off this id instead of reading the coordinator's entire event history —
+  // see the comment on fetchCoordinatorMetrics for the isolation caveat
+  // (this scopes SEQUENTIAL runs on a shared coordinator; concurrent runs
+  // still interleave event ids and need coordinator-side run_id filtering).
+  let coordinatorEventBaseline = 0;
+  if (mode === "with_coordinator") {
+    coordinatorEventBaseline = await fetchLatestEventId(effectiveCoordinatorUrl);
+    log.info(`Coordinator events baseline for run ${runId}: id ${coordinatorEventBaseline}`);
+  }
+
   // 1. Reset coordinator state — only when reusing an external coordinator.
   // For in-process spawns the DB is empty; calling reset there races with
   // the orchestrator's own pre-register step (curl --max-time 2 gives up,
@@ -247,9 +268,11 @@ async function _runProjectBody(
   // Group agents by launch_delay if any agent uses it, otherwise use stagger
   const hasLaunchDelays = project.agents.some(a => a.launch_delay !== undefined);
 
-  // Pre-register all agents via REST (don't rely on LLMs to register correctly)
+  // Pre-register all agents via REST (don't rely on LLMs to register correctly).
+  // Ids that fail here are tracked so the launch loops below can skip them
+  // instead of launching an agent that can never announce_work (#107).
+  const registeredAgentIds = new Set<string>();
   if (isCoordinated) {
-    let registered = 0;
     for (const agent of project.agents) {
       // Use the agent's declared modules so consultation.ts can match it as a
       // respondent. With `[]` here, target_modules.some()/agentModules.some()
@@ -262,13 +285,23 @@ async function _runProjectBody(
         name: agent.name,
         modules,
       })) {
-        registered++;
+        registeredAgentIds.add(agent.id);
       }
     }
-    log.info(`Pre-registered ${registered}/${project.agents.length} agents`);
-    if (registered < project.agents.length) {
-      log.error(`Pre-registration incomplete (${registered}/${project.agents.length}); /api/announce will fail with FK violations.`);
+    log.info(`Pre-registered ${registeredAgentIds.size}/${project.agents.length} agents`);
+    if (registeredAgentIds.size < project.agents.length) {
+      log.error(`Pre-registration incomplete (${registeredAgentIds.size}/${project.agents.length}); skipping the unregistered agents rather than letting /api/announce fail with FK violations.`);
     }
+  }
+
+  // An agent that failed pre-registration must never be launched: every
+  // coordinator call it makes (announce_work first) would fail immediately —
+  // previously this was only logged, and the agent was launched anyway (#107).
+  function isLaunchable(agent: typeof project.agents[0]): boolean {
+    if (!isCoordinated) return true;
+    if (registeredAgentIds.has(agent.id)) return true;
+    log.error(`Skipping ${agent.name} (${agent.id}): failed to pre-register with the coordinator.`);
+    return false;
   }
 
   function setupAndLaunch(agent: typeof project.agents[0]): ChildProcess | null {
@@ -329,6 +362,7 @@ async function _runProjectBody(
       }
       elapsed = delayTarget;
       for (const agent of groups.get(delayTarget)!) {
+        if (!isLaunchable(agent)) continue;
         setupAndLaunch(agent);
       }
     }
@@ -336,6 +370,7 @@ async function _runProjectBody(
     // Standard stagger-based launching
     for (let i = 0; i < project.agents.length; i++) {
       const agent = project.agents[i];
+      if (!isLaunchable(agent)) continue;
       const proc = setupAndLaunch(agent);
 
       // Stagger
@@ -366,32 +401,70 @@ async function _runProjectBody(
 
   let processResults: Array<{ stdout: string; stderr: string; code: number }>;
   const agentLoopResults = new Map<string, AgentLoopResult>();
+  // Keyed by agent id rather than launch order: #107 can skip agents that
+  // failed pre-registration, so the collections below may hold fewer entries
+  // than project.agents — indexing by position would silently misattribute
+  // one agent's exit code/stdout to a different agent.
+  const processResultsById = new Map<string, { stdout: string; stderr: string; code: number }>();
 
   if (useAgentLoop) {
     // Agent-loop mode: await all promises, race against timeout
     const entries = [...agentLoopPromises.entries()];
+    const originalPromises = entries.map(([, p]) => p);
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutReject = () => reject(new Error("TIMEOUT"));
     });
-    const racePromises = entries.map(([, p]) => Promise.race([p, timeoutPromise]));
+    const racePromises = originalPromises.map((p) => Promise.race([p, timeoutPromise]));
     const results = await Promise.allSettled(racePromises);
-    processResults = results.map((r, i) => {
+    results.forEach((r, i) => {
+      const agentId = entries[i][0];
       if (r.status === "fulfilled") {
-        agentLoopResults.set(entries[i][0], r.value);
-        return { stdout: r.value.summary, stderr: "", code: r.value.exitReason === "done" ? 0 : 1 };
+        agentLoopResults.set(agentId, r.value);
+        processResultsById.set(agentId, { stdout: r.value.summary, stderr: "", code: r.value.exitReason === "done" ? 0 : 1 });
+      } else {
+        processResultsById.set(agentId, { stdout: "", stderr: (r.reason as Error).message, code: 1 });
       }
-      return { stdout: "", stderr: (r.reason as Error).message, code: 1 };
     });
+
+    // #112 — the race above settles the instant EITHER the agent-loop finishes
+    // OR the timeout fires. On timeout, `originalPromises` are still mid-abort
+    // (SIGKILLing claude children, posting a final coordinator update) and were
+    // never themselves awaited or cancelled — the caller's `finally` used to
+    // call coordinatorHandle.stop() right after this, cutting them off
+    // mid-flight. Give them a bounded grace window to drain first. This is a
+    // no-op on a normal (non-timeout) completion: every `p` is already settled
+    // by the time we get here, so allSettled resolves immediately.
+    // Use a cancelable timer so the grace window doesn't keep the event loop
+    // alive after the drain wins the race (the common case): an uncleared
+    // setTimeout would leave a ref'd Node timer dangling for up to the full
+    // grace on every run.
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const gracePromise = new Promise<void>((resolve) => {
+      graceTimer = setTimeout(resolve, AGENT_DRAIN_GRACE_MS);
+    });
+    try {
+      await Promise.race([
+        Promise.allSettled(originalPromises.map((p) => p.catch(() => {}))),
+        gracePromise,
+      ]);
+    } finally {
+      if (graceTimer) clearTimeout(graceTimer);
+    }
   } else {
     // Legacy mode: wait for child processes
-    processResults = await Promise.all(
+    const legacyResults = await Promise.all(
       agentProcesses.map((ap) => {
         const seqResult = sequentialResults.get(ap.config.id);
         if (seqResult) return Promise.resolve(seqResult);
         return waitForProcess(ap.process);
       })
     );
+    agentProcesses.forEach((ap, i) => processResultsById.set(ap.config.id, legacyResults[i]));
   }
+
+  processResults = project.agents.map((agent) =>
+    processResultsById.get(agent.id) ?? { stdout: "", stderr: "Skipped: failed coordinator pre-registration", code: 1 }
+  );
 
   clearTimeout(timeoutTimer);
   if (duringRunProcess) duringRunProcess.kill();
@@ -401,7 +474,7 @@ async function _runProjectBody(
 
   // 6. Collect metrics
   const coordinatorMetrics = isCoordinated
-    ? await fetchCoordinatorMetrics(effectiveCoordinatorUrl)
+    ? await fetchCoordinatorMetrics(effectiveCoordinatorUrl, coordinatorEventBaseline)
     : {
         agents_count: project.agents.length,
         duration_total_ms: duration,
