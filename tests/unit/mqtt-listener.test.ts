@@ -294,5 +294,87 @@ describe("MqttListener", () => {
       expect(msgs[0].raw).toEqual(payload);
     });
   });
+
+  // Regression — QoS 0 + clean:true + a fresh clientId per connect means no
+  // broker session survives a disconnect, so anything published while this
+  // client was offline was lost with no redelivery. A catch-up fetch of
+  // currently open consultations on (re)connect recovers what was missed.
+  describe("catch-up on connect", () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    async function connectWithCatchUp(fetchMock: ReturnType<typeof vi.fn>) {
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const listener = createMqttListener({ ...OPTIONS, coordinatorUrl: "http://coordinator.local" });
+      const connectPromise = listener.connect();
+      mockClient.emit("connect");
+      await connectPromise;
+      // Let the fire-and-forget catch-up fetch resolve.
+      await new Promise((r) => setTimeout(r, 0));
+      return listener;
+    }
+
+    it("processes a missed open consultation exactly once on connect", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [
+          { id: "t-100", status: "open", subject: "Missed while offline", agent_id: "agent-2" },
+          { id: "t-101", status: "resolved", subject: "Already done", agent_id: "agent-2" },
+        ],
+      });
+
+      const listener = await connectWithCatchUp(fetchMock);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://coordinator.local/api/threads-active",
+        expect.objectContaining({ method: "POST" }),
+      );
+      const msgs = listener.drain();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("consultation_new");
+      expect(msgs[0].threadId).toBe("t-100");
+      expect(msgs[0].subject).toBe("Missed while offline");
+    });
+
+    it("does not reprocess a consultation already seen via a live message", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [{ id: "t-1", status: "open", subject: "Auth redesign", agent_id: "agent-2" }],
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const listener = createMqttListener({ ...OPTIONS, coordinatorUrl: "http://coordinator.local" });
+      const connectPromise = listener.connect();
+      mockClient.emit("connect");
+      await connectPromise;
+
+      // The live message arrives (and is queued) before the catch-up fetch resolves.
+      simulateMessage("coordinator/consultations/new", {
+        agent_id: "agent-2",
+        thread_id: "t-1",
+        subject: "Auth redesign",
+      });
+      expect(listener.peek()).toBe(1);
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Catch-up must not queue a duplicate for t-1.
+      expect(listener.peek()).toBe(1);
+    });
+
+    it("skips the catch-up fetch entirely when no coordinatorUrl is configured", async () => {
+      const fetchMock = vi.fn();
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const listener = await connectListener(); // OPTIONS has no coordinatorUrl
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(listener.peek()).toBe(0);
+    });
+  });
 });
 
