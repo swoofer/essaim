@@ -129,7 +129,7 @@ function parseStep(raw: unknown, index: number, baseDir: string): PipelineStep {
   };
 
   if (hasModules) {
-    step.modules = (s.modules as unknown[]).map((m) => String(m));
+    step.modules = (s.modules as unknown[]).map((m, i) => coerceScalar(m, where, `modules[${i}]`));
   } else if (hasModulesFile) {
     step.modules = readModulesFile(s.modules_file as string, baseDir);
   }
@@ -162,7 +162,7 @@ function coerceStringMap(
   }
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    out[k] = String(v);
+    out[k] = coerceScalar(v, where, `${field}.${k}`);
   }
   return out;
 }
@@ -173,7 +173,25 @@ function parseHooks(raw: unknown, where: string): { before?: string[]; after?: s
   }
   const h = raw as Record<string, unknown>;
   const out: { before?: string[]; after?: string[] } = {};
-  if (h.before !== undefined) out.before = (h.before as unknown[]).map((c) => String(c));
-  if (h.after !== undefined) out.after = (h.after as unknown[]).map((c) => String(c));
+  for (const key of ["before", "after"] as const) {
+    const value = h[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) {
+      throw new Error(`Step ${where}: 'hooks.${key}' must be a list of commands`);
+    }
+    out[key] = value.map((c, i) => coerceScalar(c, where, `hooks.${key}[${i}]`));
+  }
   return out;
+}
+
+/**
+ * Coerce a scalar YAML value (string/number/boolean) to a string. Rejects
+ * non-null objects/arrays so a mistyped nested value fails loudly instead of
+ * silently stringifying to "[object Object]" or "a,b".
+ */
+function coerceScalar(value: unknown, where: string, field: string): string {
+  if (typeof value === "object" && value !== null) {
+    throw new Error(`Step ${where}: '${field}' must be a scalar (string, number, or boolean)`);
+  }
+  return String(value);
 }
