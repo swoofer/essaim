@@ -25,7 +25,7 @@ export interface DockerRunOpts {
   mount: string;
   envFile?: string;
   target: string;
-  scanMode: "quick" | "deep";
+  scanMode: "quick" | "standard" | "deep";
   scopeMode: "diff" | "full";
   diffBase?: string;
   instruction: string;

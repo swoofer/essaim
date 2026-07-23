@@ -1,0 +1,60 @@
+[
+  {
+    "id": "vuln-0001",
+    "title": "SQL injection via string concatenation",
+    "severity": "high",
+    "timestamp": "2026-07-23T10:15:00Z",
+    "description": "User-controlled request parameter flows into a SQL query built via string concatenation, allowing an attacker to alter query semantics.",
+    "impact": "An attacker can read, modify, or delete arbitrary rows in the users table, and potentially escalate to full database compromise.",
+    "target": "src/db/users.ts",
+    "technical_analysis": "The handler concatenates req.params.id directly into the WHERE clause of a raw SQL string instead of using a parameterized query or query builder placeholder.",
+    "poc_description": "Sending id=1 OR 1=1 as the request parameter returns all rows instead of a single user.",
+    "poc_script_code": "fetch('/users/1%20OR%201=1')",
+    "remediation_steps": [
+      "Use parameterized queries",
+      "Validate that the id parameter is numeric before use"
+    ],
+    "evidence": "query = 'SELECT * FROM users WHERE id=' + req.params.id  // debug token sk-abcDEF0123456789ghijklmnop",
+    "assumptions": "Assumes the users table is reachable from the request handler without additional authorization checks.",
+    "fix_effort": "low",
+    "cvss": 8.6,
+    "cvss_breakdown": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "endpoint": "/users/:id",
+    "method": "GET",
+    "cwe": "CWE-89",
+    "code_locations": [
+      {
+        "file": "src/db/users.ts",
+        "start_line": 42,
+        "end_line": 44,
+        "snippet": "const query = 'SELECT * FROM users WHERE id=' + req.params.id;\nconst row = db.get(query);",
+        "label": "vulnerable query construction",
+        "fix_before": "const query = 'SELECT * FROM users WHERE id=' + req.params.id;",
+        "fix_after": "const query = 'SELECT * FROM users WHERE id=?'; const row = db.get(query, [req.params.id]);"
+      }
+    ],
+    "finding_class": "static"
+  },
+  {
+    "id": "vuln-0002",
+    "title": "Reflected XSS in search results page",
+    "severity": "medium",
+    "timestamp": "2026-07-23T10:16:30Z",
+    "description": "The search term from the query string is rendered into the results page without HTML-escaping, allowing script injection.",
+    "impact": "An attacker can craft a link that executes arbitrary JavaScript in a victim's browser session (session theft, phishing, defacement).",
+    "target": "src/routes/search.ts",
+    "technical_analysis": "res.send() interpolates the raw `q` query parameter into an HTML template string without escaping special characters.",
+    "poc_description": "Navigating to /search?q=<script>alert(1)</script> executes the injected script.",
+    "remediation_steps": "Escape user input before interpolating into HTML, or use a templating engine with auto-escaping enabled.",
+    "cvss": 6.1,
+    "cve": null,
+    "cwe": "CWE-79",
+    "code_locations": [
+      {
+        "file": "src/routes/search.ts",
+        "start_line": 17
+      }
+    ],
+    "finding_class": "dynamic"
+  }
+]

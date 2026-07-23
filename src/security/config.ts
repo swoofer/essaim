@@ -8,7 +8,7 @@ import { SecurityConfigError } from "./errors.js";
 export const SECURITY_CONFIG_REL = join(".essaim", "security.yaml");
 
 const KNOWN_ENGINES = new Set<string>(["strix"]);
-const SCAN_MODES = new Set(["quick", "deep"]);
+const SCAN_MODES = new Set(["quick", "standard", "deep"]);
 const SCOPE_MODES = new Set(["diff", "full"]);
 
 export const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
@@ -45,7 +45,9 @@ export function validateSecurityConfig(raw: unknown): SecurityConfig {
     }
   }
   if (!SCAN_MODES.has(merged.scan_mode)) {
-    throw new SecurityConfigError(`security config: scan_mode must be quick|deep (got '${merged.scan_mode}')`);
+    throw new SecurityConfigError(
+      `security config: scan_mode must be quick|standard|deep (got '${merged.scan_mode}')`,
+    );
   }
   if (!SCOPE_MODES.has(merged.scope.mode)) {
     throw new SecurityConfigError(`security config: scope.mode must be diff|full (got '${merged.scope.mode}')`);
