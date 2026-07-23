@@ -29,17 +29,21 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: release
         if: ${{ github.event_name == 'push' || inputs.publish_only != 'true' }}
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Pinned explicitly so the release target always matches this
+          # workflow's `push: branches: [main]` trigger, instead of relying
+          # implicitly on the repository's default-branch setting.
+          target-branch: main
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
         with:
           node-version: "22"
