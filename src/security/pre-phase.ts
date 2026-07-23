@@ -184,7 +184,7 @@ function gitDiffNames(worktree: string, base: string): string[] {
 
 /** Map each posted finding to the worktree whose diff touched its file (deterministic, no coordinator). */
 export function buildVerifyItems(
-  params: { postedMap: { threadId: string; finding: Finding }[]; workspacePaths: Map<string, string>; baseSha?: string; engineId: EngineId; scanMode: "quick" | "deep" },
+  params: { postedMap: { threadId: string; finding: Finding }[]; workspacePaths: Map<string, string>; baseSha?: string; engineId: EngineId; scanMode: "quick" | "standard" | "deep" },
   deps: { diffFn?: (worktree: string, base: string) => string[] } = {},
 ): VerifyItem[] {
   const diffFn = deps.diffFn ?? gitDiffNames;
@@ -217,7 +217,7 @@ export async function runSecurityVerifyPhase(
     engineId: EngineId;
     scanTimeoutMs: number;
     secretsFile?: string;
-    scanMode: "quick" | "deep";
+    scanMode: "quick" | "standard" | "deep";
   },
   deps: { registry?: AdapterRegistry; diffFn?: (worktree: string, base: string) => string[] } = {},
 ): Promise<{ verified: number; reopened: number; details: VerifyResult[] }> {

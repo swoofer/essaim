@@ -13,7 +13,7 @@ export interface VerifyItem {
   worktreePath: string; // the agent branch that should contain the fix
   threadId: string;
   engineId: EngineId;
-  scanMode: "quick" | "deep";
+  scanMode: "quick" | "standard" | "deep";
 }
 
 export interface VerifyResult {

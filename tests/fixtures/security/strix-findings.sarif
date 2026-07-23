@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Strix",
+          "version": "1.3.1",
+          "informationUri": "https://github.com/usestrix/strix",
+          "rules": [
+            { "id": "cwe-89", "name": "SqlInjection" },
+            { "id": "cwe-79", "name": "ReflectedXss" }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "cwe-89",
+          "level": "error",
+          "message": {
+            "text": "SQL injection via string concatenation"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/db/users.ts" },
+                "region": { "startLine": 42, "endLine": 44 }
+              }
+            }
+          ],
+          "properties": {
+            "cwe": "CWE-89",
+            "security-severity": "8.6"
+          }
+        },
+        {
+          "ruleId": "cwe-79",
+          "level": "warning",
+          "message": {
+            "text": "Reflected XSS in search results page"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/routes/search.ts" },
+                "region": { "startLine": 17 }
+              }
+            }
+          ],
+          "properties": {
+            "cwe": "CWE-79",
+            "security-severity": "6.1"
+          }
+        }
+      ]
+    }
+  ]
+}

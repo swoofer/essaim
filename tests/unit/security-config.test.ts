@@ -120,6 +120,17 @@ authorization: { affirmed: false, authorized_by: "" }
 `);
     expect(() => loadSecurityConfig(dir)).toThrow(SecurityConfigError);
   });
+
+  it("accepts scan_mode: standard", () => {
+    writeCfg(`version: 1
+engines: [strix]
+scan_mode: standard
+scope: { mode: diff, diff_base: "", exclude_paths: [] }
+authorization: { affirmed: false, authorized_by: "" }
+`);
+    const cfg = loadSecurityConfig(dir);
+    expect(cfg.scan_mode).toBe("standard");
+  });
 });
 
 describe("DEFAULT_SECURITY_CONFIG", () => {

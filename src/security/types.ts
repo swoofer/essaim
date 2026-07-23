@@ -75,7 +75,7 @@ export interface EngineCapabilities {
 export interface ResolvedScope {
   targetPath: string; // repo path (Docker mount source)
   mode: "diff" | "full";
-  scanMode: "quick" | "deep"; // from SecurityConfig.scan_mode — wired into the engine's --scan-mode
+  scanMode: "quick" | "standard" | "deep"; // from SecurityConfig.scan_mode — wired into the engine's --scan-mode
   diffBase?: string; // resolved ref for Strix --diff-base
   excludeMatchers: RegExp[]; // compiled from SecurityConfig.scope.exclude_paths
 }
@@ -110,7 +110,7 @@ export interface SecurityAuthorizationConfig {
 export interface SecurityConfig {
   version: 1;
   engines: EngineId[];
-  scan_mode: "quick" | "deep";
+  scan_mode: "quick" | "standard" | "deep";
   scope: SecurityScopeConfig;
   authorization: SecurityAuthorizationConfig;
   // Runtime fields (not in yaml; defaulted here, overridable by CLI in Plan 4):
