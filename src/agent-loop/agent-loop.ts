@@ -1000,6 +1000,9 @@ export async function runAgentLoop(
                   }
                 } else {
                   logger.error("Work-stealing: still rate limited after wait — stopping");
+                  await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
+                  claimedThreadIds.delete(task.id);
+                  exitReason = "rate_limited";
                   break;
                 }
                 continue;

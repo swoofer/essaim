@@ -1375,6 +1375,47 @@ describe("runAgentLoop — phased mode", () => {
     );
   });
 
+  it("unclaims task and does not report success when still rate limited after retry", async () => {
+    vi.useFakeTimers();
+
+    let claimCall = 0;
+    mockClaimNextTask.mockImplementation(async () => {
+      claimCall++;
+      if (claimCall === 1) return { id: "t-stuck", description: "task that stays rate limited", file: undefined, severity: undefined };
+      return null;
+    });
+
+    // Discovery phase
+    mockSend.mockResolvedValueOnce({ content: "DISCOVERY:\nitem", toolCalls: [], costUsd: 0.01, durationMs: 100, sessionId: "s1" });
+    mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
+
+    // Execute phase: first attempt rate limited, retry after wait still rate limited
+    mockSend.mockResolvedValueOnce({ content: "", toolCalls: [], costUsd: 0, durationMs: 100, sessionId: "s1", rateLimited: true, rateLimitResetsAt: undefined });
+    mockSend.mockResolvedValueOnce({ content: "", toolCalls: [], costUsd: 0, durationMs: 100, sessionId: "s1", rateLimited: true, rateLimitResetsAt: undefined });
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Scan", toolsMode: "read_only", loop: false, effort: "low" },
+        { name: "execute",  prompt: "Fix",  toolsMode: "full",      loop: true,  effort: "high" },
+      ],
+    });
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    // Fallback rate-limit wait is 5min; advance well past it plus retry margins.
+    for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(10_000);
+    const result = await loopPromise;
+
+    // The task must be released, not left claimed forever.
+    expect(mockUnclaimTask).toHaveBeenCalledWith(
+      "http://localhost:3100",
+      "t-stuck",
+      "test-agent",
+    );
+    expect(mockCompleteTask).not.toHaveBeenCalled();
+    // A run that never got past a rate limit must not be stamped as a success.
+    expect(result.exitReason).not.toBe("done");
+  });
+
   it("does NOT cycle when maxDiscoverCycles is absent (default)", async () => {
     vi.useFakeTimers();
 
