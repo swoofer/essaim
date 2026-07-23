@@ -114,7 +114,7 @@ describe('fetchCoordinatorMetrics — scoping the SSE cursor to this run (#108)'
     // events with id > Last-Event-ID. Events accumulate over time — the array
     // is mutated as each "run" emits its events, mirroring production instead
     // of pre-seeding the log with events that haven't happened yet. Seeded
-    // with one pre-existing event (id 1) to model the realistic D108 scenario
+    // with one pre-existing event (id 1) to model the realistic #108 scenario
     // — a SHARED, persistent coordinator that already has history — rather
     // than a coordinator that has never seen a single event.
     const liveEvents: { id: number; type: string; data: Record<string, unknown> }[] = [
