@@ -43,6 +43,7 @@ const mockNextAction = vi.fn(() => null);
 const mockOnAnnounceResult = vi.fn();
 const mockDecideContinue = vi.fn();
 const mockDecideYield = vi.fn();
+const mockDecideAdjust = vi.fn();
 const mockWorkDone = vi.fn();
 const mockOnTimeout = vi.fn();
 const mockOnThreadMessage = vi.fn();
@@ -62,6 +63,7 @@ vi.mock("../../src/agent-loop/coordination-protocol.js", () => ({
     onTimeout: mockOnTimeout,
     decideContinue: mockDecideContinue,
     decideYield: mockDecideYield,
+    decideAdjust: mockDecideAdjust,
     workDone: mockWorkDone,
     getThreadState: vi.fn(() => null),
     get phase() { return mockPhase; },
@@ -366,6 +368,92 @@ describe("runAgentLoop", () => {
     // The second call is interruptClaude — should use haiku
     const interruptOpts = calls[1][0] as { model?: string };
     expect(interruptOpts.model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  // ── Coordination decision: ADJUST ────────────────────────────────────
+
+  it("routes an ADJUST reply to protocol.decideAdjust with the parsed plan", async () => {
+    let nextActionCall = 0;
+    mockNextAction.mockImplementation((): any => {
+      nextActionCall++;
+      if (nextActionCall === 1) {
+        return { type: "ask_llm_decide", threadId: "t-1", responses: "[agent-2]: I'm on file X too" };
+      }
+      mockPhase = "working";
+      return { type: "work" };
+    });
+
+    let sendCall = 0;
+    mockSend.mockImplementation(async () => {
+      sendCall++;
+      if (sendCall === 1) {
+        return {
+          content: "ADJUST: je vais éviter le fichier X et me concentrer sur Y à la place",
+          toolCalls: [],
+          costUsd: 0.01,
+          durationMs: 100,
+          sessionId: "s1",
+        };
+      }
+      return {
+        content: "DONE: finished",
+        toolCalls: [],
+        costUsd: 0.01,
+        durationMs: 100,
+        sessionId: "s1",
+      };
+    });
+
+    await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(mockDecideAdjust).toHaveBeenCalledWith("je vais éviter le fichier X et me concentrer sur Y à la place");
+    expect(mockDecideContinue).not.toHaveBeenCalled();
+    expect(mockDecideYield).not.toHaveBeenCalled();
+  });
+
+  it("falls back to CONTINUE and logs a warning when ADJUST has no plan attached", async () => {
+    let nextActionCall = 0;
+    mockNextAction.mockImplementation((): any => {
+      nextActionCall++;
+      if (nextActionCall === 1) {
+        return { type: "ask_llm_decide", threadId: "t-2", responses: "[agent-2]: hello" };
+      }
+      mockPhase = "working";
+      return { type: "work" };
+    });
+
+    let sendCall = 0;
+    mockSend.mockImplementation(async () => {
+      sendCall++;
+      if (sendCall === 1) {
+        return {
+          content: "ADJUST",
+          toolCalls: [],
+          costUsd: 0.01,
+          durationMs: 100,
+          sessionId: "s1",
+        };
+      }
+      return {
+        content: "DONE: finished",
+        toolCalls: [],
+        costUsd: 0.01,
+        durationMs: 100,
+        sessionId: "s1",
+      };
+    });
+
+    const warnSpy = vi.fn();
+    const loggerWithSpy: AgentLoopLogger = { ...silentLogger, warn: warnSpy };
+
+    await runAgentLoop(makeConfig(), loggerWithSpy);
+
+    expect(mockDecideAdjust).not.toHaveBeenCalled();
+    expect(mockDecideContinue).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("ADJUST"),
+      expect.anything(),
+    );
   });
 });
 
