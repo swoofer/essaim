@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { strixProcessEnv, PINNED_STRIX_SANDBOX_IMAGE } from "../../src/security/strix-cli.js";
+import { strixProcessEnv, strixEnv, PINNED_STRIX_SANDBOX_IMAGE } from "../../src/security/strix-cli.js";
 
 describe("strixProcessEnv", () => {
   it("default-denies essaim's own secrets while forwarding OS essentials + strix overlay", () => {
@@ -50,5 +50,36 @@ describe("strixProcessEnv", () => {
     const base = { STRIX_RUNTIME_BACKEND: "should-be-overwritten" };
     const result = strixProcessEnv({}, PINNED_STRIX_SANDBOX_IMAGE, base);
     expect(result.STRIX_RUNTIME_BACKEND).toBe("docker");
+  });
+});
+
+describe("strixEnv", () => {
+  it("always sets the pinned image + docker backend", () => {
+    const env = strixEnv({}, PINNED_STRIX_SANDBOX_IMAGE);
+    expect(env.STRIX_IMAGE).toBe(PINNED_STRIX_SANDBOX_IMAGE);
+    expect(env.STRIX_RUNTIME_BACKEND).toBe("docker");
+  });
+
+  it("forwards a custom LLM base URL + tuning keys when the operator set them (proxy path)", () => {
+    const env = strixEnv({
+      STRIX_LLM: "openai/local-model",
+      LLM_API_BASE: "http://localhost:1234/v1",
+      STRIX_REASONING_EFFORT: "medium",
+      LLM_TIMEOUT: "300",
+      PERPLEXITY_API_KEY: "pk-x",
+    });
+    expect(env.STRIX_LLM).toBe("openai/local-model");
+    expect(env.LLM_API_BASE).toBe("http://localhost:1234/v1");
+    expect(env.STRIX_REASONING_EFFORT).toBe("medium");
+    expect(env.LLM_TIMEOUT).toBe("300");
+    expect(env.PERPLEXITY_API_KEY).toBe("pk-x");
+  });
+
+  it("forwards ONLY recognized keys the operator actually set — never invents values", () => {
+    const env = strixEnv({ LLM_API_KEY: "sk-secret", NOT_A_STRIX_VAR: "leak" });
+    expect(env.LLM_API_KEY).toBe("sk-secret");
+    expect(env).not.toHaveProperty("NOT_A_STRIX_VAR");
+    expect(env).not.toHaveProperty("STRIX_LLM"); // absent from secrets → not fabricated
+    expect(env).not.toHaveProperty("LLM_API_BASE");
   });
 });

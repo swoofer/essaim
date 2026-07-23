@@ -31,17 +31,47 @@ export function strixCliArgs(scope: ResolvedScope, opts?: { instruction?: string
 }
 
 /**
- * Build the CHILD process env for the `strix` invocation. Adds STRIX_LLM/LLM_API_KEY only when
- * present in `secrets` — never invents values. Caller merges this over a copy of process.env
- * (essaim's own process.env is never mutated; see adapters/strix.ts).
+ * Strix LLM/config keys the operator may set in the secrets file (.security-env) and which we
+ * forward verbatim into the strix child env when present. Names verified against usestrix/strix
+ * source (strix/config/settings.py, docs/llm-providers/local.mdx):
+ *  - STRIX_LLM / LLM_API_KEY (+ OPENAI_API_KEY alias): the model string + API key.
+ *  - LLM_API_BASE (+ OPENAI_API_BASE / OPENAI_BASE_URL / LITELLM_BASE_URL / OLLAMA_API_BASE aliases):
+ *    custom OpenAI-compatible base URL — the officially-documented path to route Strix through a
+ *    local/self-hosted proxy (STRIX_LLM="openai/<model>" + LLM_API_BASE=http://host:port/v1).
+ *  - Optional tuning Strix reads: reasoning effort, timeouts, retries, web-search key.
+ * Only keys the operator explicitly put in .security-env are forwarded — we never invent values.
+ */
+const STRIX_FORWARD_KEYS = [
+  "STRIX_LLM",
+  "LLM_API_KEY",
+  "OPENAI_API_KEY",
+  "LLM_API_BASE",
+  "OPENAI_API_BASE",
+  "OPENAI_BASE_URL",
+  "LITELLM_BASE_URL",
+  "OLLAMA_API_BASE",
+  "STRIX_REASONING_EFFORT",
+  "LLM_TIMEOUT",
+  "STRIX_LLM_MAX_RETRIES",
+  "STRIX_MEMORY_COMPRESSOR_TIMEOUT",
+  "STRIX_FORCE_REQUIRED_TOOL_CHOICE",
+  "PERPLEXITY_API_KEY",
+] as const;
+
+/**
+ * Build the CHILD process env for the `strix` invocation. Sets the pinned sandbox image + docker
+ * backend, then forwards each recognized Strix LLM/config key present in `secrets` — never invents
+ * values. Caller merges this over an allowlisted copy of process.env (essaim's own process.env is
+ * never mutated, and essaim's own credentials are NOT forwarded; see strixProcessEnv + strix.ts).
  */
 export function strixEnv(secrets: Record<string, string>, image: string = PINNED_STRIX_SANDBOX_IMAGE): Record<string, string> {
   const env: Record<string, string> = {
     STRIX_IMAGE: image,
     STRIX_RUNTIME_BACKEND: "docker",
   };
-  if (secrets.STRIX_LLM !== undefined) env.STRIX_LLM = secrets.STRIX_LLM;
-  if (secrets.LLM_API_KEY !== undefined) env.LLM_API_KEY = secrets.LLM_API_KEY;
+  for (const k of STRIX_FORWARD_KEYS) {
+    if (secrets[k] !== undefined) env[k] = secrets[k];
+  }
   return env;
 }
 
