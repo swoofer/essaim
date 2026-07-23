@@ -7,6 +7,41 @@ COORDINATOR_URL="${COORDINATOR_URL:-http://localhost:3100}"
 AGENT_ID="${COORDINATOR_AGENT_ID:-unknown}"
 AGENT_NAME="${COORDINATOR_AGENT_NAME:-unknown}"
 
+# Auth: when COORDINATOR_TOKEN is set, send it as a bearer token (same
+# convention as the TS side — see src/coordinator-auth.ts). Unset = no header.
+AUTH_HEADER=()
+if [ -n "${COORDINATOR_TOKEN:-}" ]; then
+  AUTH_HEADER=(-H "Authorization: Bearer $COORDINATOR_TOKEN")
+fi
+
+# Returns success (0) if FILE_PATH looks like it may hold secrets, in which
+# case its raw content must never be shipped to the coordinator — team-mode
+# sends this payload to a different host. File-activity tracking still
+# happens; only the content field is withheld.
+is_sensitive_path() {
+  local path="$1"
+  local base path_lc base_lc
+  base=$(basename -- "$path")
+  path_lc=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')
+  base_lc=$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')
+
+  case "$path_lc" in
+    */.ssh/*|.ssh/*|*/.aws/*|.aws/*) return 0 ;;
+  esac
+
+  case "$base_lc" in
+    .env|.env.*) return 0 ;;
+    *.pem|*.key|*.p12|*.pfx|*.keystore) return 0 ;;
+    id_rsa|id_rsa.*|id_dsa|id_dsa.*|id_ecdsa|id_ecdsa.*|id_ed25519|id_ed25519.*) return 0 ;;
+    kubeconfig|*.kubeconfig) return 0 ;;
+    credentials|credentials.*) return 0 ;;
+    .netrc|.npmrc|.pypirc) return 0 ;;
+    *secret*) return 0 ;;
+  esac
+
+  return 1
+}
+
 INPUT=$(cat 2>/dev/null)
 if [ -z "$INPUT" ]; then
   exit 0
@@ -36,15 +71,18 @@ if [ -n "$FILE_PATH" ] && [ "$FILE_PATH" != "null" ]; then
   FILE_PATH="${FILE_PATH//\\//}"
 fi
 
-# v0.6: include file content in the payload if under 256 KB
+# v0.6: include file content in the payload if under 256 KB and not sensitive
 SIZE=$(stat -c%s "$FILE_PATH" 2>/dev/null || stat -f%z "$FILE_PATH" 2>/dev/null || echo 999999)
-if [ "$SIZE" -lt 262144 ] && [ -f "$FILE_PATH" ]; then
+if is_sensitive_path "$FILE_PATH"; then
+  CONTENT="null"
+elif [ "$SIZE" -lt 262144 ] && [ -f "$FILE_PATH" ]; then
   CONTENT=$(jq -Rs . < "$FILE_PATH" 2>/dev/null || echo "null")
 else
   CONTENT="null"
 fi
 
 curl -s --max-time 1 -X POST "$COORDINATOR_URL/api/log-file" \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d "$(jq -n \
     --arg sid "$SESSION_ID" \
