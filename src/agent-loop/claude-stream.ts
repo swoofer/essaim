@@ -215,7 +215,7 @@ export function createStreamParser(emitter: EventEmitter, readable: NodeJS.Reada
 
 // ── Resolve claude binary ─────────────────────────────────────────────
 
-function resolveClaudeBin(): string {
+export function resolveClaudeBin(): string {
   const envPath = process.env.CLAUDE_BIN;
   if (envPath) return envPath;
   const candidates = [
