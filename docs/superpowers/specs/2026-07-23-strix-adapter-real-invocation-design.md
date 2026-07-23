@@ -44,6 +44,7 @@
 5. **Wiring:** secrets now flow to the strix process env (not a docker `--env-file`); update `createDefaultRegistry`/pre-phase secret passing accordingly (the temp env-file mechanism can be dropped for Strix, or kept as the source `resolveEngineSecrets` reads to build the process env).
 6. **Docs:** update `docs/security/*` — Strix is invoked as a host CLI (prereq `pip install strix-agent`), sandbox pinned via `STRIX_IMAGE` digest; the `PINNED_STRIX_IMAGE` placeholder is replaced by the real sandbox digest.
 7. **Live validation (needs operator LLM key):** run one real `strix -n -t <throwaway target> -m quick` with the operator's `STRIX_LLM`+`LLM_API_KEY`, capture the real `vulnerabilities.json`/`findings.sarif`, diff against the fixtures, and adjust field mapping if reality differs from the source-derived schema.
+   - Capture the real Strix sandbox container name/label from a live run and wire an effective orphan/timeout cleanup (current `sweepOrphanContainers` targets the removed essaim-managed naming and is a no-op for Strix-managed sandboxes).
 
 ### Non-goals (unchanged from v1)
 HexStrike/PentAGI, dynamic/DAST beyond what Strix does, cross-engine dedup (SARIF normalization lays the groundwork but dedup is v2).

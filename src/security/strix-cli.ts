@@ -45,6 +45,47 @@ export function strixEnv(secrets: Record<string, string>, image: string = PINNED
   return env;
 }
 
+// Default-deny allowlist for the strix CHILD process env. essaim's own secrets (ANTHROPIC_API_KEY,
+// COORDINATOR_TOKEN, AWS_*, GITHUB_TOKEN, ...) must NEVER reach the third-party `strix` tool — only
+// OS/runtime essentials the CLI needs to function, plus the strixEnv() overlay below.
+const ALLOW_EXACT = new Set([
+  "PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+  "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT",
+  "TEMP", "TMP", "TMPDIR", "LANG", "TERM", "TZ", "SHELL",
+  "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
+  "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+  "DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_CONFIG", "DOCKER_CONTEXT",
+  "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "FTP_PROXY",
+]);
+
+const ALLOW_PREFIX = ["LC_", "PYTHON", "PIP_", "XDG_"];
+
+function isProcessEnvAllowed(key: string): boolean {
+  const upper = key.toUpperCase();
+  if (ALLOW_EXACT.has(upper)) return true;
+  return ALLOW_PREFIX.some((p) => upper.startsWith(p));
+}
+
+/**
+ * Build the CHILD process env for the `strix` invocation via a DEFAULT-DENY allowlist over `base`
+ * (defaults to `process.env`, but never mutates it): only OS/runtime essentials the strix CLI needs
+ * (PATH, HOME, proxy/TLS config, docker/python/pip/xdg config, ...) are copied — essaim's own
+ * secrets (ANTHROPIC_API_KEY, COORDINATOR_TOKEN, AWS_*, GITHUB_TOKEN, ...) are never forwarded.
+ * The `strixEnv()` overlay (STRIX_IMAGE, STRIX_RUNTIME_BACKEND, STRIX_LLM/LLM_API_KEY) always wins.
+ */
+export function strixProcessEnv(
+  secrets: Record<string, string>,
+  image: string = PINNED_STRIX_SANDBOX_IMAGE,
+  base: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (v !== undefined && isProcessEnvAllowed(k)) out[k] = v;
+  }
+  return { ...out, ...strixEnv(secrets, image) };
+}
+
 export interface FindNewestRunDeps {
   readdir?: (p: string) => string[];
   mtime?: (p: string) => number;

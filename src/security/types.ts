@@ -28,7 +28,7 @@ export interface Finding {
   severity: Severity; // native 5-level
   category: string; // normalized slug: "sqli","xss","ssrf","secret","authz",...
   cwe?: string; // "CWE-89"
-  file?: string; // repo-relative → coordinator target_files (v1: always set)
+  file?: string; // repo-relative → coordinator target_files (absent when the engine reports no code_locations)
   line?: number;
   endLine?: number;
   symbol?: string; // fn/route → coordinator target_symbols

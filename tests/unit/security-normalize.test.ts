@@ -83,6 +83,19 @@ describe("parseStrixVulnerabilitiesJson", () => {
     expect(f.file).toBeUndefined();
     expect(f.line).toBeUndefined();
   });
+
+  it("skips a single bad element (null) instead of discarding the whole file", () => {
+    const results = parseStrixVulnerabilitiesJson(
+      JSON.stringify([
+        { id: "vuln-0001", title: "First valid finding", severity: "high", cwe: "CWE-89" },
+        null,
+        { id: "vuln-0002", title: "Second valid finding", severity: "medium", cwe: "CWE-79" },
+      ]),
+    );
+    expect(results).toHaveLength(2);
+    expect(results[0].ruleId).toBe("cwe-89");
+    expect(results[1].ruleId).toBe("cwe-79");
+  });
 });
 
 describe("parseStrixSarif", () => {
@@ -146,6 +159,22 @@ describe("parseStrixSarif", () => {
     const [f] = parseStrixSarif(JSON.stringify(doc));
     expect(f.severity).toBe("critical");
   });
+
+  it("skips a single bad element (null) instead of discarding the whole run", () => {
+    const doc = {
+      runs: [
+        {
+          results: [
+            { ruleId: "cwe-89", level: "error", message: { text: "valid" } },
+            null,
+          ],
+        },
+      ],
+    };
+    const results = parseStrixSarif(JSON.stringify(doc));
+    expect(results).toHaveLength(1);
+    expect(results[0].ruleId).toBe("cwe-89");
+  });
 });
 
 describe("reconcileStrixFindings", () => {
@@ -198,6 +227,60 @@ describe("reconcileStrixFindings", () => {
     const sarifFindings = parseStrixSarif(fx("strix-findings.sarif"));
     const reconciled = reconcileStrixFindings(jsonFindings, sarifFindings);
     expect(reconciled[0].file).toBeUndefined();
+  });
+
+  it("recomputes fingerprint after SARIF backfill and matches SARIF findings 1:1 (no collision when two json findings share a ruleId)", () => {
+    const jsonFindings = parseStrixVulnerabilitiesJson(
+      JSON.stringify([
+        { id: "vuln-0001", title: "First SQLi instance", severity: "high", cwe: "CWE-89" },
+        { id: "vuln-0002", title: "Second SQLi instance", severity: "high", cwe: "CWE-89" },
+      ]),
+    );
+    // Same ruleId (cwe-89), same category, both fileless → identical parse-time fingerprints.
+    expect(jsonFindings[0].file).toBeUndefined();
+    expect(jsonFindings[1].file).toBeUndefined();
+    expect(jsonFindings[0].fingerprint).toBe(jsonFindings[1].fingerprint);
+
+    const sarifDoc = {
+      runs: [
+        {
+          results: [
+            {
+              ruleId: "cwe-89",
+              level: "error",
+              message: { text: "SQLi A" },
+              locations: [{ physicalLocation: { artifactLocation: { uri: "src/a.ts" }, region: { startLine: 1 } } }],
+            },
+            {
+              ruleId: "cwe-89",
+              level: "error",
+              message: { text: "SQLi B" },
+              locations: [{ physicalLocation: { artifactLocation: { uri: "src/b.ts" }, region: { startLine: 2 } } }],
+            },
+          ],
+        },
+      ],
+    };
+    const sarifFindings = parseStrixSarif(JSON.stringify(sarifDoc));
+
+    const reconciled = reconcileStrixFindings(jsonFindings, sarifFindings);
+    expect(reconciled).toHaveLength(2);
+    expect(reconciled[0].file).toBe("src/a.ts");
+    expect(reconciled[1].file).toBe("src/b.ts");
+    expect(reconciled[0].file).not.toBe(reconciled[1].file);
+    expect(reconciled[0].fingerprint).not.toBe(reconciled[1].fingerprint);
+    // Recomputed from the backfilled file, not the stale parse-time fingerprint.
+    expect(reconciled[0].fingerprint).not.toBe(jsonFindings[0].fingerprint);
+    expect(reconciled[1].fingerprint).not.toBe(jsonFindings[1].fingerprint);
+  });
+
+  it("keeps a stable fingerprint for a fileless finding with no matching SARIF", () => {
+    const jsonFindings = parseStrixVulnerabilitiesJson(
+      JSON.stringify([{ id: "vuln-0099", title: "No match here", severity: "low", cwe: "CWE-000" }]),
+    );
+    const before = jsonFindings[0].fingerprint;
+    const reconciled = reconcileStrixFindings(jsonFindings, []);
+    expect(reconciled[0].fingerprint).toBe(before);
   });
 });
 

@@ -3,7 +3,7 @@
 // machine-readable artifacts Strix writes to `<cwd>/strix_runs/<run>/` on exit.
 import type { EngineAdapter, EngineCapabilities, EngineRunResult, ResolvedScope } from "../types.js";
 import { spawnCaptured, type SpawnFn } from "./base.js";
-import { PINNED_STRIX_SANDBOX_IMAGE, strixCliArgs, strixEnv, readStrixRunArtifacts } from "../strix-cli.js";
+import { PINNED_STRIX_SANDBOX_IMAGE, strixCliArgs, strixProcessEnv, readStrixRunArtifacts } from "../strix-cli.js";
 import { parseStrixVulnerabilitiesJson, parseStrixSarif, reconcileStrixFindings } from "./strix-parse.js";
 import { redact } from "../redact.js";
 import { createLogger } from "../../logger.js";
@@ -91,7 +91,9 @@ export function createStrixAdapter(deps: StrixAdapterDeps): EngineAdapter {
       });
 
       const workdir = makeWorkdir();
-      const env = { ...process.env, ...strixEnv(deps.secrets ?? {}, image) };
+      // Default-deny allowlist — essaim's own secrets (ANTHROPIC_API_KEY, COORDINATOR_TOKEN, AWS_*,
+      // ...) never reach the third-party strix child; see strixProcessEnv in strix-cli.ts.
+      const env = strixProcessEnv(deps.secrets ?? {}, image);
       const args = strixCliArgs(scope, { instruction: deps.instruction });
 
       try {
@@ -103,6 +105,10 @@ export function createStrixAdapter(deps: StrixAdapterDeps): EngineAdapter {
         }
 
         if (res.timedOut) {
+          // NOTE: this only SIGKILLs the host `strix` process. Strix manages its own sandbox
+          // container lifecycle (Docker SDK) — essaim has no handle to it, so nothing here tears
+          // down the sandbox container on a timeout. Real cleanup is pending live validation (see
+          // docs/superpowers/specs/2026-07-23-strix-adapter-real-invocation-design.md §7).
           return finish({
             status: "timeout",
             exitCode: res.code ?? undefined,
