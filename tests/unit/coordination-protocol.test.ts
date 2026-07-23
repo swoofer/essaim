@@ -386,15 +386,71 @@ describe("CoordinationProtocol", () => {
     const action1 = protocol.nextAction();
     expect(action1?.type).toBe("ask_llm_decide");
 
-    // Second message from same agent — respondent already tracked
+    // Second message from same agent — respondent already tracked, and a
+    // decision was already requested for this round, so no re-enqueue
     protocol.onThreadMessage("t-9", "agent-2", "follow-up");
-    // Still triggers another ask_llm_decide since all respondents are still complete
     const action2 = protocol.nextAction();
-    expect(action2?.type).toBe("ask_llm_decide");
+    expect(action2).toBeNull();
 
     // Thread state shows the agent only once in respondedAgents
     const thread = protocol.getThreadState("t-9");
     expect(thread?.respondedAgents).toEqual(["agent-2"]);
+  });
+
+  it("does not re-enqueue ask_llm_decide for a replayed thread message after quorum", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-9b",
+      status: "open",
+      expectedRespondents: ["agent-2", "agent-3"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    protocol.onThreadMessage("t-9b", "agent-2", "first from agent-2");
+    expect(protocol.nextAction()).toBeNull(); // not all responded yet
+
+    protocol.onThreadMessage("t-9b", "agent-3", "first from agent-3");
+    const decideAction = protocol.nextAction();
+    expect(decideAction?.type).toBe("ask_llm_decide"); // quorum reached
+
+    // A replayed/duplicate message arrives after the decision was already requested
+    protocol.onThreadMessage("t-9b", "agent-3", "replayed message");
+    expect(protocol.nextAction()).toBeNull();
+  });
+
+  it("allows a fresh ask_llm_decide after a contestation opens a new round", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-9c",
+      status: "open",
+      expectedRespondents: ["agent-2"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    // Round 1: reach quorum, decide, work, propose, contest
+    protocol.onThreadMessage("t-9c", "agent-2", "ok");
+    expect(protocol.nextAction()?.type).toBe("ask_llm_decide");
+    protocol.decideContinue();
+    drainActions(protocol);
+    protocol.workDone();
+    drainActions(protocol);
+    protocol.onResolutionProposed("t-9c");
+    drainActions(protocol);
+    protocol.onContestation("t-9c", "agent-2", "still conflicting");
+    drainActions(protocol);
+
+    expect(protocol.getThreadState("t-9c")?.round).toBe(2);
+
+    // Round 2: quorum should trigger a fresh ask_llm_decide
+    protocol.onThreadMessage("t-9c", "agent-2", "ok again");
+    const action = protocol.nextAction();
+    expect(action?.type).toBe("ask_llm_decide");
   });
 
   // ── Unknown thread ────────────────────────────────────────────────
