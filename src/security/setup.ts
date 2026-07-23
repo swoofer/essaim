@@ -19,7 +19,8 @@ authorization:
 `;
 
 const ENV_TEMPLATE = `# Engine credentials for security scans — 0600, gitignored, NEVER committed.
-# Fill values; passed only to the engine container, never to essaim's process.env.
+# Fill values; passed only into the engine process's own env, never to disk or essaim's process.env.
+# Strix prereqs (operator installs): pip install strix-agent (Python >=3.12) + a running Docker daemon.
 LLM_API_KEY=
 STRIX_LLM=anthropic/claude-sonnet-4-6
 `;
