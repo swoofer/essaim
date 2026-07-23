@@ -95,3 +95,45 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
     expect(task?.relatedDone?.join(' ')).toContain('receipt_date');
   });
 });
+
+describe('claimNextTask — refetch après course perdue (fenêtre TOCTOU réduite, pas fermée)', () => {
+  it('après un claim perdu, re-fetch threads-active et exclut le fichier devenu occupé avant le candidat suivant', async () => {
+    let threadsActiveCalls = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/threads-active')) {
+        threadsActiveCalls++;
+        if (threadsActiveCalls === 1) {
+          // Snapshot initial : les deux fichiers sont libres.
+          return new Response(JSON.stringify([
+            { id: 't1', status: 'open', claimed_by: null, target_files: ['fileA.ts'] },
+            { id: 't2', status: 'open', claimed_by: null, target_files: ['fileB.ts'] },
+          ]), { status: 200 });
+        }
+        // Re-fetch déclenché après la course perdue sur t1 : entre-temps, un
+        // autre agent a claim un thread sur fileB — invisible dans le snapshot
+        // initial, mais visible ici.
+        return new Response(JSON.stringify([
+          { id: 't1', status: 'open', claimed_by: 'autre-agent', target_files: ['fileA.ts'] },
+          { id: 't2', status: 'open', claimed_by: null, target_files: ['fileB.ts'] },
+          { id: 't3', status: 'open', claimed_by: 'autre-agent', target_files: ['fileB.ts'] },
+        ]), { status: 200 });
+      }
+      if (url.endsWith('/api/claim-task')) {
+        const body = JSON.parse((init!.body as string)) as { thread_id: string };
+        // t1 perd toujours la course ; t2 ne devrait jamais être tenté une fois
+        // que le refetch a révélé que fileB est occupé.
+        const ok = body.thread_id !== 't1';
+        return new Response(JSON.stringify({ success: ok, claimed_by: ok ? null : 'autre-agent' }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task).toBeNull();
+    expect(threadsActiveCalls).toBeGreaterThanOrEqual(2);
+    const claimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/claim-task'));
+    expect(claimed).toHaveLength(1); // t2 correctement écarté après le refetch
+  });
+});
