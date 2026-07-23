@@ -225,3 +225,66 @@ describe("runProject — timeout teardown ordering (#112)", () => {
     expect(order).toEqual(["agent-drained", "coordinator-stopped"]);
   });
 });
+
+// ── resetBase refuses an implicit cwd fallback ──────────────────────────────
+
+describe("runProject — resetBase refuses implicit cwd fallback", () => {
+  const ORIGINAL_ENV = process.env.ESSAIM_RESET_BASE;
+
+  afterEach(() => {
+    if (ORIGINAL_ENV === undefined) delete process.env.ESSAIM_RESET_BASE;
+    else process.env.ESSAIM_RESET_BASE = ORIGINAL_ENV;
+  });
+
+  it("refuses to run (and never touches cwd) when ESSAIM_RESET_BASE=1 and workspace.base is unset", async () => {
+    process.env.ESSAIM_RESET_BASE = "1";
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree" }, // base intentionally omitted
+    });
+
+    await expect(
+      runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
+    ).rejects.toThrow(/resetBase refused/);
+
+    // The agent must never have been launched — the refusal happens before
+    // any workspace/agent setup.
+    expect(launchAgentLoop).not.toHaveBeenCalled();
+  });
+
+  it("proceeds normally when ESSAIM_RESET_BASE=1 and workspace.base IS set", async () => {
+    process.env.ESSAIM_RESET_BASE = "1";
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree", base: TMP_DIR },
+    });
+
+    const result = await runProject(project, "with_coordinator", false, {
+      coordinatorUrl: "http://coordinator.test",
+    });
+
+    expect(launchAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.agent_results).toHaveLength(1);
+  });
+
+  it("does not throw when ESSAIM_RESET_BASE is unset, even with workspace.base omitted (no regression)", async () => {
+    delete process.env.ESSAIM_RESET_BASE;
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree" }, // base omitted, but no destructive opt-in
+    });
+
+    await expect(
+      runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
+    ).resolves.toBeDefined();
+  });
+});
