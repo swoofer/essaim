@@ -10,8 +10,10 @@ import { randomUUID } from "node:crypto";
 import type { EngineId, Finding, Severity } from "../types.js";
 import { fingerprint } from "../finding.js";
 import { redact } from "../redact.js";
+import { createLogger } from "../../logger.js";
 
 const STRIX: EngineId = "strix";
+const log = createLogger("security");
 
 export class StrixParseError extends Error {
   constructor(message: string) {
@@ -78,8 +80,7 @@ export function parseStrixVulnerabilitiesJson(text: string): Finding[] {
       findings.push(mapVulnerabilityItem(item));
     } catch (err) {
       // One malformed element must not discard the rest of a real capture.
-      // eslint-disable-next-line no-console
-      console.warn("security: skipping unparseable vulnerabilities.json element", (err as Error).message);
+      log.warn("security: skipping unparseable vulnerabilities.json element", { err: (err as Error).message });
     }
   }
   return findings;
@@ -198,8 +199,7 @@ export function parseStrixSarif(text: string): Finding[] {
         findings.push(mapSarifResult(result));
       } catch (err) {
         // One malformed element must not discard the rest of a real capture.
-        // eslint-disable-next-line no-console
-        console.warn("security: skipping unparseable findings.sarif result", (err as Error).message);
+        log.warn("security: skipping unparseable findings.sarif result", { err: (err as Error).message });
       }
     }
   }
