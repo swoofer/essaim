@@ -31,6 +31,7 @@ export interface ThreadState {
   respondedAgents: string[];
   round: number;
   decideRequested: boolean;
+  work: WorkDescription;
 }
 
 // â”€â”€ Protocol actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -65,6 +66,10 @@ export interface CoordinationProtocol {
   // responds, call one of these to advance the state machine.
   decideContinue(): void;
   decideYield(): void;
+  // The LLM wants to revise its plan instead of continuing or yielding —
+  // updates the thread's plan and re-opens the current round for a fresh
+  // set of responses (same reset as onContestation).
+  decideAdjust(newPlan: string): void;
 
   // After work is done, transition to resolution
   workDone(): void;
@@ -89,6 +94,7 @@ const APPROVAL_TIMEOUT_MS = 20_000;
 export function createCoordinationProtocol(agentId: string): CoordinationProtocol {
   let phase: Phase = "idle";
   let currentThreadId: string | null = null;
+  let pendingWork: WorkDescription | null = null;
 
   const threads = new Map<string, ThreadState>();
   const actionQueue: ProtocolAction[] = [];
@@ -116,6 +122,19 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
     return msgs.map((m) => `[${m.agentId}]: ${m.content}`).join("\n");
   }
 
+  // Shared by onContestation and decideAdjust: reopen the current thread
+  // for a new round of responses (bump round, clear respondents/decision
+  // flag, go back to "waiting").
+  function resetForNewRound(thread: ThreadState): void {
+    thread.round += 1;
+    thread.respondedAgents = [];
+    thread.decideRequested = false;
+    thread.status = "waiting";
+    phase = "waiting";
+    messageBuffer.set(thread.threadId, []);
+    enqueue({ type: "wait_responses", threadId: thread.threadId, timeoutMs: RESPONSE_TIMEOUT_MS });
+  }
+
   return {
     get phase() {
       return phase;
@@ -130,6 +149,7 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
         throw new Error(`Cannot start work while in phase "${phase}"`);
       }
       phase = "announcing";
+      pendingWork = work;
       enqueue({ type: "announce", work });
     },
 
@@ -143,7 +163,9 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
         respondedAgents: [],
         round: 1,
         decideRequested: false,
+        work: pendingWork ?? { subject: "", targetModules: [], targetFiles: [] },
       };
+      pendingWork = null;
       threads.set(result.threadId, thread);
       messageBuffer.set(result.threadId, []);
       currentThreadId = result.threadId;
@@ -227,13 +249,7 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
       }
 
       // Back to waiting for a new round
-      thread.round += 1;
-      thread.respondedAgents = [];
-      thread.decideRequested = false;
-      thread.status = "waiting";
-      phase = "waiting";
-      messageBuffer.set(threadId, []);
-      enqueue({ type: "wait_responses", threadId, timeoutMs: RESPONSE_TIMEOUT_MS });
+      resetForNewRound(thread);
     },
 
     onTimeout(threadId: string): void {
@@ -276,6 +292,15 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
       phase = "idle";
       currentThreadId = null;
       enqueue({ type: "done", summary: `Yielded on thread ${thread.threadId}` });
+    },
+
+    decideAdjust(newPlan: string): void {
+      if (phase !== "waiting" || !currentThreadId) return;
+      const thread = getThread(currentThreadId);
+      if (!thread) return;
+
+      thread.work.plan = newPlan;
+      resetForNewRound(thread);
     },
 
     workDone(): void {

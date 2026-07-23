@@ -250,6 +250,74 @@ describe("CoordinationProtocol", () => {
     expect(thread?.respondedAgents).toEqual([]);
   });
 
+  // ── Adjust: waiting → waiting (new round, updated plan) ────────────
+
+  it("updates the plan, bumps the round, and re-enters waiting on decideAdjust", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-adjust",
+      status: "open",
+      expectedRespondents: ["agent-2"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    // Respondent replies, LLM is asked to decide
+    protocol.onThreadMessage("t-adjust", "agent-2", "I'm touching session.ts too");
+    const decideAction = protocol.nextAction();
+    expect(decideAction?.type).toBe("ask_llm_decide");
+
+    expect(protocol.getThreadState("t-adjust")?.round).toBe(1);
+
+    protocol.decideAdjust("Avoid session.ts, focus on login.ts instead");
+
+    expect(protocol.phase).toBe("waiting");
+    const thread = protocol.getThreadState("t-adjust");
+    expect(thread?.work.plan).toBe("Avoid session.ts, focus on login.ts instead");
+    expect(thread?.round).toBe(2);
+    expect(thread?.respondedAgents).toEqual([]);
+    expect(thread?.decideRequested).toBe(false);
+    expect(thread?.status).toBe("waiting");
+
+    const action = protocol.nextAction();
+    expect(action?.type).toBe("wait_responses");
+    if (action?.type === "wait_responses") {
+      expect(action.threadId).toBe("t-adjust");
+    }
+  });
+
+  it("allows a fresh ask_llm_decide after decideAdjust opens a new round", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-adjust-2",
+      status: "open",
+      expectedRespondents: ["agent-2"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    protocol.onThreadMessage("t-adjust-2", "agent-2", "conflict on file X");
+    drainActions(protocol); // ask_llm_decide
+
+    protocol.decideAdjust("New plan avoiding file X");
+    drainActions(protocol); // wait_responses
+
+    // Round 2: quorum should trigger a fresh ask_llm_decide
+    protocol.onThreadMessage("t-adjust-2", "agent-2", "looks fine now");
+    const action = protocol.nextAction();
+    expect(action?.type).toBe("ask_llm_decide");
+  });
+
+  it("ignores decideAdjust when not waiting", () => {
+    protocol.decideAdjust("some plan");
+    expect(protocol.phase).toBe("idle");
+    expect(protocol.nextAction()).toBeNull();
+  });
+
   // ── Max rounds: 3 contestations → auto-resolve ────────────────────
 
   it("auto-resolves after max rounds", () => {

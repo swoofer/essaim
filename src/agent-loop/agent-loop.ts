@@ -644,9 +644,25 @@ export async function runAgentLoop(
           const resp = await send(
             formatCoordinationContext(action.threadId, action.responses),
           );
-          const decision = resp.content.trim().toUpperCase();
+          const content = resp.content.trim();
+          const decision = content.toUpperCase();
           if (decision.startsWith("YIELD")) {
             protocol.decideYield();
+          } else if (decision.startsWith("ADJUST")) {
+            // The LLM's reply is "ADJUST" followed by its new plan — strip
+            // the leading token (and any separator like ":" or "-") to get
+            // the plan text.
+            const newPlan = content.slice("ADJUST".length).replace(/^[:\s-]+/, "").trim();
+            if (newPlan) {
+              protocol.decideAdjust(newPlan);
+            } else {
+              // Malformed ADJUST (no plan attached) — don't let it wedge the
+              // loop on a plan we don't have. Fall back to the safe default.
+              logger.warn("ADJUST decision had no plan attached — falling back to CONTINUE", {
+                threadId: action.threadId,
+              });
+              protocol.decideContinue();
+            }
           } else {
             protocol.decideContinue();
           }
