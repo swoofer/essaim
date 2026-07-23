@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.8.0](https://github.com/swoofer/essaim/compare/v0.7.0...v0.8.0) (2026-07-23)
+
+
+### Features
+
+* **coordination:** handle ADJUST decisions from the coordination LLM ([#73](https://github.com/swoofer/essaim/issues/73)) ([87d0537](https://github.com/swoofer/essaim/commit/87d05371289233fff6fbd8dd0dade6d76a3248e0))
+* **security:** forward Strix custom LLM endpoint + tuning vars (proxy/self-hosted support) ([c8fd372](https://github.com/swoofer/essaim/commit/c8fd37221a54719357b4009ae5189c929b38d948))
+* **security:** invoke Strix as host CLI, read strix_runs artifacts; secrets to child env (no disk) ([b601c10](https://github.com/swoofer/essaim/commit/b601c100d2a812ec9b36ac7f8722ed6f803065a3))
+* **security:** parse real Strix vulnerabilities.json + SARIF; scan_mode gains standard ([5ccbd9d](https://github.com/swoofer/essaim/commit/5ccbd9d0a414715f433843bd5ccfc2a06f60a17d))
+* **security:** pluggable multi-engine security subsystem (v1: Strix) ([#70](https://github.com/swoofer/essaim/issues/70)) ([bae2edb](https://github.com/swoofer/essaim/commit/bae2edb6502ebb8580217dcdca3abc173eed8fb8))
+
+
+### Bug Fixes
+
+* **agent-launcher:** handle spawn errors and resolve the claude binary robustly ([#64](https://github.com/swoofer/essaim/issues/64)) ([dbe5b44](https://github.com/swoofer/essaim/commit/dbe5b44c2fbebd037f507c7ce9a29fd390ac750e))
+* **agent-loop:** release task and mark run as rate-limited when still rate-limited after retry ([#61](https://github.com/swoofer/essaim/issues/61)) ([4f750ca](https://github.com/swoofer/essaim/commit/4f750ca06bad5984dba46095774896d738149a75))
+* **claude-stream:** decode stdout as UTF-8 to avoid split-codepoint corruption ([#65](https://github.com/swoofer/essaim/issues/65)) ([6463715](https://github.com/swoofer/essaim/commit/646371562fe121e884a57868194c986f47829ef9))
+* **coordination:** dedupe ask_llm_decide requests per round ([#67](https://github.com/swoofer/essaim/issues/67)) ([d50d1c8](https://github.com/swoofer/essaim/commit/d50d1c8604dd6c0e1c4619bdd27b34010b4a9dee))
+* **hooks:** report workspace-relative paths from submodule checkouts ([#75](https://github.com/swoofer/essaim/issues/75)) ([84bf558](https://github.com/swoofer/essaim/commit/84bf558ba6e81ed045fca47621d8f4b26ac35cf3))
+* **mqtt:** honor reconnect budget on post-connect errors, catch up missed consultations ([#63](https://github.com/swoofer/essaim/issues/63)) ([4886de3](https://github.com/swoofer/essaim/commit/4886de39a74e0d2912a0fd6eb642af3f1d9dd74b))
+* **mqtt:** preserve coordinator URL path when deriving the WS URL ([655b176](https://github.com/swoofer/essaim/commit/655b176640bf48414afeaec791ad6cbf0b934788))
+* **orchestrator:** cap concurrent agent launches and refuse resetBase's implicit-cwd clean ([#74](https://github.com/swoofer/essaim/issues/74)) ([dc186b1](https://github.com/swoofer/essaim/commit/dc186b1b35fc2e7f837aeef1eda6795e63a39215))
+* **orchestrator:** skip unregistered agents, scope metrics to the run, drain before teardown, guard resolution counts ([#69](https://github.com/swoofer/essaim/issues/69)) ([c106952](https://github.com/swoofer/essaim/commit/c1069527ba758a855d67e967b362471e11598fb9))
+* **pipeline:** validate hooks arrays and reject non-scalar values ([#68](https://github.com/swoofer/essaim/issues/68)) ([d7afe86](https://github.com/swoofer/essaim/commit/d7afe86c99abab57b025b2a2d315d13733d9098b))
+* **security:** recompute fingerprint after SARIF backfill; env allowlist for strix child; per-element parse resilience ([ac3b45a](https://github.com/swoofer/essaim/commit/ac3b45a215ff32b309e98aa397063164e27ecfb5))
+* **security:** Strix adapter — real host-CLI invocation + strix_runs artifacts ([90764b2](https://github.com/swoofer/essaim/commit/90764b25f162a0a50aa9faf90f21d22bb98726ae))
+* **security:** use a concrete loopback in LLM_API_BASE examples (satisfy hermetic guard) ([b682861](https://github.com/swoofer/essaim/commit/b6828614157473c1e86b762cf208d32cb77bf307))
+* **track-activity:** skip sensitive file content and send the coordinator auth token ([#66](https://github.com/swoofer/essaim/issues/66)) ([94d199a](https://github.com/swoofer/essaim/commit/94d199a8baa2a46f570c7f2f8f139c24b8a011cf))
+* **work-stealing:** refetch busyFiles after a lost claim race ([#62](https://github.com/swoofer/essaim/issues/62)) ([d3cd363](https://github.com/swoofer/essaim/commit/d3cd363128e85be5b6cb87923da693e47587f885))
+
+
+### Documentation
+
+* **security:** Strix adapter real-invocation design (CLI + files + verified schema + pinned sandbox digest) ([4f2b36c](https://github.com/swoofer/essaim/commit/4f2b36c1eb58361fddb08ec8cdedc4e525f36bcf))
+* **security:** Strix invoked as host CLI (pip install strix-agent) driving a pinned Docker sandbox ([c396823](https://github.com/swoofer/essaim/commit/c396823d13479f7c19174dfe1aff4676c7f254c3))
+
 ## [0.7.0](https://github.com/swoofer/essaim/compare/v0.6.0...v0.7.0) (2026-07-14)
 
 
