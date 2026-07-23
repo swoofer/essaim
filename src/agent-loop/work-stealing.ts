@@ -110,16 +110,11 @@ export async function postDiscoveries(
 }
 
 /**
- * Atomically claim the next available task from the coordinator.
- * Uses POST /api/claim-task which does UPDATE WHERE claimed_by IS NULL.
- * Returns null if no tasks available.
+ * Fetch active threads from the coordinator, scoped to the current run.
+ * Returns null on any failure (unreachable coordinator or non-ok response) —
+ * callers treat that as "nothing to claim right now".
  */
-export async function claimNextTask(
-  coordinatorUrl: string,
-  agentId: string,
-): Promise<Task | null> {
-  // Get all active threads
-  let threads: Array<Record<string, unknown>>;
+async function fetchActiveThreads(coordinatorUrl: string): Promise<Array<Record<string, unknown>> | null> {
   try {
     const resp = await fetch(`${coordinatorUrl}/api/threads-active`, {
       method: "POST",
@@ -129,31 +124,49 @@ export async function claimNextTask(
       // visible — the coordinator's filter keeps them on purpose.
       body: JSON.stringify({ run_id: currentRunId() }),
     });
-    if (!resp.ok) { log.warn("claimNextTask: threads-active failed", { status: resp.status }); return null; }
+    if (!resp.ok) { log.warn("fetchActiveThreads: threads-active failed", { status: resp.status }); return null; }
     const data = await resp.json();
-    threads = Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data : [];
   } catch (err) {
-    log.warn("claimNextTask: coordinator unreachable", { error: (err as Error).message });
+    log.warn("fetchActiveThreads: coordinator unreachable", { error: (err as Error).message });
     return null;
   }
+}
 
-  const open = threads.filter((t) => t.status === "open");
-  const unclaimed = open.filter((t) => !t.claimed_by);
-  log.debug(`claimNextTask: ${threads.length} active, ${open.length} open, ${unclaimed.length} unclaimed`);
-
-  // One agent per file (#30). Three hunters that each posted their own discovery
-  // for a single bug produce three threads on the same file; claiming is atomic
-  // per THREAD, so each hunter took one and all three wrote a near-identical
-  // repro test. Excluding files another agent is actively working makes the
-  // de-duplication structural instead of asking the LLM to notice — which is
-  // also, exactly, what the coordinator exists to do.
+// One agent per file (#30). Three hunters that each posted their own discovery
+// for a single bug produce three threads on the same file; claiming is atomic
+// per THREAD, so each hunter took one and all three wrote a near-identical
+// repro test. Excluding files another agent is actively working makes the
+// de-duplication structural instead of asking the LLM to notice — which is
+// also, exactly, what the coordinator exists to do.
+function computeBusyFiles(openThreads: Array<Record<string, unknown>>, agentId: string): Set<string> {
   const busyFiles = new Set<string>();
-  for (const t of open) {
+  for (const t of openThreads) {
     const owner = t.claimed_by as string | null | undefined;
     if (owner && owner !== agentId) {
       for (const f of threadFiles(t)) busyFiles.add(f);
     }
   }
+  return busyFiles;
+}
+
+/**
+ * Atomically claim the next available task from the coordinator.
+ * Uses POST /api/claim-task which does UPDATE WHERE claimed_by IS NULL.
+ * Returns null if no tasks available.
+ */
+export async function claimNextTask(
+  coordinatorUrl: string,
+  agentId: string,
+): Promise<Task | null> {
+  const threads = await fetchActiveThreads(coordinatorUrl);
+  if (threads === null) return null;
+
+  const open = threads.filter((t) => t.status === "open");
+  const unclaimed = open.filter((t) => !t.claimed_by);
+  log.debug(`claimNextTask: ${threads.length} active, ${open.length} open, ${unclaimed.length} unclaimed`);
+
+  let busyFiles = computeBusyFiles(open, agentId);
 
   // What has already LANDED on each file this run, so the executing agent can
   // recognise a duplicate rather than re-committing it.
@@ -208,6 +221,18 @@ export async function claimNextTask(
         };
       }
       log.info(`claim race lost thread=${threadId} to ${(result as Record<string, unknown>).claimed_by as string}: ${subject.slice(0, 60)}`);
+      // Lost the race: another agent's claim landed between our snapshot and
+      // this attempt, so busyFiles may already be stale for the NEXT
+      // candidate. Re-fetch and recompute before evaluating it. This narrows
+      // the TOCTOU window (#30 doesn't get worse) — it does NOT close it:
+      // claim-task is atomic only on thread_id, not on file, so a race can
+      // still land in the gap between this refetch and the next claim
+      // attempt. Closing it fully needs server-side atomicity over the file,
+      // i.e. a coordinator change — out of scope here.
+      const refreshed = await fetchActiveThreads(coordinatorUrl);
+      if (refreshed !== null) {
+        busyFiles = computeBusyFiles(refreshed.filter((t) => t.status === "open"), agentId);
+      }
     } catch (err) {
       log.warn(`claim error: ${threadId}`, { error: (err as Error).message });
     }
