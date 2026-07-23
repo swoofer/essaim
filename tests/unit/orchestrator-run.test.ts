@@ -225,3 +225,172 @@ describe("runProject — timeout teardown ordering (#112)", () => {
     expect(order).toEqual(["agent-drained", "coordinator-stopped"]);
   });
 });
+
+// ── Concurrency cap on agent fan-out ────────────────────────────────────────
+
+describe("runProject — concurrency cap on agent fan-out", () => {
+  /**
+   * Wires launchAgentLoop to track how many launches are simultaneously
+   * in-flight and hand back per-agent resolvers so the test can release them
+   * in a controlled order.
+   */
+  function makeTrackedLaunch() {
+    let active = 0;
+    let maxActive = 0;
+    const pending: Array<() => void> = [];
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => pending.push(resolve));
+      active--;
+      return makeLoopResult(agent.id);
+    });
+    return {
+      get maxActive() { return maxActive; },
+      get pendingCount() { return pending.length; },
+      releaseOne() { pending.shift()?.(); },
+      releaseAll() { while (pending.length) pending.shift()!(); },
+    };
+  }
+
+  function makeFanoutProject(agentCount: number, extra: Partial<MiniProject> = {}): MiniProject {
+    const agents = Array.from({ length: agentCount }, (_, i) =>
+      makeAgent({ id: `a${i}`, name: `Agent ${i}` })
+    );
+    const registerOk: Record<string, boolean> = Object.fromEntries(agents.map((a) => [a.id, true]));
+    vi.stubGlobal("fetch", makeFetchMock(registerOk));
+    return makeProject({
+      agents,
+      workspace: { type: "none", base: TMP_DIR },
+      // mode "fixed" with no delay: the no-throttle path — every agent would
+      // otherwise launch back-to-back in the same tick.
+      stagger: { mode: "fixed" },
+      ...extra,
+    });
+  }
+
+  it("never runs more than max_concurrency agent-loops in flight at once", async () => {
+    const tracked = makeTrackedLaunch();
+    const project = makeFanoutProject(5, { max_concurrency: 2 });
+
+    const runPromise = runProject(project, "with_coordinator", false, {
+      coordinatorUrl: "http://coordinator.test",
+    });
+
+    // Only 2 of the 5 agents should have been allowed to start.
+    await vi.waitFor(() => expect(tracked.pendingCount).toBe(2));
+    expect(tracked.maxActive).toBeLessThanOrEqual(2);
+
+    // Releasing one in-flight agent should let exactly one more through —
+    // still never exceeding the cap.
+    tracked.releaseOne();
+    await vi.waitFor(() => expect(tracked.pendingCount).toBe(2));
+    expect(tracked.maxActive).toBeLessThanOrEqual(2);
+
+    tracked.releaseAll();
+    await vi.waitFor(() => expect(tracked.pendingCount).toBeGreaterThan(0));
+    tracked.releaseAll();
+    await runPromise;
+
+    expect(tracked.maxActive).toBeLessThanOrEqual(2);
+  });
+
+  it("defaults max_concurrency to 8 when unset", async () => {
+    const tracked = makeTrackedLaunch();
+    const project = makeFanoutProject(10); // no max_concurrency override
+
+    const runPromise = runProject(project, "with_coordinator", false, {
+      coordinatorUrl: "http://coordinator.test",
+    });
+
+    await vi.waitFor(() => expect(tracked.pendingCount).toBe(8));
+    expect(tracked.maxActive).toBeLessThanOrEqual(8);
+
+    tracked.releaseAll();
+    await vi.waitFor(() => expect(tracked.pendingCount).toBeGreaterThan(0));
+    tracked.releaseAll();
+    await runPromise;
+
+    expect(tracked.maxActive).toBeLessThanOrEqual(8);
+  });
+
+  it("does not cap below the configured max_concurrency (no false throttling)", async () => {
+    const tracked = makeTrackedLaunch();
+    const project = makeFanoutProject(3, { max_concurrency: 8 });
+
+    const runPromise = runProject(project, "with_coordinator", false, {
+      coordinatorUrl: "http://coordinator.test",
+    });
+
+    // All 3 agents (well under the cap) should launch immediately.
+    await vi.waitFor(() => expect(tracked.pendingCount).toBe(3));
+
+    tracked.releaseAll();
+    await runPromise;
+
+    expect(tracked.maxActive).toBe(3);
+  });
+});
+
+// ── resetBase refuses an implicit cwd fallback ──────────────────────────────
+
+describe("runProject — resetBase refuses implicit cwd fallback", () => {
+  const ORIGINAL_ENV = process.env.ESSAIM_RESET_BASE;
+
+  afterEach(() => {
+    if (ORIGINAL_ENV === undefined) delete process.env.ESSAIM_RESET_BASE;
+    else process.env.ESSAIM_RESET_BASE = ORIGINAL_ENV;
+  });
+
+  it("refuses to run (and never touches cwd) when ESSAIM_RESET_BASE=1 and workspace.base is unset", async () => {
+    process.env.ESSAIM_RESET_BASE = "1";
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree" }, // base intentionally omitted
+    });
+
+    await expect(
+      runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
+    ).rejects.toThrow(/resetBase refused/);
+
+    // The agent must never have been launched — the refusal happens before
+    // any workspace/agent setup.
+    expect(launchAgentLoop).not.toHaveBeenCalled();
+  });
+
+  it("proceeds normally when ESSAIM_RESET_BASE=1 and workspace.base IS set", async () => {
+    process.env.ESSAIM_RESET_BASE = "1";
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree", base: TMP_DIR },
+    });
+
+    const result = await runProject(project, "with_coordinator", false, {
+      coordinatorUrl: "http://coordinator.test",
+    });
+
+    expect(launchAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.agent_results).toHaveLength(1);
+  });
+
+  it("does not throw when ESSAIM_RESET_BASE is unset, even with workspace.base omitted (no regression)", async () => {
+    delete process.env.ESSAIM_RESET_BASE;
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree" }, // base omitted, but no destructive opt-in
+    });
+
+    await expect(
+      runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
+    ).resolves.toBeDefined();
+  });
+});
