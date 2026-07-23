@@ -9,23 +9,50 @@ const fx = (name: string) => readFileSync(join(__dirname, "..", "fixtures", "sec
 
 const scope: ResolvedScope = { targetPath: "C:/repo", mode: "diff", scanMode: "quick", diffBase: "abc123", excludeMatchers: [] };
 
-// Build a SpawnFn that emits the given stdout + exit code, and records argv.
-function scriptedSpawn(stdout: string, code: number, capture?: { args?: string[] }): SpawnFn {
-  return ((_cmd: string, args: string[]) => {
-    if (capture) capture.args = args;
-    const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
-    const stream = { on: (_e: "data", cb: (c: string) => void) => setTimeout(() => cb(stdout), 0) };
-    return {
-      stdout: stream,
+interface Invocation {
+  cmd: string;
+  args: string[];
+  opts: { cwd?: string; env?: Record<string, string | undefined> };
+}
+
+/** Build a SpawnFn that dispatches on (command, args) so `strix --version`, `strix -n …`, and
+ *  `docker info` can each be scripted independently. Records every invocation. */
+function makeSpawn(
+  handlers: {
+    match: (cmd: string, args: string[]) => boolean;
+    stdout?: string;
+    code?: number | null;
+    hang?: boolean; // never closes on its own — only via kill()
+  }[],
+  invocations: Invocation[] = [],
+): SpawnFn {
+  return ((cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string | undefined> }) => {
+    invocations.push({ cmd, args, opts });
+    const handler = handlers.find((h) => h.match(cmd, args));
+    const stdout = handler?.stdout ?? "";
+    const code = handler?.code ?? 0;
+    const hang = handler?.hang ?? false;
+
+    let closeCb: ((code: number | null) => void) | null = null;
+    const child = {
+      stdout: { on: (_e: "data", cb: (c: string) => void) => setTimeout(() => cb(stdout), 0) },
       stderr: { on: () => {} },
       on: (ev: string, cb: (...a: unknown[]) => void) => {
-        (listeners[ev] ??= []).push(cb);
-        if (ev === "close") setTimeout(() => cb(code), 5);
+        if (ev === "close") {
+          closeCb = cb as (code: number | null) => void;
+          if (!hang) setTimeout(() => cb(code), 5);
+        }
       },
-      kill: () => {},
+      kill: () => {
+        if (hang && closeCb) closeCb(null);
+      },
     };
+    return child as unknown as ReturnType<SpawnFn>;
   }) as unknown as SpawnFn;
 }
+
+const okVersion = { match: (cmd: string, args: string[]) => cmd === "strix" && args[0] === "--version", code: 0 };
+const okDockerInfo = { match: (cmd: string) => cmd === "docker", code: 0 };
 
 describe("STRIX_CAPABILITIES", () => {
   it("declares Apache-2.0, static, process transport", () => {
@@ -35,90 +62,142 @@ describe("STRIX_CAPABILITIES", () => {
   });
 });
 
-describe("StrixAdapter.healthCheck — placeholder digest guard", () => {
-  it("refuses with a clear message when using the default (placeholder-digest) image, without spawning docker", async () => {
-    let spawnCalled = false;
-    const spawnFn: SpawnFn = ((..._args: unknown[]) => {
-      spawnCalled = true;
-      throw new Error("docker should not be spawned when the digest is a placeholder");
-    }) as unknown as SpawnFn;
-    // No `image` override → adapter uses the default PINNED_STRIX_IMAGE (still PLACEHOLDER_DIGEST).
+describe("StrixAdapter.healthCheck", () => {
+  it("strix + docker both present → ok:true", async () => {
+    const spawnFn = makeSpawn([okVersion, okDockerInfo]);
+    const a = createStrixAdapter({ runId: "r1", spawnFn });
+    const res = await a.healthCheck();
+    expect(res.ok).toBe(true);
+    expect(res.detail).toContain("strix cli ok");
+    expect(res.detail).toContain("docker ok");
+  });
+
+  it("strix --version non-zero → ok:false, mentions pip install strix-agent", async () => {
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "--version", code: 1 }]);
     const a = createStrixAdapter({ runId: "r1", spawnFn });
     const res = await a.healthCheck();
     expect(res.ok).toBe(false);
-    expect(res.detail).toContain("PLACEHOLDER_DIGEST");
-    expect(res.detail).toContain("PINNED_STRIX_IMAGE");
-    expect(spawnCalled).toBe(false);
+    expect(res.detail).toContain("pip install strix-agent");
+  });
+
+  it("docker info non-zero → ok:false, mentions Docker", async () => {
+    const spawnFn = makeSpawn([okVersion, { match: (cmd) => cmd === "docker", code: 1 }]);
+    const a = createStrixAdapter({ runId: "r1", spawnFn });
+    const res = await a.healthCheck();
+    expect(res.ok).toBe(false);
+    expect(res.detail).toContain("Docker");
   });
 });
 
 describe("StrixAdapter.run — exit-code mapping", () => {
   it("exit 0 → no_vulns, no findings", async () => {
-    const a = createStrixAdapter({ runId: "r1", spawnFn: scriptedSpawn(fx("strix-clean.stdout.txt"), 0) });
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 0, stdout: "clean" }]);
+    const a = createStrixAdapter({ runId: "r1", spawnFn, makeWorkdir: () => "/fake", cleanup: () => {} });
     const res = await a.run(scope, new AbortController().signal);
     expect(res.status).toBe("no_vulns");
     expect(res.findings).toHaveLength(0);
     expect(res.exitCode).toBe(0);
   });
 
-  it("exit 2 → vulns_found, findings parsed + normalized", async () => {
-    const cap: { args?: string[] } = {};
-    const a = createStrixAdapter({ runId: "r1", spawnFn: scriptedSpawn(fx("strix-vulns.stdout.txt"), 2, cap) });
+  it("exit 2, artifacts readable → vulns_found, reconciled findings", async () => {
+    const invocations: Invocation[] = [];
+    const spawnFn = makeSpawn(
+      [{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 2, stdout: "vulns found" }],
+      invocations,
+    );
+    const a = createStrixAdapter({
+      runId: "r1",
+      spawnFn,
+      makeWorkdir: () => "/fake",
+      cleanup: () => {},
+      readRun: () => ({ vulnJson: fx("strix-vulnerabilities.json"), sarif: fx("strix-findings.sarif") }),
+    });
     const res = await a.run(scope, new AbortController().signal);
     expect(res.status).toBe("vulns_found");
     expect(res.findings).toHaveLength(2);
     expect(res.findings[0].engine).toBe("strix");
-    // argv carried the diff scope
-    expect(cap.args).toEqual(expect.arrayContaining(["--diff-base", "abc123"]));
+    // reconciliation: a json finding's file/line survives (already present in json, SARIF backfill n/a here)
+    expect(res.findings.some((f) => f.file === "src/db/users.ts" && f.line === 42)).toBe(true);
+
+    // argv carried the diff scope (via strixCliArgs)
+    const runInvocation = invocations.find((i) => i.cmd === "strix" && i.args[0] === "-n");
+    expect(runInvocation?.args).toEqual(expect.arrayContaining(["--diff-base", "abc123"]));
+  });
+
+  it("exit 2 but readRun returns {} (no artifacts) → error (zero-reads guard), NOT no_vulns", async () => {
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 2, stdout: "vulns found" }]);
+    const a = createStrixAdapter({
+      runId: "r1",
+      spawnFn,
+      makeWorkdir: () => "/fake",
+      cleanup: () => {},
+      readRun: () => ({}),
+    });
+    const res = await a.run(scope, new AbortController().signal);
+    expect(res.status).toBe("error");
+    expect(res.status).not.toBe("no_vulns");
+  });
+
+  it("exit 2 with vulnJson parsing to an empty array → error", async () => {
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 2, stdout: "vulns found" }]);
+    const a = createStrixAdapter({
+      runId: "r1",
+      spawnFn,
+      makeWorkdir: () => "/fake",
+      cleanup: () => {},
+      readRun: () => ({ vulnJson: "[]" }),
+    });
+    const res = await a.run(scope, new AbortController().signal);
+    expect(res.status).toBe("error");
   });
 
   it("exit 1 → error", async () => {
-    const a = createStrixAdapter({ runId: "r1", spawnFn: scriptedSpawn("boom", 1) });
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 1, stdout: "boom" }]);
+    const a = createStrixAdapter({ runId: "r1", spawnFn, makeWorkdir: () => "/fake", cleanup: () => {} });
     const res = await a.run(scope, new AbortController().signal);
     expect(res.status).toBe("error");
     expect(res.error?.kind).toBe("crash");
   });
 
-  it("exit 2 but ZERO parseable findings from non-empty stdout → error (never false no_vulns)", async () => {
-    const a = createStrixAdapter({ runId: "r1", spawnFn: scriptedSpawn("noise but no json", 2) });
-    const res = await a.run(scope, new AbortController().signal);
-    expect(res.status).toBe("error");
-  });
-
-  it("exit 2 but a clean-parsed empty findings array → error (never a false no_vulns)", async () => {
-    // strix-clean.stdout.txt parses to {"findings": []}; paired with exit 2 this must be an error, not no_vulns.
-    const a = createStrixAdapter({ runId: "r1", spawnFn: scriptedSpawn(fx("strix-clean.stdout.txt"), 2) });
-    const res = await a.run(scope, new AbortController().signal);
-    expect(res.status).toBe("error");
-  });
-
   it("stdoutExcerpt is redacted", async () => {
-    const a = createStrixAdapter({ runId: "r1", spawnFn: scriptedSpawn(fx("strix-vulns.stdout.txt"), 2) });
+    const spawnFn = makeSpawn([
+      { match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 2, stdout: "leaked sk-abcDEF0123456789ghijklmnop" },
+    ]);
+    const a = createStrixAdapter({
+      runId: "r1",
+      spawnFn,
+      makeWorkdir: () => "/fake",
+      cleanup: () => {},
+      readRun: () => ({ vulnJson: fx("strix-vulnerabilities.json") }),
+    });
     const res = await a.run(scope, new AbortController().signal);
     expect(res.stdoutExcerpt ?? "").not.toContain("sk-abcDEF0123456789ghijklmnop");
   });
 
-  it("abort → status timeout AND issues a docker kill of the tracked container", async () => {
-    const invocations: string[][] = [];
-    // run child: closes only when killed via the signal; kill child: closes immediately.
-    const spawnFn: SpawnFn = ((_cmd: string, args: string[]) => {
-      invocations.push(args);
-      const child: any = { stdout: { on: () => {} }, stderr: { on: () => {} }, kill: () => {}, _close: null };
-      child.on = (ev: string, cb: (code: number | null) => void) => { if (ev === "close") child._close = cb; };
-      if (args[0] === "kill") {
-        setTimeout(() => child._close && child._close(0), 0); // teardown closes immediately
-      } else {
-        child.kill = () => child._close && child._close(null); // run child closes only when killed
-      }
-      return child;
-    }) as unknown as SpawnFn;
+  it("passes secrets into the child env, never into argv", async () => {
+    const invocations: Invocation[] = [];
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", code: 0 }], invocations);
+    const a = createStrixAdapter({
+      runId: "r1",
+      spawnFn,
+      makeWorkdir: () => "/fake",
+      cleanup: () => {},
+      secrets: { STRIX_LLM: "anthropic/claude-sonnet-4-6", LLM_API_KEY: "sk-secret-value" },
+    });
+    await a.run(scope, new AbortController().signal);
+    const runInvocation = invocations.find((i) => i.cmd === "strix" && i.args[0] === "-n");
+    expect(runInvocation?.args.join(" ")).not.toContain("sk-secret-value");
+    expect(runInvocation?.opts.env?.STRIX_LLM).toBe("anthropic/claude-sonnet-4-6");
+    expect(runInvocation?.opts.env?.LLM_API_KEY).toBe("sk-secret-value");
+  });
 
+  it("abort → status timeout", async () => {
+    const spawnFn = makeSpawn([{ match: (cmd, args) => cmd === "strix" && args[0] === "-n", hang: true }]);
     const ac = new AbortController();
-    const a = createStrixAdapter({ runId: "r1", spawnFn });
+    const a = createStrixAdapter({ runId: "r1", spawnFn, makeWorkdir: () => "/fake", cleanup: () => {} });
     const p = a.run(scope, ac.signal);
     setTimeout(() => ac.abort(), 5);
     const res = await p;
     expect(res.status).toBe("timeout");
-    expect(invocations.some((args) => args[0] === "kill")).toBe(true); // docker kill happened
   });
 });

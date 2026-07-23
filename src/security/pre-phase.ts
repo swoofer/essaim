@@ -8,7 +8,7 @@ import type {
 import { resolveScope, dropOutOfScope } from "./scope.js";
 import { assertAuthorizedRun } from "./authorization.js";
 import { loadBaseline, applyBaseline } from "./baseline.js";
-import { resolveEngineSecrets, writeEnvFile, removeEnvFile } from "./secrets.js";
+import { resolveEngineSecrets } from "./secrets.js";
 import { createDefaultRegistry, runSecurityScan, type ScanResult } from "./scan.js";
 import { registerSyntheticAuthor, ingestFindings, syntheticAuthorId } from "./ingest.js";
 import { verifyFixes, type VerifyItem, type VerifyResult } from "./verify.js";
@@ -16,7 +16,7 @@ import { isHaltRequested, sweepOrphanContainers } from "./killswitch.js";
 import { normPath } from "./finding.js";
 import { authHeaders } from "../coordinator-auth.js";
 import { createLogger } from "../logger.js";
-import { PINNED_STRIX_IMAGE } from "./docker.js";
+import { PINNED_STRIX_SANDBOX_IMAGE } from "./strix-cli.js";
 
 const log = createLogger("security");
 
@@ -61,7 +61,7 @@ export function buildLedger(
     exitCode: r?.exitCode,
     engineVersion: r?.engineVersion,
     license: "Apache-2.0",
-    imageDigest: imageDigestOf(PINNED_STRIX_IMAGE),
+    imageDigest: imageDigestOf(PINNED_STRIX_SANDBOX_IMAGE),
     outOfScopeDropped: extra.outOfScopeDropped,
     suppressed: extra.suppressed,
   };
@@ -138,15 +138,13 @@ export async function runSecurityPrePhase(
   assertAuthorizedRun(cfg, { resolvedDiffBase: scope.diffBase, envAffirmed: p.security.envAffirmed });
 
   const secrets = resolveEngineSecrets(p.security.secretsFile);
-  const envFile = writeEnvFile(secrets);
-  const registry = deps.registry ?? createDefaultRegistry({ runId: p.runId, envFile });
+  const registry = deps.registry ?? createDefaultRegistry({ runId: p.runId, secrets });
   const sweep = deps.sweep ?? (() => sweepOrphanContainers(p.runId));
 
   let scan: ScanResult;
   try {
     scan = await runSecurityScan(registry, cfg.engines, scope, AbortSignal.timeout(cfg.scanTimeoutMs));
   } finally {
-    removeEnvFile(envFile);
     await sweep().catch(() => undefined); // teardown any orphan container
   }
 
@@ -223,24 +221,19 @@ export async function runSecurityVerifyPhase(
 ): Promise<{ verified: number; reopened: number; details: VerifyResult[] }> {
   const items = buildVerifyItems(params, { diffFn: deps.diffFn });
   const secrets = resolveEngineSecrets(params.secretsFile);
-  const envFile = writeEnvFile(secrets);
-  const registry = deps.registry ?? createDefaultRegistry({ runId: "verify", envFile });
-  try {
-    const details = await verifyFixes(registry, items, AbortSignal.timeout(params.scanTimeoutMs));
-    // Change B: buildVerifyItems silently OMITS a posted finding no worktree diff touched — it must
-    // not vanish from the tally. Any postedMap entry whose finding.fingerprint isn't among the
-    // verifyFixes results is conservatively counted as reopened (closure unproven).
-    const coveredFingerprints = new Set(details.map((d) => d.fingerprint));
-    const orphanDetails: VerifyResult[] = params.postedMap
-      .filter(({ finding }) => !coveredFingerprints.has(finding.fingerprint))
-      .map(({ threadId, finding }) => ({ threadId, fingerprint: finding.fingerprint, status: "reopened" as const }));
-    const allDetails = [...details, ...orphanDetails];
-    return {
-      verified: allDetails.filter((d) => d.status === "verified").length,
-      reopened: allDetails.filter((d) => d.status === "reopened").length,
-      details: allDetails,
-    };
-  } finally {
-    removeEnvFile(envFile);
-  }
+  const registry = deps.registry ?? createDefaultRegistry({ runId: "verify", secrets });
+  const details = await verifyFixes(registry, items, AbortSignal.timeout(params.scanTimeoutMs));
+  // Change B: buildVerifyItems silently OMITS a posted finding no worktree diff touched — it must
+  // not vanish from the tally. Any postedMap entry whose finding.fingerprint isn't among the
+  // verifyFixes results is conservatively counted as reopened (closure unproven).
+  const coveredFingerprints = new Set(details.map((d) => d.fingerprint));
+  const orphanDetails: VerifyResult[] = params.postedMap
+    .filter(({ finding }) => !coveredFingerprints.has(finding.fingerprint))
+    .map(({ threadId, finding }) => ({ threadId, fingerprint: finding.fingerprint, status: "reopened" as const }));
+  const allDetails = [...details, ...orphanDetails];
+  return {
+    verified: allDetails.filter((d) => d.status === "verified").length,
+    reopened: allDetails.filter((d) => d.status === "reopened").length,
+    details: allDetails,
+  };
 }

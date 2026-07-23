@@ -5,9 +5,7 @@
 // Real Strix (strix-agent v1.3.1, verified from source — see
 // docs/superpowers/specs/2026-07-23-strix-adapter-real-invocation-design.md) writes FILES, not
 // stdout JSON: `vulnerabilities.json` (top-level JSON array of report dicts, primary/rich) and
-// `findings.sarif` (SARIF 2.1.0, normalized cross-engine layer). parseStrixReport/toFinding below
-// are the OLD stdout-fenced-json model (pre-verification) — kept only as a shim so strix.ts (which
-// still docker-runs + parses stdout) keeps compiling until the CLI-invocation rewrite lands.
+// `findings.sarif` (SARIF 2.1.0, normalized cross-engine layer).
 import { randomUUID } from "node:crypto";
 import type { EngineId, Finding, Severity } from "../types.js";
 import { fingerprint } from "../finding.js";
@@ -39,80 +37,6 @@ function slugify(s: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 60);
-}
-
-// ---------------------------------------------------------------------------------------------
-// OLD (pre-verification) stdout-fenced-json model — kept as a compile shim for strix.ts until the
-// CLI-invocation rewrite replaces it with the file-reading model below. DO NOT extend this.
-// ---------------------------------------------------------------------------------------------
-
-export interface RawStrixFinding {
-  ruleId: string;
-  title: string;
-  description: string;
-  severity: string;
-  category: string;
-  cwe?: string;
-  file?: string;
-  line?: number;
-  evidence?: string;
-}
-
-/** Extract the JSON report object embedded in Strix stdout (a ```json fenced block, else a raw {…}). */
-function extractReportJson(stdout: string): { findings?: unknown[]; strix_version?: string } {
-  const fenced = stdout.match(/```json\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : stdout.slice(stdout.indexOf("{"), stdout.lastIndexOf("}") + 1);
-  if (!candidate || !candidate.trim().startsWith("{")) {
-    throw new StrixParseError("no JSON report found in Strix stdout");
-  }
-  try {
-    return JSON.parse(candidate);
-  } catch (err) {
-    throw new StrixParseError(`Strix report is not valid JSON: ${(err as Error).message}`);
-  }
-}
-
-export function parseStrixReport(stdout: string): RawStrixFinding[] {
-  const report = extractReportJson(stdout);
-  if (!Array.isArray(report.findings)) {
-    throw new StrixParseError("Strix report has no findings array");
-  }
-  return report.findings.map((f) => {
-    const o = f as Record<string, unknown>;
-    return {
-      ruleId: String(o.rule_id ?? o.ruleId ?? "unknown"),
-      title: String(o.title ?? "Untitled finding"),
-      description: String(o.description ?? ""),
-      severity: String(o.severity ?? "info"),
-      category: String(o.category ?? "unknown"),
-      cwe: o.cwe ? String(o.cwe) : undefined,
-      file: o.file ? String(o.file) : undefined,
-      line: typeof o.line === "number" ? o.line : undefined,
-      evidence: o.evidence ? String(o.evidence) : undefined,
-    };
-  });
-}
-
-export function toFinding(raw: RawStrixFinding, id: string): Finding {
-  const fp = fingerprint({ engine: STRIX, ruleId: raw.ruleId, file: raw.file, category: raw.category });
-  return {
-    id,
-    engine: STRIX,
-    engineFindingId: raw.ruleId,
-    ruleId: raw.ruleId,
-    title: raw.title,
-    description: raw.description,
-    severity: mapSeverity(raw.severity),
-    category: raw.category,
-    cwe: raw.cwe,
-    file: raw.file,
-    line: raw.line,
-    evidence: raw.evidence ? redact(raw.evidence) : undefined,
-    fingerprint: fp,
-    status: "new",
-    discoveredAt: new Date().toISOString(),
-    raw,
-  };
 }
 
 // ---------------------------------------------------------------------------------------------
