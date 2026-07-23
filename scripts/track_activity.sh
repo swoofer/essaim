@@ -64,7 +64,12 @@ fi
 # In team-mode the coordinator is on a different machine and cannot
 # resolve the agent's local repo root; only this client can.
 if [ -n "$FILE_PATH" ] && [ "$FILE_PATH" != "null" ]; then
-  REPO_ROOT=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+  # Prefer the SUPERPROJECT root when this file lives inside a submodule, so
+  # paths reported to the coordinator are workspace-relative (relative to the
+  # outer working tree, e.g. a nested multi-repo workspace) rather than
+  # submodule-relative. Falls back to the repo toplevel in a normal checkout.
+  REPO_ROOT=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-superproject-working-tree 2>/dev/null)
+  [ -z "$REPO_ROOT" ] && REPO_ROOT=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
   if [ -n "$REPO_ROOT" ] && [[ "$FILE_PATH" == "$REPO_ROOT"/* ]]; then
     FILE_PATH="${FILE_PATH#$REPO_ROOT/}"
   fi
