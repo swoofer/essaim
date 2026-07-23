@@ -187,6 +187,20 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       }
     }
 
+    if (r.security) {
+      const s = r.security;
+      md += `\n### Moteur de sécurité\n\n`;
+      md += `| Moteur | Licence | Statut | Durée | Exit | Version | Image |\n`;
+      md += `|--------|---------|--------|-------|------|---------|-------|\n`;
+      md += `| ${s.engine} | ${s.license} | ${s.status}${s.degraded ? " (degraded)" : ""} | ${Math.round(s.durationMs / 1000)}s | ${s.exitCode ?? "N/A"} | ${s.engineVersion ?? "N/A"} | \`${s.imageDigest ?? "N/A"}\` |\n`;
+      md += `\n**Findings par sévérité:** `;
+      md += `critical ${s.findingsBySeverity.critical}, high ${s.findingsBySeverity.high}, medium ${s.findingsBySeverity.medium}, low ${s.findingsBySeverity.low}, info ${s.findingsBySeverity.info}\n`;
+      md += `\n**Remédiation:** ${s.ingested} ingérés · ${s.verified} verified · ${s.reopened} reopened · ${s.falsePositives} faux-positifs · ${s.suppressed} baselinés · ${s.outOfScopeDropped} hors-scope écartés\n`;
+      if (s.reopened > 0) {
+        md += `\n> ⚠️ ${s.reopened} finding(s) re-détecté(s) à la vérification — le run n'est PAS "clean" (révision humaine requise).\n`;
+      }
+    }
+
     md += "\n---\n\n";
   }
 

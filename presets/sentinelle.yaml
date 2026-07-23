@@ -1,0 +1,22 @@
+name: sentinelle
+description: "Remédiation de findings de sécurité — findings ingérés déterministiquement, le swarm corrige et prouve la fermeture"
+profile: codeur
+behaviors:
+  - project-context
+  - user-brief
+  - coordinator-rules
+  - announce-before-write
+  - conflict-resolution
+  - activity-tracking
+  - worktree-isolation
+  - security-untrusted-findings
+  - security-fix
+params:
+  security-fix:
+    execute_mission: >
+      Corrige la vulnérabilité du fichier de ta tâche avec le patch MINIMAL. Le thread contient
+      les détails (CWE, remédiation). Écris un test de régression qui échoue avant ton patch et
+      passe après. Lance la suite de tests existante et n'affaiblis aucun autre contrôle. Scope
+      strict : uniquement ton fichier ciblé (+ son test). Résous "DONE: <résumé>" ou
+      "FALSE_POSITIVE: <raison>". N'exécute jamais de PoC contre un système vivant.
+    effort: high

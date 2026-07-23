@@ -526,5 +526,36 @@ describe("createClaudeStream (spawn-per-turn)", () => {
     await expect(client.send("nope")).rejects.toThrow();
     expect(client.isAlive()).toBe(false);
   });
+
+  it("scrubs engine secrets from the env handed to the spawned claude child (buildChildEnv applied)", async () => {
+    process.env.LLM_API_KEY = "sk-engine-secret";
+    process.env.STRIX_LLM = "x";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-keep";
+    try {
+      const { spawn } = await import("child_process");
+      const client = createClaudeStream({ workspacePath: "/tmp" });
+
+      const p = client.send("Hello");
+      await new Promise((r) => process.nextTick(r));
+      const child = mockChildren[0];
+      child.stdout.push('{"type":"result","subtype":"success","cost_usd":0.01,"duration_ms":100,"session_id":"s1"}\n');
+      child.stdout.push(null);
+      await p;
+
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const opts = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][2] as { env: Record<string, string | undefined> };
+      const env = opts.env;
+      expect(env.LLM_API_KEY).toBeUndefined();
+      expect(env.STRIX_LLM).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-keep");
+      expect(env.PATH ?? env.Path).toBeTruthy();
+
+      client.close();
+    } finally {
+      delete process.env.LLM_API_KEY;
+      delete process.env.STRIX_LLM;
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
 });
 
