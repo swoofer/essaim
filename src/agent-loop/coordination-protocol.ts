@@ -30,6 +30,7 @@ export interface ThreadState {
   expectedRespondents: string[];
   respondedAgents: string[];
   round: number;
+  decideRequested: boolean;
 }
 
 // â”€â”€ Protocol actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -141,6 +142,7 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
         expectedRespondents: result.expectedRespondents,
         respondedAgents: [],
         round: 1,
+        decideRequested: false,
       };
       threads.set(result.threadId, thread);
       messageBuffer.set(result.threadId, []);
@@ -171,8 +173,10 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
         thread.respondedAgents.push(fromAgentId);
       }
 
-      // If all respondents replied, ask the LLM to decide
-      if (allRespondentsReplied(thread)) {
+      // If all respondents replied, ask the LLM to decide — but only once
+      // per round, so a duplicate/replayed message doesn't re-enqueue it.
+      if (allRespondentsReplied(thread) && !thread.decideRequested) {
+        thread.decideRequested = true;
         enqueue({
           type: "ask_llm_decide",
           threadId,
@@ -225,6 +229,7 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
       // Back to waiting for a new round
       thread.round += 1;
       thread.respondedAgents = [];
+      thread.decideRequested = false;
       thread.status = "waiting";
       phase = "waiting";
       messageBuffer.set(threadId, []);
