@@ -66,6 +66,37 @@ async function postJson(url: string, body: unknown, timeoutMs = 5000): Promise<b
 
 const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://localhost:3100";
 const DEFAULT_BASE = process.cwd(); // default to current working directory
+const DEFAULT_MAX_CONCURRENCY = 8;
+
+/**
+ * Minimal counting semaphore. Caps how many launches are in flight at once,
+ * independent of stagger config — stagger.mode "fixed"/"random" with `delay`
+ * omitted otherwise spawns every agent in project.agents back-to-back in the
+ * same tick with no throttling at all. `acquire()` resolves once a slot is
+ * free; the caller must invoke the returned release function when its unit
+ * of work finishes so the next queued caller can proceed.
+ */
+function createConcurrencyLimiter(max: number): () => Promise<() => void> {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  const grantNext = () => {
+    if (active >= max || queue.length === 0) return;
+    active++;
+    queue.shift()!();
+  };
+  return function acquire(): Promise<() => void> {
+    return new Promise<() => void>((resolve) => {
+      let released = false;
+      queue.push(() => resolve(() => {
+        if (released) return;
+        released = true;
+        active--;
+        grantNext();
+      }));
+      grantNext();
+    });
+  };
+}
 
 // On a run-level timeout, agent-loop promises are raced against the deadline
 // (see the "Wait for all agents" section) — the race settles the instant the
@@ -354,6 +385,37 @@ async function _runProjectBody(
     return proc;
   }
 
+  // Bound fan-out independent of stagger. Both launch loops below spawn
+  // agents without awaiting their completion (sequential/delayed stagger is a
+  // best-effort throttle, not a cap) — a config with stagger.mode "fixed"/
+  // "random" and delay omitted otherwise launches every agent in the same
+  // tick. acquireLaunchSlot() blocks the loop from spawning the next agent
+  // once max_concurrency agents are in flight, and is released once that
+  // agent's underlying work (child process exit, or agent-loop settlement)
+  // completes — independent of when the caller stops waiting on it (e.g. the
+  // run-level timeout race in the "Wait for all agents" section below).
+  const maxConcurrency = project.max_concurrency ?? DEFAULT_MAX_CONCURRENCY;
+  const acquireLaunchSlot = createConcurrencyLimiter(maxConcurrency);
+
+  async function launchWithLimit(agent: typeof project.agents[0]): Promise<ChildProcess | null> {
+    const release = await acquireLaunchSlot();
+    const proc = setupAndLaunch(agent);
+    if (useAgentLoop) {
+      const loopPromise = agentLoopPromises.get(agent.id);
+      if (loopPromise) {
+        loopPromise.finally(release);
+      } else {
+        release();
+      }
+    } else if (proc) {
+      proc.once("exit", release);
+      proc.once("error", release);
+    } else {
+      release();
+    }
+    return proc;
+  }
+
   if (hasLaunchDelays) {
     // Group-based launching: group agents by launch_delay, launch each group together
     const groups = new Map<number, typeof project.agents>();
@@ -373,7 +435,7 @@ async function _runProjectBody(
       elapsed = delayTarget;
       for (const agent of groups.get(delayTarget)!) {
         if (!isLaunchable(agent)) continue;
-        setupAndLaunch(agent);
+        await launchWithLimit(agent);
       }
     }
   } else {
@@ -381,7 +443,7 @@ async function _runProjectBody(
     for (let i = 0; i < project.agents.length; i++) {
       const agent = project.agents[i];
       if (!isLaunchable(agent)) continue;
-      const proc = setupAndLaunch(agent);
+      const proc = await launchWithLimit(agent);
 
       // Stagger
       if (i < project.agents.length - 1) {

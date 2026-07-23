@@ -44,6 +44,13 @@ export interface MiniProject {
   };
   timeout_minutes?: number;
   use_legacy_mode?: boolean; // Opt-out: fall back to claude -p one-shot instead of agent-loop
+  // Caps how many agents are launched (and running) at once during fan-out,
+  // independent of stagger config. Defaults to 8. Composes with stagger: a
+  // sequential/staggered project already launches at most one (or a delayed
+  // trickle of) agents at a time and never hits this ceiling; it only bounds
+  // configs where stagger.mode is "fixed"/"random" with delay omitted, which
+  // otherwise launches every agent in project.agents back-to-back with no wait.
+  max_concurrency?: number;
   setup?: string;
   during_run?: string;
   teardown?: string;
