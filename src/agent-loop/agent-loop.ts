@@ -431,6 +431,7 @@ export async function runAgentLoop(
     url: config.mqttUrl,
     agentId: config.agentId,
     agentModules: config.modules,
+    coordinatorUrl: config.coordinatorUrl,
   });
 
   const protocol: CoordinationProtocol = createCoordinationProtocol(config.agentId);

@@ -65,4 +65,31 @@ describe('mqtt-listener — backoff et abandon (#33)', () => {
     for (let i = 0; i < 3; i++) fake.emit('reconnect');
     expect(fake.end).not.toHaveBeenCalled();
   });
+
+  // Regression — a post-connect "error" (a plain network blip) used to call
+  // giveUp()+reject() immediately, never consulting the MAX_RECONNECT_ATTEMPTS
+  // budget the "reconnect" handler is meant to govern.
+  it('a post-connect error does not give up — the reconnect budget stays in charge', async () => {
+    const listener = createMqttListener({ url: 'ws://c/mqtt', agentId: 'a1', agentModules: [] });
+    const promise = listener.connect();
+    fake.emit('connect');
+    await promise;
+    expect(listener.connected).toBe(true);
+
+    fake.emit('error', new Error('transient network blip'));
+    expect(fake.end).not.toHaveBeenCalled();
+
+    // The reconnect budget still governs attempts afterwards.
+    for (let i = 0; i < 10; i++) fake.emit('reconnect');
+    expect(fake.end).toHaveBeenCalled();
+  });
+
+  it('an error before any connection still gives up immediately', async () => {
+    const listener = createMqttListener({ url: 'ws://c/mqtt', agentId: 'a1', agentModules: [] });
+    const promise = listener.connect();
+    fake.emit('error', new Error('initial refusal'));
+    await expect(promise).rejects.toThrow('initial refusal');
+    expect(fake.end).toHaveBeenCalled();
+    expect(listener.connected).toBe(false);
+  });
 });
