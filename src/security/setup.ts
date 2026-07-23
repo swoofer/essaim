@@ -29,7 +29,7 @@ STRIX_LLM=anthropic/claude-sonnet-4-6
 # for Strix's own scanning LLM. Using a subscription-backed proxy for a third-party tool may be
 # against Anthropic's usage terms — verify before relying on it.
 #   STRIX_LLM=openai/<model-name>
-#   LLM_API_BASE=http://localhost:<port>/v1
+#   LLM_API_BASE=http://localhost:1234/v1     # adjust host/port to your proxy
 # Optional tuning Strix honors: STRIX_REASONING_EFFORT=medium  LLM_TIMEOUT=300  PERPLEXITY_API_KEY=
 `;
 

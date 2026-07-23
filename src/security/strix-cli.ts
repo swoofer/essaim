@@ -37,7 +37,7 @@ export function strixCliArgs(scope: ResolvedScope, opts?: { instruction?: string
  *  - STRIX_LLM / LLM_API_KEY (+ OPENAI_API_KEY alias): the model string + API key.
  *  - LLM_API_BASE (+ OPENAI_API_BASE / OPENAI_BASE_URL / LITELLM_BASE_URL / OLLAMA_API_BASE aliases):
  *    custom OpenAI-compatible base URL — the officially-documented path to route Strix through a
- *    local/self-hosted proxy (STRIX_LLM="openai/<model>" + LLM_API_BASE=http://host:port/v1).
+ *    local/self-hosted proxy (STRIX_LLM="openai/<model>" + LLM_API_BASE=http://localhost:1234/v1).
  *  - Optional tuning Strix reads: reasoning effort, timeouts, retries, web-search key.
  * Only keys the operator explicitly put in .security-env are forwarded — we never invent values.
  */
