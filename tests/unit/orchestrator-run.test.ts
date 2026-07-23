@@ -207,7 +207,7 @@ describe("runProject — timeout teardown ordering (#112)", () => {
           setTimeout(() => {
             order.push("agent-drained");
             resolve(makeLoopResult(agent.id, "aborted"));
-          }, 30);
+          }, 50);
         });
       });
     });
@@ -217,7 +217,7 @@ describe("runProject — timeout teardown ordering (#112)", () => {
     const project = makeProject({
       agents: [makeAgent({ id: "a1", name: "Agent A" })],
       workspace: { type: "none", base: TMP_DIR },
-      timeout_minutes: 0.0005, // ~30ms — fires well before the agent-loop would ever resolve on its own
+      timeout_minutes: 0.0025, // ~150ms — fires well before the agent-loop would ever resolve on its own; drains ~50ms after abort, well within the grace window
     });
 
     await runProject(project, "with_coordinator", false, {});

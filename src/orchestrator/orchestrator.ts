@@ -76,10 +76,6 @@ const DEFAULT_BASE = process.cwd(); // default to current working directory
 // only fires on the timeout path, where the run has already blown its budget.
 const AGENT_DRAIN_GRACE_MS = 5000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export interface RunProjectOptions {
   /** Override max quota utilization % for the pre-flight check. */
   maxQuotaPct?: number;
@@ -438,10 +434,22 @@ async function _runProjectBody(
     // mid-flight. Give them a bounded grace window to drain first. This is a
     // no-op on a normal (non-timeout) completion: every `p` is already settled
     // by the time we get here, so allSettled resolves immediately.
-    await Promise.race([
-      Promise.allSettled(originalPromises.map((p) => p.catch(() => {}))),
-      sleep(AGENT_DRAIN_GRACE_MS),
-    ]);
+    // Use a cancelable timer so the grace window doesn't keep the event loop
+    // alive after the drain wins the race (the common case): an uncleared
+    // setTimeout would leave a ref'd Node timer dangling for up to the full
+    // grace on every run.
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const gracePromise = new Promise<void>((resolve) => {
+      graceTimer = setTimeout(resolve, AGENT_DRAIN_GRACE_MS);
+    });
+    try {
+      await Promise.race([
+        Promise.allSettled(originalPromises.map((p) => p.catch(() => {}))),
+        gracePromise,
+      ]);
+    } finally {
+      if (graceTimer) clearTimeout(graceTimer);
+    }
   } else {
     // Legacy mode: wait for child processes
     const legacyResults = await Promise.all(
