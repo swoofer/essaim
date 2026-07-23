@@ -1,7 +1,8 @@
 import mqtt from "mqtt";
 import { Duplex } from "stream";
 import { createLogger } from "../logger.js";
-import { coordinatorToken } from "../coordinator-auth.js";
+import { coordinatorToken, authHeaders } from "../coordinator-auth.js";
+import { currentRunId } from "../run-id.js";
 const log = createLogger("mqtt-listener");
 
 const isBun = !!(process.versions as Record<string, string>)?.bun;
@@ -65,6 +66,11 @@ export interface MqttListenerOptions {
   url: string;             // mqtt://localhost:1883 (TCP) or ws://localhost:3100/mqtt (WebSocket)
   agentId: string;
   agentModules: string[];
+  // Coordinator REST base URL. When set, enables a catch-up fetch of
+  // currently open consultations on every (re)connect (see #113 below).
+  // Optional so callers that only need push notifications (or tests) can
+  // omit it — catch-up simply stays disabled in that case.
+  coordinatorUrl?: string;
 }
 
 export type InterruptType =
@@ -180,12 +186,18 @@ const RECONNECT_PERIOD_MS = 5_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 export function createMqttListener(options: MqttListenerOptions): MqttListener {
-  const { url, agentId } = options;
+  const { url, agentId, coordinatorUrl } = options;
   let client: mqtt.MqttClient | null = null;
   let isConnected = false;
+  let hasConnected = false;
   let reconnectAttempts = 0;
   let gaveUp = false;
   const queue: MqttInterrupt[] = [];
+
+  // Thread/consultation ids already delivered to this listener — via a live
+  // MQTT message or a previous catch-up — so the catch-up fetch below never
+  // re-queues the same consultation twice across reconnects.
+  const seenThreadIds = new Set<string>();
 
   /** Tear the client down for good — stops mqtt.js's endless auto-reconnect. */
   function giveUp(reason: string): void {
@@ -213,8 +225,63 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
     if (!type) return;
 
     const interrupt = buildInterrupt(type, topic, payload);
+    if (interrupt.threadId) seenThreadIds.add(interrupt.threadId);
     log.debug("message", { type, threadId: interrupt.threadId });
     queue.push(interrupt);
+  }
+
+  // mqtt.js subscribes at QoS 0 with clean:true and a randomized clientId per
+  // connect (below), so no broker session survives a disconnect — anything
+  // published to `coordinator/consultations/*` while this client was offline
+  // is gone with no redelivery. QoS/clean-session changes alone can't fix
+  // that without broker-side persistence we don't control here. Instead, on
+  // every (re)connect we do a catch-up fetch of currently open consultations
+  // via the coordinator's existing /api/threads-active endpoint — the same
+  // one work-stealing.ts already polls for open threads — and re-queue
+  // anything this listener hasn't seen yet.
+  async function catchUpOpenConsultations(): Promise<void> {
+    if (!coordinatorUrl) return; // no REST base configured — nothing to catch up on
+
+    let threads: Array<Record<string, unknown>>;
+    try {
+      const resp = await fetch(`${coordinatorUrl}/api/threads-active`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ run_id: currentRunId() }),
+      });
+      if (!resp.ok) {
+        log.debug("catch-up: threads-active failed", { status: resp.status });
+        return;
+      }
+      const data = await resp.json();
+      threads = Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+    } catch (err) {
+      log.debug("catch-up: coordinator unreachable", { error: (err as Error).message });
+      return;
+    }
+
+    let recovered = 0;
+    for (const thread of threads) {
+      if (thread.status !== "open") continue;
+      if (thread.agent_id === agentId) continue; // filter self, same as handleMessage
+
+      const threadId = thread.id as string | undefined;
+      if (!threadId || seenThreadIds.has(threadId)) continue;
+      seenThreadIds.add(threadId);
+
+      queue.push({
+        type: "consultation_new",
+        threadId,
+        subject: typeof thread.subject === "string" ? thread.subject : undefined,
+        targetModules: Array.isArray(thread.target_modules) ? (thread.target_modules as string[]) : undefined,
+        timestamp: Date.now(),
+        raw: thread,
+      });
+      recovered++;
+    }
+    if (recovered > 0) {
+      log.info("catch-up: recovered open consultations missed while offline", { count: recovered });
+    }
   }
 
   return {
@@ -259,8 +326,10 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
 
         client.on("connect", () => {
           clearTimeout(timeout);
+          hasConnected = true;
           isConnected = true;
           reconnectAttempts = 0; // a successful connect earns a fresh budget
+          void catchUpOpenConsultations();
           client!.subscribe(TOPICS, (err) => {
             if (err) {
               reject(err);
@@ -274,6 +343,16 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         client.on("message", handleMessage);
 
         client.on("error", (err) => {
+          if (hasConnected) {
+            // A transient error after a successful connect (e.g. a network
+            // blip). mqtt.js will follow up with "close" then "reconnect",
+            // and the MAX_RECONNECT_ATTEMPTS budget on that handler below
+            // already governs whether we keep retrying — giving up and
+            // rejecting here would bypass that budget and kill the listener
+            // on a single post-connect error.
+            log.warn("post-connect error — reconnect budget governs retry", { error: (err as Error).message });
+            return;
+          }
           clearTimeout(timeout);
           log.warn("connection failed", { error: (err as Error).message });
           // Without this teardown the client keeps auto-reconnecting in the
