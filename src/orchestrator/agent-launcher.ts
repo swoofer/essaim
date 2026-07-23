@@ -2,6 +2,7 @@
 import { spawn, ChildProcess } from "child_process";
 import type { AgentConfig } from "./types.js";
 import { runAgentLoop, type AgentLoopConfig, type AgentLoopResult } from "../agent-loop/agent-loop.js";
+import { resolveClaudeBin } from "../agent-loop/claude-stream.js";
 
 const MCP_COORDINATOR_PREFIX = "mcp__coordinator__";
 
@@ -76,7 +77,7 @@ export function launchAgent(
     args.push("--mcp-config", mcpConfigPath);
   }
 
-  return spawn("claude", args, {
+  return spawn(resolveClaudeBin(), args, {
     cwd: workspacePath,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -191,9 +192,22 @@ export function waitForProcess(child: ChildProcess): Promise<{ stdout: string; s
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
+    let settled = false;
     child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
     child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
-    child.on("close", (code) => resolve({ stdout, stderr, code: code || 0 }));
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      resolve({ stdout, stderr, code: code || 0 });
+    });
+    // A spawn failure (e.g. binary not found) emits "error" instead of — or
+    // in addition to — "close". Without this handler the failure is either
+    // an unhandled Node error or leaves the promise hanging forever.
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      resolve({ stdout, stderr: stderr + (stderr ? "\n" : "") + err.message, code: 1 });
+    });
   });
 }
 
