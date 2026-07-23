@@ -1,0 +1,52 @@
+name: security-fix
+description: "Fix one security finding from the shared pool — minimal patch + regression test — work-stealing loop"
+category: mission
+
+phase:
+  name: execute
+  tools_mode: full
+  loop: true
+
+params:
+  execute_mission:
+    type: string
+    required: true
+    description: "Injected by the sentinelle preset — how to fix each finding"
+  current_task:
+    type: string
+    required: false
+    default: ""
+    description: "Injected at runtime by the agent-loop with the specific finding (thread) details"
+  effort:
+    type: string
+    default: high
+    description: "Effort profile — security patches need code-writing capability"
+
+sections:
+  "030-security-fix":
+    prompt: |
+      ## Tâche assignée — Correctif de sécurité
+
+      {{params.execute_mission}}
+
+      {{#if params.current_task}}
+      Détails du finding (issu du thread coordinateur) :
+      {{params.current_task}}
+      {{/if}}
+
+      Procédure :
+      1. Lis le fichier ciblé et comprends la vulnérabilité (CWE, catégorie, remédiation du thread).
+      2. Écris un test de régression qui ÉCHOUE avant ton patch et PASSE après.
+      3. Applique le patch MINIMAL. Scope STRICT : uniquement le fichier ciblé (+ son test).
+      4. Lance la suite de tests EXISTANTE du projet — n'affaiblis AUCUN autre contrôle.
+      5. Résous le thread : "DONE: <résumé>" — ou "FALSE_POSITIVE: <raison>" si le finding est un faux positif.
+  "050-safety-exploit":
+    prompt: |
+      ## Sécurité (impératif)
+      - N'exécute JAMAIS de PoC/exploit contre un système vivant.
+      - N'appelle JAMAIS docker, un moteur de scan, ou un outil réseau offensif.
+      - N'affaiblis pas un contrôle existant pour "faire passer" un test.
+      - Un correctif transverse (auth/crypto/contrôle d'accès) : signale via post_to_thread type:"warning" puis "DONE: escaladé".
+
+mcp_tools:
+  - log_action_summary

@@ -1,0 +1,14 @@
+name: Sentinelle
+description: "Le swarm corrige les findings de sécurité ingérés dans le coordinateur"
+phase: 2
+workspace: worktree
+stagger: { mode: random, delay: [5, 10] }
+timeout_minutes: 30
+metrics: [findings_fixed, findings_verified]
+compare_mode: false
+agents:
+  - idPrefix: agent-sentinelle
+    namePrefix: Sentinelle
+    preset: sentinelle
+    profile: codeur
+    count: dynamic

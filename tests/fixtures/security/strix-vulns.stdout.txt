@@ -1,0 +1,30 @@
+Strix scan complete.
+```json
+{
+  "strix_version": "1.3.1",
+  "findings": [
+    {
+      "rule_id": "sqli-concat",
+      "title": "SQL injection via string concatenation",
+      "description": "User input flows into a concatenated SQL query.",
+      "severity": "high",
+      "category": "sqli",
+      "cwe": "CWE-89",
+      "file": "src/db/users.ts",
+      "line": 42,
+      "evidence": "query = 'SELECT * FROM users WHERE id=' + req.params.id  // token sk-abcDEF0123456789ghijklmnop"
+    },
+    {
+      "rule_id": "xss-reflected",
+      "title": "Reflected XSS in search",
+      "description": "Search term rendered without escaping.",
+      "severity": "medium",
+      "category": "xss",
+      "cwe": "CWE-79",
+      "file": "src/routes/search.ts",
+      "line": 17
+    }
+  ]
+}
+```
+2 findings.

@@ -9,8 +9,19 @@ export function createInitCommand(): Command {
     .option("--url <url>", "Coordinator URL", "http://localhost:3100")
     .option("--name <name>", "Agent name", process.env.USER || "developer")
     .option("--modules <list>", "Comma-separated modules", "")
-    .action((pathArg: string, opts: { url: string; name: string; modules: string }) => {
-      setupProject(resolve(pathArg), opts);
+    .option("--security", "Also scaffold security config + .gitignore")
+    .action((pathArg: string, opts: { url: string; name: string; modules: string; security?: boolean }) => {
+      const projectPath = resolve(pathArg);
+      setupProject(projectPath, opts);
+      if (opts.security) {
+        // dynamic import keeps the security module out of the base init path
+        import("../src/security/setup.js")
+          .then(({ setupSecurity }) => setupSecurity(projectPath))
+          .catch((err) => {
+            console.error(`Security setup failed: ${err instanceof Error ? err.message : err}`);
+            process.exitCode = 1;
+          });
+      }
     });
 }
 

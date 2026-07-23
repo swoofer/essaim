@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { EventEmitter } from "events";
 import { createLogger } from "../logger.js";
 import { thinkingKeyword, type ThinkingLevel } from "./effort.js";
+import { buildChildEnv } from "./child-env.js";
 const log = createLogger("claude-stream");
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ function runOneTurn(
   return new Promise<AssistantResponse>((resolve, reject) => {
     const child = spawn(claudeBin, args, {
       cwd: options.workspacePath,
-      env: { ...(process.env as Record<string, string>), ...options.env },
+      env: buildChildEnv(process.env, options.env),
       stdio: ["pipe", "pipe", "pipe"],
     });
     log.info(`spawned claude (pid=${child.pid}, resume=${resume})`);

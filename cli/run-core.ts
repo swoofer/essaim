@@ -28,6 +28,8 @@ export interface ExecuteRunOptions {
   maxQuotaPct?: number;
   /** Catalogues externes (--catalog, répétable). */
   catalogs?: string[];
+  security?: import("../src/security/types.js").MiniProjectSecurity;
+  triageOnly?: boolean;
 }
 
 /**
@@ -95,6 +97,11 @@ Catalogues consultés : ${roots}`,
     { agentCount, setParams, catalogs },
     projectPath,
   );
+
+  if (opts.security) {
+    project.security = opts.security;
+    if (opts.triageOnly) project.agents = []; // seed + report, no swarm
+  }
 
   if (opts.timeout !== undefined) {
     project.timeout_minutes = opts.timeout;
