@@ -19,9 +19,18 @@ authorization:
 `;
 
 const ENV_TEMPLATE = `# Engine credentials for security scans — 0600, gitignored, NEVER committed.
-# Fill values; passed only to the engine container, never to essaim's process.env.
+# Fill values; passed only into the engine process's own env, never to disk or essaim's process.env.
+# Strix prereqs (operator installs): pip install strix-agent (Python >=3.12) + a running Docker daemon.
 LLM_API_KEY=
 STRIX_LLM=anthropic/claude-sonnet-4-6
+
+# Optional — route Strix through a custom OpenAI-compatible endpoint (e.g. a local proxy).
+# NOTE: essaim's own fix-swarm already runs on your Claude subscription (claude -p); this is only
+# for Strix's own scanning LLM. Using a subscription-backed proxy for a third-party tool may be
+# against Anthropic's usage terms — verify before relying on it.
+#   STRIX_LLM=openai/<model-name>
+#   LLM_API_BASE=http://localhost:1234/v1     # adjust host/port to your proxy
+# Optional tuning Strix honors: STRIX_REASONING_EFFORT=medium  LLM_TIMEOUT=300  PERPLEXITY_API_KEY=
 `;
 
 const GITIGNORE_BLOCK = [
