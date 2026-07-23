@@ -31,5 +31,36 @@ describe("computeMetrics", () => {
     expect(metrics.messages_exchanged).toBe(2);
     expect(metrics.conflicts_by_layer["Layer 0a"]).toBe(1);
   });
+
+  // #117 — a thread that gets contested and re-proposed emits MULTIPLE
+  // resolution_proposed events for the same thread_id. A flat count of those
+  // events both over-counts threads_resolved_consensus and can push
+  // threads_auto_resolved negative.
+  it("dedups resolution_proposed by thread_id — a re-proposed thread counts once", () => {
+    const events = [
+      { id: 1, type: "thread_opened", data: { thread_id: "t1" } },
+      { id: 2, type: "resolution_proposed", data: { thread_id: "t1" } },
+      { id: 3, type: "resolution_proposed", data: { thread_id: "t1" } }, // contest → re-propose
+      { id: 4, type: "resolution_proposed", data: { thread_id: "t1" } }, // contest → re-propose again
+    ];
+
+    const metrics = computeMetrics(events);
+    expect(metrics.threads_resolved_consensus).toBe(1);
+    expect(metrics.threads_auto_resolved).toBe(0);
+  });
+
+  it("threads_auto_resolved never goes negative even when resolutions outnumber opens", () => {
+    // e.g. the observed event window's cursor started after a thread's own
+    // thread_opened event but still includes its resolution.
+    const events = [
+      { id: 1, type: "resolution_proposed", data: { thread_id: "t1" } },
+      { id: 2, type: "resolution_proposed", data: { thread_id: "t2" } },
+    ];
+
+    const metrics = computeMetrics(events);
+    expect(metrics.threads_opened).toBe(0);
+    expect(metrics.threads_resolved_consensus).toBe(2);
+    expect(metrics.threads_auto_resolved).toBe(0);
+  });
 });
 

@@ -48,13 +48,25 @@ export function computeMetrics(events: SseEvent[]): CoordinatorMetrics {
   const introspectionRequested = events.filter((e) => e.type === "introspection_requested");
   const introspectionCompleted = events.filter((e) => e.type === "introspection_completed");
   const resolutionProposed = events.filter((e) => e.type === "resolution_proposed");
+  // A thread that cycles contest → re-propose emits MULTIPLE resolution_proposed
+  // events for the same thread_id. Counting them flat both inflates
+  // threads_resolved_consensus and can push threads_auto_resolved negative
+  // (#117) — dedup by thread_id first.
+  const resolvedThreadIds = new Set(
+    resolutionProposed
+      .map((e) => e.data.thread_id)
+      .filter((id): id is string => typeof id === "string"),
+  );
 
   return {
     agents_count: 0,
     duration_total_ms: 0,
     threads_opened: threadOpened.length,
-    threads_resolved_consensus: resolutionProposed.length,
-    threads_auto_resolved: threadOpened.length - resolutionProposed.length,
+    threads_resolved_consensus: resolvedThreadIds.size,
+    // Guarded: even after dedup this can go negative when the observed event
+    // window doesn't include a thread's own thread_opened event (e.g. it opened
+    // just before an SSE replay cursor) but does include its resolution.
+    threads_auto_resolved: Math.max(0, threadOpened.length - resolvedThreadIds.size),
     messages_exchanged: messagesPosted.length,
     conflicts_by_layer,
     introspections_triggered: introspectionRequested.length,
@@ -84,12 +96,53 @@ async function getWithTimeout(url: string, init: RequestInit, timeoutMs: number)
   }
 }
 
-export async function fetchCoordinatorMetrics(coordinatorUrl: string): Promise<CoordinatorMetrics> {
-  let sseRaw = "";
+/**
+ * Capture the coordinator's current max event id, to be used as the
+ * `Last-Event-ID` cursor baseline for a run that's about to start (#108).
+ *
+ * Reuses the same replay the SSE endpoint always sends on connect: a
+ * `Last-Event-ID: 0` GET returns the last 50 buffered events (fewer if less
+ * history exists) in ascending id order — so the max id among them IS the
+ * coordinator's current max, regardless of how much history precedes it.
+ */
+export async function fetchLatestEventId(coordinatorUrl: string): Promise<number> {
   try {
     const resp = await getWithTimeout(
       `${coordinatorUrl}/api/events`,
-      { headers: { "Last-Event-ID": "1", ...authHeaders() } },
+      { headers: { "Last-Event-ID": "0", ...authHeaders() } },
+      3000,
+    );
+    if (!resp.ok) return 0;
+    const events = parseSseEvents(await resp.text());
+    return events.reduce((max, e) => Math.max(max, e.id), 0);
+  } catch {
+    // Coordinator unreachable — degrade to "no baseline" (0), matching the
+    // fail-open posture of fetchCoordinatorMetrics itself.
+    return 0;
+  }
+}
+
+/**
+ * @param sinceEventId Cursor baseline captured via fetchLatestEventId right
+ * before this run's agents started. Only events with a strictly greater id
+ * are replayed, so a run no longer reads the coordinator's ENTIRE history —
+ * only what happened since. This isolates SEQUENTIAL runs sharing one
+ * coordinator; it does NOT isolate CONCURRENT runs, whose event ids
+ * interleave in the same stream — full isolation needs coordinator-side
+ * run_id filtering, which is out of scope here.
+ */
+export async function fetchCoordinatorMetrics(coordinatorUrl: string, sinceEventId = 0): Promise<CoordinatorMetrics> {
+  let sseRaw = "";
+  try {
+    // Never send "0" literally: the endpoint special-cases lastEventId<=0 as
+    // "give me the last 50 buffered events" rather than "since the start",
+    // which would silently cap a long/busy run's metrics. Clamp to at least 1
+    // (the previous hardcoded value) so a fresh coordinator with no prior
+    // events still gets the full replay instead of the last-50 fallback.
+    const cursor = Math.max(sinceEventId, 1);
+    const resp = await getWithTimeout(
+      `${coordinatorUrl}/api/events`,
+      { headers: { "Last-Event-ID": String(cursor), ...authHeaders() } },
       3000,
     );
     if (resp.ok) {
