@@ -279,6 +279,21 @@ describe("createStreamParser", () => {
     await tick();
     expect(events).toHaveLength(1);
   });
+
+  it("correctly decodes a multi-byte UTF-8 character split across raw Buffer chunks", async () => {
+    createStreamParser(emitter, readable);
+    // "café" — the "é" is 2 bytes (0xC3 0xA9) in UTF-8. Split those two bytes
+    // across two separate Buffer chunks to simulate a TCP/pipe boundary landing
+    // mid-codepoint.
+    const prefix = Buffer.from('{"type":"system","subtype":"init","note":"caf', "utf8");
+    const suffix = Buffer.from('"}\n', "utf8");
+    const accent = Buffer.from("é", "utf8");
+    readable.push(Buffer.concat([prefix, accent.subarray(0, 1)]));
+    readable.push(Buffer.concat([accent.subarray(1), suffix]));
+    await tick();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "system", subtype: "init", note: "café" });
+  });
 });
 
 // ── createClaudeStream (spawn-per-turn model) ────────────────────────

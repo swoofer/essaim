@@ -184,8 +184,15 @@ export function buildArgs(opts: ClaudeStreamOptions, prompt: string, resume: boo
 export function createStreamParser(emitter: EventEmitter, readable: NodeJS.ReadableStream): void {
   let buffer = "";
 
-  readable.on("data", (chunk: Buffer) => {
-    buffer += chunk.toString();
+  // Decode as UTF-8 at the stream level so Node buffers any partial
+  // multi-byte sequence internally and only hands the "data" handler
+  // complete codepoints — otherwise a multi-byte character split across
+  // two chunks (e.g. by a TCP/pipe boundary) decodes as garbage on each
+  // half independently.
+  readable.setEncoding("utf8");
+
+  readable.on("data", (chunk: string) => {
+    buffer += chunk;
     const lines = buffer.split("\n");
     buffer = lines.pop()!;
 
