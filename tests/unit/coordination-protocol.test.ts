@@ -288,6 +288,41 @@ describe("CoordinationProtocol", () => {
     }
   });
 
+  it("proceeds to work instead of reopening once ADJUST reaches MAX_ROUNDS", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-adjcap",
+      status: "open",
+      expectedRespondents: ["agent-2"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    protocol.onThreadMessage("t-adjcap", "agent-2", "conflict");
+    expect(protocol.nextAction()?.type).toBe("ask_llm_decide"); // round 1, waiting
+
+    // round 1 -> adjust -> round 2
+    protocol.decideAdjust("plan v2");
+    expect(protocol.getThreadState("t-adjcap")?.round).toBe(2);
+    drainActions(protocol);
+
+    // round 2 -> adjust -> round 3 (== MAX_ROUNDS)
+    protocol.decideAdjust("plan v3");
+    expect(protocol.getThreadState("t-adjcap")?.round).toBe(3);
+    drainActions(protocol);
+
+    // round 3 -> adjust at the cap: adopt the plan and work, do NOT reopen
+    protocol.decideAdjust("plan v4");
+    const thread = protocol.getThreadState("t-adjcap");
+    expect(thread?.work.plan).toBe("plan v4");
+    expect(thread?.round).toBe(3); // not bumped past the cap
+    expect(thread?.status).toBe("working");
+    expect(protocol.phase).toBe("working");
+    expect(protocol.nextAction()?.type).toBe("work");
+  });
+
   it("allows a fresh ask_llm_decide after decideAdjust opens a new round", () => {
     protocol.startWork(WORK);
     drainActions(protocol);

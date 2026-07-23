@@ -300,6 +300,18 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
       if (!thread) return;
 
       thread.work.plan = newPlan;
+
+      // Bound re-planning the same way onContestation bounds re-rounds: an LLM
+      // that keeps replying ADJUST would otherwise reopen rounds indefinitely.
+      // At the cap, adopt the latest plan and proceed to work instead of
+      // reopening another announce round.
+      if (thread.round >= MAX_ROUNDS) {
+        thread.status = "working";
+        phase = "working";
+        enqueue({ type: "work" });
+        return;
+      }
+
       resetForNewRound(thread);
     },
 
