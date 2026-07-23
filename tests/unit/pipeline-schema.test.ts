@@ -124,4 +124,54 @@ steps:
     const def = loadPipeline(p);
     expect(def.steps[0]!.hooks).toEqual({ before: ["echo hi"], after: ["npm run build"] });
   });
+
+  it("throws a descriptive error when hooks.before is a scalar instead of a list", () => {
+    const p = write(
+      "p.yaml",
+      `name: x\nsteps:\n  - name: s\n    template: t\n    project: .\n    hooks:\n      before: npm run lint\n`,
+    );
+    expect(() => loadPipeline(p)).toThrow(/hooks\.before/);
+  });
+
+  it("throws a descriptive error when hooks.after is a scalar instead of a list", () => {
+    const p = write(
+      "p.yaml",
+      `name: x\nsteps:\n  - name: s\n    template: t\n    project: .\n    hooks:\n      after: npm run build\n`,
+    );
+    expect(() => loadPipeline(p)).toThrow(/hooks\.after/);
+  });
+
+  it("throws a descriptive error when a modules entry is a map, not a scalar", () => {
+    const p = write(
+      "p.yaml",
+      `name: x\nsteps:\n  - name: s\n    template: t\n    project: .\n    modules:\n      - a\n      - key: value\n`,
+    );
+    expect(() => loadPipeline(p)).toThrow(/modules/i);
+  });
+
+  it("throws a descriptive error when a set value is a map, not a scalar", () => {
+    const p = write(
+      "p.yaml",
+      `name: x\nsteps:\n  - name: s\n    template: t\n    project: .\n    set:\n      behavior.param:\n        nested: value\n`,
+    );
+    expect(() => loadPipeline(p)).toThrow(/set/i);
+  });
+
+  it("throws a descriptive error when a set_file value is a map, not a scalar", () => {
+    const p = write(
+      "p.yaml",
+      `name: x\nsteps:\n  - name: s\n    template: t\n    project: .\n    set_file:\n      behavior.param:\n        nested: value\n`,
+    );
+    expect(() => loadPipeline(p)).toThrow(/set_file/i);
+  });
+
+  it("still coerces legitimate scalar modules/set values (regression)", () => {
+    const p = write(
+      "p.yaml",
+      `name: x\nsteps:\n  - name: s\n    template: t\n    project: .\n    modules: [a, 1, true]\n    set:\n      behavior.count: 42\n      behavior.enabled: true\n`,
+    );
+    const def = loadPipeline(p);
+    expect(def.steps[0]!.modules).toEqual(["a", "1", "true"]);
+    expect(def.steps[0]!.set).toEqual({ "behavior.count": "42", "behavior.enabled": "true" });
+  });
 });
