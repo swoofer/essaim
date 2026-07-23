@@ -20,20 +20,26 @@ export interface ChildLike {
   kill(signal?: string): void;
 }
 
-export type SpawnFn = (command: string, args: string[], opts: { cwd?: string }) => ChildLike;
+export type SpawnFn = (
+  command: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string | undefined> },
+) => ChildLike;
 
 const defaultSpawnFn: SpawnFn = (command, args, opts) =>
-  nodeSpawn(command, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] }) as unknown as ChildLike;
+  nodeSpawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: ["ignore", "pipe", "pipe"] }) as unknown as ChildLike;
 
-/** Spawn a command, capture output, honor an AbortSignal (kill + timedOut). Rejects only on spawn error. */
+/** Spawn a command, capture output, honor an AbortSignal (kill + timedOut). Rejects only on spawn error.
+ *  `env`, when given, replaces the CHILD process's environment only — essaim's own process.env is
+ *  never mutated. Omitting it lets Node inherit process.env as before. */
 export function spawnCaptured(
   command: string,
   args: string[],
-  opts: { cwd?: string; signal?: AbortSignal; spawnFn?: SpawnFn } = {},
+  opts: { cwd?: string; signal?: AbortSignal; spawnFn?: SpawnFn; env?: Record<string, string | undefined> } = {},
 ): Promise<SpawnResult> {
   const spawnFn = opts.spawnFn ?? defaultSpawnFn;
   return new Promise<SpawnResult>((resolve, reject) => {
-    const child = spawnFn(command, args, { cwd: opts.cwd });
+    const child = spawnFn(command, args, { cwd: opts.cwd, env: opts.env });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
