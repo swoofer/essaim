@@ -15,15 +15,15 @@ describe('run-id', () => {
   });
 
   it('ensureRunId frappe un id et le publie dans l\'environnement', () => {
-    const id = ensureRunId('mekova-bughunt');
-    expect(id).toMatch(/^mekova-bughunt-[0-9a-f]{8}$/);
+    const id = ensureRunId('raid');
+    expect(id).toMatch(/^raid-[0-9a-f]{8}$/);
     expect(process.env.ESSAIM_RUN_ID).toBe(id);
     expect(currentRunId()).toBe(id);
   });
 
   it('est idempotent — un runner ou une CI qui a déjà fixé le run gagne', () => {
     process.env.ESSAIM_RUN_ID = 'run-du-runner';
-    expect(ensureRunId('mekova-bughunt')).toBe('run-du-runner');
+    expect(ensureRunId('raid')).toBe('run-du-runner');
   });
 });
 

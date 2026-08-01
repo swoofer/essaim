@@ -30,11 +30,12 @@ const CONTEXT: ProjectContext = {
   has_git: true, is_clean: true, modules: ['core'], applicable_templates: [],
 };
 
-// #32 du plan catalogue-externe — aujourd'hui, un template projet-local peut
-// RECOMBINER les presets bundlés, mais dès qu'il référence un preset maison :
-// « Preset not found in registry ». Toute organisation qui veut son propre preset
-// doit donc patcher le repo essaim. C'est très exactement pour ça que 21 artefacts
-// Mekova y vivent.
+// #32 du plan catalogue-externe — avant ça, un template projet-local pouvait
+// RECOMBINER les presets bundlés, mais dès qu'il référençait un preset maison :
+// « Preset not found in registry ». Toute organisation voulant son propre preset
+// devait donc patcher le repo essaim — c'est exactement pour ça que des artefacts
+// métier avaient fini par y vivre. Ils sont partis dans un catalogue externe ;
+// essaim ne ship plus que du générique.
 
 describe('getCatalogRoots', () => {
   it('sans rien, c\'est le catalogue bundlé seul (non-régression)', () => {

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { claimNextTask } from '../../src/agent-loop/work-stealing.js';
 
-// Régression #30 — mekova-bughunt, 3 hunters, UN seul bug bien localisé : les
+// Régression #30 — un template de chasse aux bugs, 3 hunters, UN seul bug bien localisé : les
 // trois ont écrit ET commité un test de repro quasi identique. Le claim était
 // déjà atomique PAR THREAD, mais chaque hunter avait posté sa propre découverte
 // → 3 threads pour un seul bug → un thread chacun, trois tests.

@@ -198,38 +198,20 @@ describe('Parity: BCE presets produce complete prompts', () => {
   // du contrat sont testés : le producteur écrit avant de résoudre, le
   // consommateur gate sur les fichiers avec retry borné.
   describe('Artifact gate (#38)', () => {
-    // Params réellement fournis par le skill invocateur via --set (cf. SMOKE_SET_PARAMS)
-    const DEC_PARAMS = {
-      'discovery-specialist': { transcript: 'notes/rencontres/test.md' },
-      'discovery-synth': { transcript: 'notes/rencontres/test.md', projet: 'test' },
-    };
-
-    it('producer writes and verifies its artifact BEFORE proposing resolution', () => {
-      // Scopé à la section mission : d'autres behaviors mentionnent
-      // propose_resolution plus haut dans le prompt assemblé.
-      const result = buildPreset('mekova-dec-risques', DEC_PARAMS);
-      const mission = result.sectionTrace.find(
-        s => s.behaviorName === 'discovery-specialist' && s.key === '030-mission',
-      );
-      expect(mission).toBeDefined();
-      const write = mission!.prompt.indexOf('tmp/decouverte/risques.yaml');
-      const resolveIdx = mission!.prompt.indexOf('propose_resolution');
-      expect(write).toBeGreaterThan(-1);
-      expect(resolveIdx).toBeGreaterThan(-1);
-      expect(write).toBeLessThan(resolveIdx);
-    });
-
+    // `phare-synth` est le consommateur générique du catalogue : il déclare
+    // `sequential-wait.expect_files` (les 4 YAML produits par les spécialistes).
     it('consumer gates on the expected files, not just thread status', () => {
-      const prompt = buildPreset('mekova-dec-synth', DEC_PARAMS).output.prompt;
-      for (const angle of ['features', 'risques', 'roi', 'questions']) {
-        expect(prompt).toContain(`tmp/decouverte/${angle}.yaml`);
+      const prompt = buildPreset('phare-synth').output.prompt;
+      for (const angle of ['inventaire', 'edges', 'deps', 'risques']) {
+        expect(prompt).toContain(`tmp/audit/${angle}.yaml`);
       }
       expect(prompt).toContain('Séquencement');
+      expect(prompt).toContain('Gate sur artefacts');
       expect(prompt).toContain('sleep');
     });
 
     it('a resolved thread is explicitly not proof the artifact exists', () => {
-      const prompt = buildPreset('mekova-dec-synth', DEC_PARAMS).output.prompt;
+      const prompt = buildPreset('phare-synth').output.prompt;
       expect(prompt).toMatch(/ne (garantit|prouve) PAS/);
     });
 
@@ -238,23 +220,6 @@ describe('Parity: BCE presets produce complete prompts', () => {
       expect(prompt).toContain('Séquencement');
       expect(prompt).not.toContain('Gate sur artefacts');
       expect(prompt).not.toContain('sleep');
-    });
-  });
-
-  // Le contrat de sortie appartient au PRESET, pas à l'appelant. Un consommateur
-  // aval (le runner nocturne, mais aussi n'importe quel autre) doit pouvoir
-  // reconnaître un finding déjà signalé. La clé ne peut pas être le titre du
-  // commit — le même bug est reformulé autrement d'un agent/d'une nuit à l'autre.
-  // Le seul signal stable est le FICHIER FAUTIF, d'où le trailer.
-  describe('Bughunt — contrat de sortie Essaim-Target', () => {
-    it('exige le trailer nommant le fichier source fautif', () => {
-      const prompt = buildPreset('mekova-bughunt').output.prompt;
-      expect(prompt).toContain('Essaim-Target:');
-    });
-
-    it('demande le fichier SOURCE fautif, pas le fichier de test', () => {
-      const prompt = buildPreset('mekova-bughunt').output.prompt;
-      expect(prompt).toMatch(/Essaim-Target[\s\S]{0,200}source/i);
     });
   });
 

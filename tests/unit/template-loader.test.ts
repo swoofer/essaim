@@ -57,45 +57,41 @@ describe("template-loader", () => {
     rmSync(proj, { recursive: true, force: true });
   });
 
-  it("mekova-implement wires lead + workers", () => {
+  it("maitre wires a lead + un pool de workers dynamique", () => {
     const t = loadTemplates();
-    expect(t["mekova-implement"].agents.map((a) => a.preset)).toEqual([
-      "mekova-implement-lead",
-      "mekova-implement-worker",
-    ]);
-    expect(t["mekova-implement"].agents[1].count).toBe("dynamic");
+    expect(t.maitre.agents[0].count).toBe(1);
+    expect(t.maitre.agents[1].count).toBe("dynamic");
   });
 
-  it("mekova-review has one agent with preset mekova-review", () => {
+  it("gardien has one agent with preset gardien and count 1", () => {
     const t = loadTemplates();
-    expect(t["mekova-review"]).toBeDefined();
-    expect(t["mekova-review"].agents.length).toBe(1);
-    expect(t["mekova-review"].agents[0].preset).toBe("mekova-review");
-    expect(t["mekova-review"].agents[0].count).toBe(1);
+    expect(t.gardien).toBeDefined();
+    expect(t.gardien.agents.length).toBe(1);
+    expect(t.gardien.agents[0].preset).toBe("gardien");
+    expect(t.gardien.agents[0].count).toBe(1);
   });
 
-  it("mekova-bughunt has one agent with preset mekova-bughunt and count dynamic", () => {
+  it("raid has one agent with preset raid and count dynamic", () => {
     const t = loadTemplates();
-    expect(t["mekova-bughunt"]).toBeDefined();
-    expect(t["mekova-bughunt"].agents.length).toBe(1);
-    expect(t["mekova-bughunt"].agents[0].preset).toBe("mekova-bughunt");
-    expect(t["mekova-bughunt"].agents[0].count).toBe("dynamic");
+    expect(t.raid.agents.length).toBe(1);
+    expect(t.raid.agents[0].preset).toBe("raid");
+    expect(t.raid.agents[0].count).toBe("dynamic");
   });
 
-  it("mekova-decouverte: 4 angles + synth", () => {
+  it("phare: 4 spécialistes + réconciliateur", () => {
     const t = loadTemplates();
-    expect(t["mekova-decouverte"].agents).toHaveLength(5);
-    expect(t["mekova-decouverte"].agents.map((a) => a.preset)).toEqual([
-      "mekova-dec-features", "mekova-dec-risques", "mekova-dec-roi",
-      "mekova-dec-questions", "mekova-dec-synth",
+    expect(t.phare.agents).toHaveLength(5);
+    expect(t.phare.agents.map((a) => a.preset)).toEqual([
+      "phare-inventaire", "phare-edges", "phare-deps",
+      "phare-risques", "phare-synth",
     ]);
   });
 
-  it("mekova-prototype: scaffolder + per-module écrans", () => {
+  it("migrate-phase2: scaffolder + agents per-module", () => {
     const t = loadTemplates();
-    const agents = t["mekova-prototype"].agents;
-    expect(agents[0].preset).toBe("mekova-proto-scaffold");
+    const agents = t["migrate-phase2"].agents;
+    expect(agents[0].preset).toBe("migrate-scaffold");
     expect(agents[1].count).toBe("per-module");
-    expect(agents[1].perModuleParam).toEqual({ behavior: "proto-ecran", key: "target_ecran" });
+    expect(agents[1].perModuleParam).toEqual({ behavior: "migrate-slice", key: "target_slice" });
   });
 });

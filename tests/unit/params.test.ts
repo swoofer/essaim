@@ -3,9 +3,9 @@ import { parseSetParams, buildParamTypeMap, parseSetFileParams } from "../../cli
 
 describe("parseSetParams — coercition par type déclaré (#28)", () => {
   it("garde la string quand le catalogue déclare string mais la valeur ressemble à un nombre", () => {
-    const typeMap = { "mission-tasks-md.phase_number": "string" as const };
-    const p = parseSetParams(["mission-tasks-md.phase_number=7"], typeMap);
-    expect(p["mission-tasks-md"]!.phase_number).toBe("7");
+    const typeMap = { "audit-specialist.focus_name": "string" as const };
+    const p = parseSetParams(["audit-specialist.focus_name=7"], typeMap);
+    expect(p["audit-specialist"]!.focus_name).toBe("7");
   });
   it("parse toujours les nombres pour les params numériques", () => {
     const typeMap = { "announce-before-write.announce_threshold": "number" as const };
@@ -18,7 +18,8 @@ describe("parseSetParams — coercition par type déclaré (#28)", () => {
   });
   it("buildParamTypeMap lit les types du catalogue réel", () => {
     const m = buildParamTypeMap();
-    expect(m["mission-tasks-md.phase_number"]).toBe("string");
+    expect(m["audit-specialist.focus_name"]).toBe("string");
+    expect(m["sequential-wait.retry_attempts"]).toBe("number");
     expect(m["user-brief.constraints"]).toBe("string[]");
   });
 });
@@ -40,8 +41,8 @@ describe("parseSetFileParams — valeurs lues verbatim depuis un fichier (#35)",
   });
 
   it("n'applique jamais JSON.parse — une valeur numérique reste une string", () => {
-    const p = parseSetFileParams(["mission-tasks-md.phase_number=file.txt"], () => "7");
-    expect(p["mission-tasks-md"]!.phase_number).toBe("7");
+    const p = parseSetFileParams(["audit-specialist.focus_name=file.txt"], () => "7");
+    expect(p["audit-specialist"]!.focus_name).toBe("7");
   });
 
   it("ignore les entrées sans '=' ", () => {

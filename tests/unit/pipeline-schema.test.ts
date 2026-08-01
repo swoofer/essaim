@@ -23,27 +23,27 @@ describe("loadPipeline — parsing & validation", () => {
   it("parses a valid pipeline", () => {
     const p = write(
       "pipeline.yaml",
-      `name: decouverte
+      `name: audit-puis-migration
 steps:
   - name: analyse
-    template: mekova-decouverte
-    project: ../specs
+    template: phare
+    project: ../legacy
     set:
-      discovery-synth.projet: commandes
+      user-brief.brief: migration Rust vers React
     timeout_minutes: 20
-  - name: proto
-    template: mekova-prototype
+  - name: migration
+    template: migrate-phase2
     project: ../code
     modules: [a, b]
 `,
     );
     const def = loadPipeline(p);
-    expect(def.name).toBe("decouverte");
+    expect(def.name).toBe("audit-puis-migration");
     expect(def.steps).toHaveLength(2);
     expect(def.steps[0]!.name).toBe("analyse");
-    expect(def.steps[0]!.template).toBe("mekova-decouverte");
-    expect(def.steps[0]!.project).toBe("../specs");
-    expect(def.steps[0]!.set).toEqual({ "discovery-synth.projet": "commandes" });
+    expect(def.steps[0]!.template).toBe("phare");
+    expect(def.steps[0]!.project).toBe("../legacy");
+    expect(def.steps[0]!.set).toEqual({ "user-brief.brief": "migration Rust vers React" });
     expect(def.steps[0]!.timeout_minutes).toBe(20);
     expect(def.steps[1]!.modules).toEqual(["a", "b"]);
   });

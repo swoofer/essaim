@@ -257,24 +257,24 @@ after-hook); remaining steps are recorded as `skipped`.
 
 ```yaml
 # pipeline.yaml — paths are relative to this file's directory
-name: decouverte-complete
+name: audit-then-migrate
 steps:
-  - name: analyse
-    template: mekova-decouverte
-    project: ../specs
+  - name: audit
+    template: phare
+    project: ../legacy
     set:
-      discovery-synth.projet: commandes-boulangerie
+      audit-output.paths: '["MIGRATION_AUDIT.md"]'
     set_file:
-      user-brief.brief: tmp/brief-decouverte.txt   # value read verbatim, wins over set
+      user-brief.brief: tmp/brief-audit.txt        # value read verbatim, wins over set
     timeout_minutes: 20
-  - name: proto
-    template: mekova-prototype
-    project: ../code
-    modules_file: tmp/proto/modules.txt            # one id per line — or modules: [a, b]
+  - name: migrate
+    template: migrate-phase2
+    project: ../web
+    modules_file: tmp/migrate/slices.txt           # one id per line — or modules: [a, b]
     set_file:
-      user-brief.brief: tmp/brief-proto.txt
+      user-brief.brief: tmp/brief-migrate.txt
     hooks:
-      before: ["cp ../specs/specs/x/ecrans.md tmp/proto/ecrans.md"]
+      before: ["cp ../legacy/MIGRATION_AUDIT.md tmp/migrate/audit.md"]
       after: ["npm run build"]                      # non-zero after-hook fails the step
 ```
 

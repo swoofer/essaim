@@ -40,13 +40,10 @@ describe("listTemplates (via BCE)", () => {
   });
 });
 
-// Templates whose required params are genuine per-run user input (no preset-time value possible)
-const SMOKE_SET_PARAMS: Record<string, Record<string, Record<string, unknown>>> = {
-  "mekova-decouverte": {
-    "discovery-specialist": { transcript: "notes/rencontres/test.md" },
-    "discovery-synth": { transcript: "notes/rencontres/test.md", projet: "test" },
-  },
-};
+// Templates whose required params are genuine per-run user input (no preset-time value possible).
+// Vide pour le catalogue stock : chaque preset générique fournit ses params.
+// Les catalogues externes (--catalog) testent les leurs chez eux.
+const SMOKE_SET_PARAMS: Record<string, Record<string, Record<string, unknown>>> = {};
 
 describe("buildProject (via BCE)", () => {
   it("throws on unknown template", () => {

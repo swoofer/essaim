@@ -7,6 +7,26 @@ on:
     branches: [main]
 
 jobs:
+  # Garde-fou : essaim (public) ne ship que du générique. Aucun artefact ni
+  # aucune mention "mekova" ne doit réapparaître — ces contenus vivent dans le
+  # catalogue privé, pas ici. Ce job échoue toute PR qui les réintroduirait.
+  no-domain-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Refuser les fichiers mekova
+        run: |
+          hits=$(git ls-files 'templates/mekova-*' 'presets/mekova-*' 'behaviors/mekova-*' 'compositions/mekova-*')
+          if [ -n "$hits" ]; then
+            echo "::error::Fichiers spécifiques mekova réintroduits :"; echo "$hits"; exit 1
+          fi
+      - name: Refuser toute mention "mekova"
+        run: |
+          if git grep -In -i 'mekova' -- . ':!.github/workflows/test.yml' > /tmp/hits 2>/dev/null; then
+            echo "::error::Le terme 'mekova' est réapparu dans des fichiers suivis :"; cat /tmp/hits; exit 1
+          fi
+          echo "OK — aucune trace mekova."
+
   test:
     runs-on: ubuntu-latest
     steps:

@@ -2,11 +2,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { uniqueReportBase } from '../../src/orchestrator/reporter.js';
 import { loadTemplates } from '../../src/template-loader.js';
-import { runPipeline } from '@swoofer/promptweave';
-import type { Agent } from '@swoofer/promptweave/types';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'essaim-minors-')); });
@@ -83,17 +81,5 @@ agents:
     count: beaucoup
 `);
     expect(() => loadTemplates(p)).toThrow(/count/);
-  });
-});
-
-describe('proto-scaffold — mock_spec est réellement transmis à l\'agent', () => {
-  const BCE_DIR = resolve(import.meta.dirname, '../..');
-
-  it('le mock_spec extrait par le skill atterrit dans le prompt (il était déclaré puis jeté)', () => {
-    const agent: Agent = { name: 'test', preset: 'mekova-proto-scaffold', add: [], remove: [], params: {} };
-    const result = runPipeline(agent, BCE_DIR, {
-      'proto-scaffold': { mock_spec: 'Commande: id, client, pains[], heure_retrait' },
-    });
-    expect(result.output.prompt).toContain('heure_retrait');
   });
 });

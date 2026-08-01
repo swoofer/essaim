@@ -1,5 +1,5 @@
 name: mission-tasks-md
-description: "Mission Mekova — implémenter les tâches d'une phase de tasks.md selon la méthode"
+description: "Mission d'implémentation — implémenter les tâches d'une phase de tasks.md selon la méthode"
 category: mission
 
 params:
@@ -11,9 +11,9 @@ params:
 sections:
   "030-mission":
     prompt: |
-      ## Ta mission — Implémenter des tâches du plan Mekova{{#if params.phase_number}} (phase {{params.phase_number}}){{/if}}
+      ## Ta mission — Implémenter des tâches du plan détaillé{{#if params.phase_number}} (phase {{params.phase_number}}){{/if}}
       Les tâches qui te sont assignées viennent du plan détaillé (tasks.md)
-      d'une spec Mekova. Elles te parviennent via le brief de session et/ou
+      d'une spec. Elles te parviennent via le brief de session et/ou
       les threads qui te sont assignés (assigned_to). Règles absolues :
 
       1. **Respecter l'ordre des steps** de chaque tâche. Ne pas réorganiser.
