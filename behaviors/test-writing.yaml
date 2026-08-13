@@ -23,7 +23,10 @@ sections:
          - depends_on_files: les fichiers source que tu testes
       2. Si le coordinator détecte un conflit, participe à la consultation
       3. SEULEMENT après résolution, écris tes tests
-      4. Utilise le framework de test existant du projet
+      {{#if params.test_dir}}
+         Écris-les sous `{{params.test_dir}}`.
+      {{/if}}
+      4. Utilise {{#if params.test_framework}}`{{params.test_framework}}`{{else}}le framework de test existant du projet{{/if}}
       5. Vérifie que tes tests passent
       6. Appelle log_action_summary après chaque fichier
       Coordonne-toi avec les autres agents pour éviter les doublons.

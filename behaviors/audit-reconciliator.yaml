@@ -30,10 +30,6 @@ params:
       - "Risques de migration (séparés des complexités)"
       - "Estimation effort (S/M/L/XL) + range jours-dev (best/likely/worst)"
       - "Notes migration React (court, factuel)"
-  effort:
-    type: string
-    default: high
-    description: "Effort profile — high (Opus) recommended for synthesis judgment"
 
 sections:
   "030-mission":

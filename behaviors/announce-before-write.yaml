@@ -16,13 +16,6 @@ requires:
 conflicts_with: [silent-mode]
 suggests: [conflict-resolution]
 
-params:
-  announce_threshold:
-    type: number
-    default: 1
-    required: false
-    description: "Minimum files before announcing"
-
 sections:
   "015-wait-for-peers":
     prompt: |
