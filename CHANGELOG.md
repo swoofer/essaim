@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/swoofer/essaim/compare/v0.8.0...v0.8.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **catalog:** interpole ou retire les params que l'assemblage jetait ([#79](https://github.com/swoofer/essaim/issues/79)) ([#87](https://github.com/swoofer/essaim/issues/87)) ([bef272a](https://github.com/swoofer/essaim/commit/bef272a451d3b363a086d652dda0cdc78d158786))
+* **test:** n'exige les bits POSIX que là où ils existent ([#91](https://github.com/swoofer/essaim/issues/91)) ([607c95f](https://github.com/swoofer/essaim/commit/607c95f64f6c0333b3c4285e0d7722574545d6a2))
+
 ## [0.8.0](https://github.com/swoofer/essaim/compare/v0.7.0...v0.8.0) (2026-07-23)
 
 
