@@ -16,6 +16,9 @@ sections:
   "030-mission":
     prompt: |
       ## Ta mission — Synthèse de découverte
+      Prototype : `{{params.projet}}` — c'est le nom kebab-case à reprendre tel
+      quel dans le frontmatter `titre` du `spec_draft`, sans le reformuler.
+
       Les 4 angles ont posé leurs résultats dans `tmp/decouverte/*.yaml`
       (features, risques, roi, questions). Lis-les tous, arbitre les
       recoupements/contradictions en retournant au transcript

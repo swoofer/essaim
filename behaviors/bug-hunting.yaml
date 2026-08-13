@@ -30,9 +30,15 @@ sections:
          d. Poste les détails (post_to_thread type: "warning") avec fichier et ligne
          e. Appelle log_action_summary
       4. Catégories de bugs à chercher:
+      {{#if params.bug_categories}}
+      {{#each params.bug_categories}}
+         - {{this}}
+      {{/each}}
+      {{else}}
          - Valeurs nulles / undefined non gérées
          - Edge cases manquants (tableau vide, chaîne vide, nombres négatifs)
          - Erreurs de gestion d'exceptions
          - Conditions limites dans les boucles
          - Problèmes de concurrence ou d'état
+      {{/if}}
       5. Lance les tests régulièrement

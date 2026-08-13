@@ -14,12 +14,18 @@ sections:
       ## Ta mission — Audit qualité
       Analyse le projet selon ces catégories:
 
+      {{#if params.categories}}
+      {{#each params.categories}}
+      - {{this}}
+      {{/each}}
+      {{else}}
       1. **Structure** — Organisation des fichiers, séparation des responsabilités, profondeur des répertoires
       2. **Conventions** — Naming (fichiers, variables, fonctions), cohérence du style
       3. **Complexité** — Fichiers trop longs (>300 lignes), fonctions complexes, nesting profond
       4. **Dette technique** — TODO/FIXME/HACK dans le code, code commenté, imports inutilisés
       5. **Tests** — Couverture apparente (ratio fichiers test / fichiers source), fichiers sans tests
       6. **Documentation** — Présence de README, commentaires sur les modules publics
+      {{/if}}
 
       Pour chaque catégorie:
       - Annonce via announce_work (subject: "Analyse: [catégorie]")
