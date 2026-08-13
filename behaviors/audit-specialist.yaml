@@ -23,10 +23,6 @@ params:
     type: string
     required: true
     description: "YAML schema the agent must produce. Reconciliator depends on this contract."
-  effort:
-    type: string
-    default: mid
-    description: "Effort profile (low/mid/high/max). Defaults to mid (Sonnet)."
 
 sections:
   "030-mission":
