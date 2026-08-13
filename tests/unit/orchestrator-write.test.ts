@@ -89,7 +89,13 @@ describe("writeClaudeHooksDir", () => {
     expect(hookScript).toMatch(/[/\\]scripts[/\\]test_script\.sh/);
   });
 
-  it("writes hook scripts with 0o755 permissions", () => {
+  // POSIX seulement : Windows n'implémente pas les bits de permission POSIX.
+  // fs.chmod n'y pilote que l'attribut lecture-seule, si bien qu'un fichier écrit
+  // avec `{ mode: 0o755 }` ressort en 0o666 et que le bit d'exécution vaut 0 —
+  // l'assertion ne peut jamais tenir. Ce n'est pas un défaut du produit : le mode
+  // compte sur les plateformes où les hooks s'exécutent réellement, et il y est
+  // toujours vérifié.
+  it.skipIf(process.platform === "win32")("writes hook scripts with 0o755 permissions", () => {
     const claudeDir = path.join(TMP_ROOT, "perms", ".claude");
     writeClaudeHooksDir({ claudeDir, hooks: BCE_HOOKS, envVars: BCE_ENV_VARS });
 
