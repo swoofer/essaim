@@ -257,6 +257,14 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
       if (!thread) return;
 
       if (phase === "waiting") {
+        // Même garde d'idempotence que onThreadMessage, et pour une raison plus
+        // pressante : agent-loop appelle onTimeout sur le chemin NOMINAL
+        // (agent-loop.ts:638-640), pas seulement quand personne n'a répondu.
+        // Après un quorum la phase vaut encore "waiting", donc sa condition
+        // laisse passer — sans ce garde, chaque round payait une seconde
+        // décision LLM sur exactement le même buffer de réponses (#53).
+        if (thread.decideRequested) return;
+        thread.decideRequested = true;
         enqueue({
           type: "ask_llm_decide",
           threadId,
