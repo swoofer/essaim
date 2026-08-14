@@ -305,6 +305,15 @@ async function _runProjectBody(
     const { spawn } = await import("child_process");
     const duringScript = path.resolve(__dirname, "..", project.during_run);
     duringRunProcess = spawn("bash", [duringScript], { cwd: runDir, stdio: "ignore" });
+    // Sans ce handler, un ENOENT (bash absent, script introuvable au spawn)
+    // devient une uncaughtException, qui CONTOURNE le try/finally de runProject
+    // — coordinatorHandle.stop() ne s'exécute pas, et coordinator, broker MQTT
+    // et worktrees fuient. Le script during_run est accessoire : son échec doit
+    // dégrader le run, pas l'abattre (#96).
+    duringRunProcess.on("error", (err) => {
+      log.warn(`during_run script failed to spawn: ${err instanceof Error ? err.message : String(err)}`);
+      duringRunProcess = null;
+    });
   }
 
   // Timeout — works for both legacy (kill ChildProcess) and agent-loop
@@ -421,7 +430,12 @@ async function _runProjectBody(
   // agent's underlying work (child process exit, or agent-loop settlement)
   // completes — independent of when the caller stops waiting on it (e.g. the
   // run-level timeout race in the "Wait for all agents" section below).
-  const maxConcurrency = project.max_concurrency ?? DEFAULT_MAX_CONCURRENCY;
+  // Math.max, pas seulement `??` : celui-ci ne substitue que null/undefined, si
+  // bien que `max_concurrency: 0` construisait un limiteur qui n'accorde jamais
+  // de slot. Le premier acquireLaunchSlot() ne rendait alors jamais la main, et
+  // le timeout du run ne rattrape pas — timeoutReject n'est assigné qu'APRÈS la
+  // boucle de lancement (#97).
+  const maxConcurrency = Math.max(1, project.max_concurrency ?? DEFAULT_MAX_CONCURRENCY);
   const acquireLaunchSlot = createConcurrencyLimiter(maxConcurrency);
 
   async function launchWithLimit(agent: typeof project.agents[0]): Promise<ChildProcess | null> {
@@ -430,7 +444,11 @@ async function _runProjectBody(
     if (useAgentLoop) {
       const loopPromise = agentLoopPromises.get(agent.id);
       if (loopPromise) {
-        loopPromise.finally(release);
+        // Le .catch porte sur la promesse DÉRIVÉE par .finally, pas sur
+        // loopPromise : celle-ci est déjà gérée au site d'attente. Sans lui, un
+        // agent-loop qui rejette produit une rejection non gérée — avertissement
+        // aujourd'hui, mort du process sous --unhandled-rejections=strict (#97).
+        loopPromise.finally(release).catch(() => {});
       } else {
         release();
       }
