@@ -1,5 +1,33 @@
 # Security Subsystem — Plan 2: Engine Layer — Implementation Plan
 
+> **✅ ÉTAT : EXÉCUTÉ ET LIVRÉ — ne pas ré-implémenter.**
+>
+> Ce plan est un document d'exécution historique, pas du travail en attente. Le
+> sous-système vit sur `main` sous `src/security/`, couvert par 26 fichiers de
+> tests (184 tests). Livré par [#70](https://github.com/swoofer/essaim/pull/70)
+> le 2026-07-23 (`903ecdc`), puis complété par
+> [#76](https://github.com/swoofer/essaim/pull/76) et huit correctifs suivants.
+>
+> Les cases `- [ ]` ci-dessous n'ont pas été cochées pendant l'exécution, et ne
+> l'ont pas été après coup : cocher rétroactivement 146 étapes fabriquerait un
+> journal pas-à-pas que personne ne peut vérifier. **La source de vérité est le
+> code et les tests, pas les cases.**
+
+> **⚠️ DIVERGENCE ASSUMÉE — la tâche `src/security/docker.ts` est CADUQUE.**
+>
+> Ce plan fait construire des builders d'arguments `docker run` et leur
+> traduction de chemins win32. Ce modèle a été abandonné : essaim ne lance
+> jamais d'image Strix par `docker run` directement, il pilote la CLI hôte
+> `strix` (`pip install strix-agent`), qui gère elle-même son sandbox Docker.
+>
+> Le pivot est fait par [#76](https://github.com/swoofer/essaim/pull/76)
+> (`298552d`) ; `docker.ts` et son test ont été supprimés par `8f14d5c`. Le
+> remplaçant est `src/security/strix-cli.ts`, et le design est décrit dans
+> `docs/superpowers/specs/2026-07-23-strix-adapter-real-invocation-design.md`.
+>
+> Ne pas ressusciter ce fichier — ce serait réintroduire du code retiré
+> volontairement.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the deterministic engine layer under `src/security/` — Docker invocation helpers, a captured-subprocess runner, the pluggable adapter registry with a **permissive-license gate**, the Strix adapter (exit-code mapping + report parsing + normalization to `Finding`), and the multi-engine scan orchestrator — all unit-tested with mocked subprocesses (no real Docker/Strix/network).

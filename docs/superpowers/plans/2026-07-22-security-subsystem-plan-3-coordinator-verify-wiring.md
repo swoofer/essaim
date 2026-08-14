@@ -1,5 +1,18 @@
 # Security Subsystem — Plan 3: Coordinator Integration, Verification & Orchestrator Wiring — Implementation Plan
 
+> **✅ ÉTAT : EXÉCUTÉ ET LIVRÉ — ne pas ré-implémenter.**
+>
+> Ce plan est un document d'exécution historique, pas du travail en attente. Le
+> sous-système vit sur `main` sous `src/security/`, couvert par 26 fichiers de
+> tests (184 tests). Livré par [#70](https://github.com/swoofer/essaim/pull/70)
+> le 2026-07-23 (`903ecdc`), puis complété par
+> [#76](https://github.com/swoofer/essaim/pull/76) et huit correctifs suivants.
+>
+> Les cases `- [ ]` ci-dessous n'ont pas été cochées pendant l'exécution, et ne
+> l'ont pas été après coup : cocher rétroactivement 146 étapes fabriquerait un
+> journal pas-à-pas que personne ne peut vérifier. **La source de vérité est le
+> code et les tests, pas les cases.**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire the deterministic engine layer into an essaim run: resolve secrets into a container env-file, normalize findings into coordinator threads via the **existing** `/api/announce`, re-scan fixed worktrees to verify closure, add the optional `MiniProject.security` / `RunResult.security` fields, insert the two guarded orchestrator steps (pre-scan + verify), harden child-process env with an **allowlist**, and render the security report section.
