@@ -943,8 +943,17 @@ export async function runAgentLoop(
               // Execute one task. When work already landed on this file, say so:
               // an agent is otherwise blind to its peers, which is how three
               // hunters each committed a near-identical repro test for one bug
-              // (#30). The file-level claim exclusion stops the concurrent case;
-              // this covers the sequential one.
+              // (#30). Ce contexte couvre le cas SÉQUENTIEL — un pair a déjà
+              // livré sur ce fichier avant nous.
+              //
+              // Le cas CONCURRENT n'est pas couvert, contrairement à ce que
+              // disait ce commentaire : work-stealing.ts:226-231 est explicite,
+              // claim-task est atomique sur thread_id seul, pas sur le fichier,
+              // donc deux agents peuvent réclamer deux threads distincts qui
+              // partagent un fichier. Le correctif est côté coordinator
+              // (swoofer/mcp-coordinator#258). Un commentaire qui affirmait le
+              // contraire de son propre module a déjà envoyé un triage sur une
+              // fausse piste (#107).
               let taskPrompt = phase.prompt.replace(/\{\{params\.current_task\}\}/g, task.description);
               if (task.relatedDone?.length) {
                 taskPrompt += `\n\n## Déjà livré sur ce fichier (par un autre agent, ce run)\n`
@@ -1138,6 +1147,18 @@ export async function runAgentLoop(
   claude.close();
   interruptClaude.close();
   await mqtt.close().catch(() => {});
+
+  // Chaque sortie nominale dépareille unclaimTask avec un
+  // claimedThreadIds.delete(), donc ce balayage ne voit normalement rien. Il
+  // couvre le cas qui échappait à toutes : une exception entre le claim et
+  // l'une de ces sorties laissait le thread réservé sur le coordinator,
+  // assigné à un agent mort, et donc involable par les autres (#101).
+  // Best-effort : le run se termine de toute façon, et un unclaim qui échoue
+  // ne doit pas masquer l'exitReason déjà déterminé.
+  for (const threadId of claimedThreadIds) {
+    await unclaimTask(config.coordinatorUrl, threadId, config.agentId).catch(() => {});
+  }
+  claimedThreadIds.clear();
 
   const result: AgentLoopResult = {
     agentId: config.agentId,
