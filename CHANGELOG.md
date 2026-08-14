@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.0](https://github.com/swoofer/essaim/compare/v0.8.1...v0.9.0) (2026-08-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **workspace:** ESSAIM_RESET_BASE=1 n'autorise plus rien. La variable doit désormais contenir le chemin du répertoire à réinitialiser, et ce chemin doit correspondre à la base du run. Le message d'erreur donne la valeur à utiliser.
+
+### Bug Fixes
+
+* **coordination:** une seule décision LLM par round ([#53](https://github.com/swoofer/essaim/issues/53)) ([#95](https://github.com/swoofer/essaim/issues/95)) ([4cc059d](https://github.com/swoofer/essaim/commit/4cc059d007342d9b60536e422f9351a233b7ed4a))
+* **metrics:** le budget de temps doit couvrir la lecture du corps ([#58](https://github.com/swoofer/essaim/issues/58)) ([#94](https://github.com/swoofer/essaim/issues/94)) ([2472924](https://github.com/swoofer/essaim/commit/247292460015e97b36eefb3a3d3f189c573fd07f))
+* **workspace:** ESSAIM_RESET_BASE nomme le répertoire à détruire ([#56](https://github.com/swoofer/essaim/issues/56)) ([#103](https://github.com/swoofer/essaim/issues/103)) ([8ab3ecf](https://github.com/swoofer/essaim/commit/8ab3ecf13c7067bbe8d8ff2e1d4af8fb856fc32e))
+
+
+### Documentation
+
+* **readme:** documente ESSAIM_RESET_BASE et son contrat de chemin ([#104](https://github.com/swoofer/essaim/issues/104)) ([1235016](https://github.com/swoofer/essaim/commit/1235016bfc81fa561b1243f846352fcb9699c576))
+* **security:** marque les plans et la spec comme livrés, signale le pan périmé ([#92](https://github.com/swoofer/essaim/issues/92)) ([9bb0637](https://github.com/swoofer/essaim/commit/9bb0637080ba2fcebd3af9b18b55cf912b8c06b7))
+
 ## [0.8.1](https://github.com/swoofer/essaim/compare/v0.8.0...v0.8.1) (2026-08-13)
 
 
