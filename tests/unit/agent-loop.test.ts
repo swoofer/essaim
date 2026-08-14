@@ -19,6 +19,13 @@ vi.mock("../../src/agent-loop/claude-stream.js", () => ({
   BudgetExceededError: class BudgetExceededError extends Error {
     constructor(msg?: string) { super(msg ?? "Budget exceeded"); this.name = "BudgetExceededError"; }
   },
+  // Le catch de runAgentLoop teste `err instanceof AbortError` avant de
+  // retomber sur "error". Sans cet export, tout test qui fait échouer un tour
+  // meurt sur « No "AbortError" export is defined » au lieu d'exercer le
+  // chemin d'erreur — c'est pourquoi aucun ne l'exerçait.
+  AbortError: class AbortError extends Error {
+    constructor(msg?: string) { super(msg ?? "Aborted"); this.name = "AbortError"; }
+  },
 }));
 
 // Mock mqtt-listener
@@ -849,6 +856,42 @@ describe("runAgentLoop — phased mode", () => {
     expect(mockPostDiscoveries).not.toHaveBeenCalled();
     // Verify the flow completes
     expect(result.exitReason).toBe("done");
+  });
+
+  // #101 — chaque sortie nominale dépareille unclaimTask avec
+  // claimedThreadIds.delete(). Mais le bloc CLEANUP ne balayait pas ce qui
+  // restait dans le set : une exception entre le claim et l'une de ces sorties
+  // laissait le thread réservé sur le coordinator, assigné à un agent mort, et
+  // aucun autre agent ne pouvait le voler.
+  it("libère la tâche réclamée quand le tour explose avant toute sortie nominale", async () => {
+    vi.useFakeTimers();
+
+    const config = makeConfig({
+      phases: [
+        { name: "execute", prompt: "Fix: {{params.current_task}}", toolsMode: "full", loop: true },
+      ],
+    });
+
+    mockClaimNextTask.mockImplementation(async () => {
+      // Une seule tâche, puis plus rien — l'exception tombe pendant son
+      // traitement, donc le second appel n'arrive jamais.
+      return { id: "t-orpheline", description: "Bug A", file: undefined, severity: undefined };
+    });
+
+    mockSend.mockRejectedValue(new Error("boom pendant le traitement de la tâche"));
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    const result = await loopPromise;
+
+    expect(result.exitReason).toBe("error");
+    expect(mockUnclaimTask).toHaveBeenCalledWith(
+      "http://localhost:3100",
+      "t-orpheline",
+      "test-agent",
+    );
   });
 
   it("respects maxTurns during work-stealing loop", async () => {
