@@ -1,5 +1,23 @@
 # essaim Security Subsystem — Unified Design Specification (v1)
 
+> **✅ IMPLÉMENTÉ — et un pan de ce document est PÉRIMÉ.**
+>
+> Le sous-système est livré sur `main` sous `src/security/` (26 fichiers de
+> tests, 184 tests), par [#70](https://github.com/swoofer/essaim/pull/70) puis
+> [#76](https://github.com/swoofer/essaim/pull/76).
+>
+> **Tout ce que ce document dit du modèle d'invocation `docker run` est faux
+> aujourd'hui.** Il affirme notamment (§ « Invocation is `docker run` only »)
+> que « essaim never spawns a host `strix` binary » — c'est précisément
+> l'inverse de ce que fait le code. essaim pilote la CLI hôte `strix`
+> (`pip install strix-agent`), qui gère elle-même son sandbox Docker ;
+> `docker.ts` et ses builders d'arguments ont été supprimés par `8f14d5c`.
+>
+> Pour le modèle d'invocation réel, lire
+> `2026-07-23-strix-adapter-real-invocation-design.md`, qui supersede ce
+> document sur ce point précis. Le reste — modèle de findings, empreintes,
+> scope, redaction, baseline, licences, kill-switch — reste valide.
+
 **Status:** implementation-ready design. Lead-architect merge of 9 draft dimensions with all critical/high gaps resolved (69 gaps found by adversarial critics; 15 critical, 19 high — all addressed). Operator decisions in §15 are **confirmed**.
 
 **Scope of this doc:** the whole subsystem, but every "build now" decision is scoped to **v1 = Strix, static diff-scoped scan of a repo you own**. v2/v3 capabilities are designed at the interface level only.
