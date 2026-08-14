@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/swoofer/essaim/compare/v0.8.1...v0.8.2) (2026-08-14)
+
+
+### Documentation
+
+* **security:** marque les plans et la spec comme livrés, signale le pan périmé ([#92](https://github.com/swoofer/essaim/issues/92)) ([9bb0637](https://github.com/swoofer/essaim/commit/9bb0637080ba2fcebd3af9b18b55cf912b8c06b7))
+
 ## [0.8.1](https://github.com/swoofer/essaim/compare/v0.8.0...v0.8.1) (2026-08-13)
 
 
