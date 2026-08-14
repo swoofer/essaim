@@ -239,6 +239,26 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
   // via the coordinator's existing /api/threads-active endpoint — the same
   // one work-stealing.ts already polls for open threads — and re-queue
   // anything this listener hasn't seen yet.
+  /**
+   * `target_modules` est stocké côté coordinator via JSON.stringify dans une
+   * colonne TEXT (consultation.ts:182), donc /api/threads-active le renvoie en
+   * CHAÎNE. Un Array.isArray dessus est toujours faux, ce qui perdait
+   * silencieusement le ciblage par module à chaque catch-up (#98). Le tableau
+   * reste accepté au cas où un appelant le fournirait déjà décodé.
+   */
+  function parseTargetModules(raw: unknown): string[] | undefined {
+    if (Array.isArray(raw)) return raw as string[];
+    if (typeof raw !== "string") return undefined;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as string[]) : undefined;
+    } catch {
+      // Colonne illisible : on perd le ciblage, pas le thread. Le renvoyer sans
+      // modules vaut mieux que de le laisser tomber.
+      return undefined;
+    }
+  }
+
   async function catchUpOpenConsultations(): Promise<void> {
     if (!coordinatorUrl) return; // no REST base configured — nothing to catch up on
 
@@ -263,7 +283,15 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
     let recovered = 0;
     for (const thread of threads) {
       if (thread.status !== "open") continue;
-      if (thread.agent_id === agentId) continue; // filter self, same as handleMessage
+      // `initiator_id` est la colonne réelle de la table threads du coordinator
+      // (consultation.ts:174) ; `agent_id` n'y existe pas. Le filtre ne pouvait
+      // donc jamais matcher et chaque agent se réinjectait ses propres
+      // consultations à chaque reconnexion (#98). `agent_id` reste accepté en
+      // repli au cas où une version du coordinator l'exposerait sous ce nom —
+      // le commentaire d'origine invoquait une parité avec handleMessage, qui
+      // lit bien `payload.agent_id`, mais d'une charge MQTT, pas d'une ligne SQL.
+      const initiatorId = (thread.initiator_id ?? thread.agent_id) as string | undefined;
+      if (initiatorId === agentId) continue;
 
       const threadId = thread.id as string | undefined;
       if (!threadId || seenThreadIds.has(threadId)) continue;
@@ -273,7 +301,7 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         type: "consultation_new",
         threadId,
         subject: typeof thread.subject === "string" ? thread.subject : undefined,
-        targetModules: Array.isArray(thread.target_modules) ? (thread.target_modules as string[]) : undefined,
+        targetModules: parseTargetModules(thread.target_modules),
         timestamp: Date.now(),
         raw: thread,
       });
