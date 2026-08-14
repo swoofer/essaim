@@ -243,16 +243,12 @@ async function _runProjectBody(
   // 2. Create workspaces (resetBase FIRST, then setup, then worktrees)
   const basePath = project.workspace.base || DEFAULT_BASE;
   if (project.workspace.type === "worktree") {
-    // resetBase runs `git checkout -- .` + `git clean -fd` — refuse to let it
-    // silently target process.cwd() when the destructive opt-in is set but
-    // the config never named an explicit base. Falling back to cwd here has
-    // no safe reading: whatever directory the operator happened to invoke
-    // essaim from would get wiped.
-    if (process.env.ESSAIM_RESET_BASE === "1" && !project.workspace.base) {
-      throw new Error(
-        "resetBase refused: set workspace.base explicitly before ESSAIM_RESET_BASE=1",
-      );
-    }
+    // The authorization check lives in resetBase itself, which throws unless
+    // ESSAIM_RESET_BASE names this exact directory (#56). The guard that used
+    // to sit here only covered an UNSET workspace.base — a case no CLI path
+    // produces, since cli/run.ts defaults -p to "." and bridge.ts types
+    // workspace.base as a required string. It protected the library API while
+    // leaving the CLI wide open; naming the target covers both.
     resetBase(basePath);
   }
 
