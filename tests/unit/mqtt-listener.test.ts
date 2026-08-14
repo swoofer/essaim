@@ -339,6 +339,66 @@ describe("MqttListener", () => {
       expect(msgs[0].subject).toBe("Missed while offline");
     });
 
+    // #98 — le catch-up lisait deux champs que le coordinator n'expose pas sous
+    // cette forme. Les fixtures ci-dessus utilisaient `agent_id`, ce que la
+    // table `threads` ne contient pas : l'initiateur y est `initiator_id`
+    // (consultation.ts:174). Le filtre « pas mes propres threads » ne pouvait
+    // donc jamais matcher, et un agent se réinjectait ses propres consultations
+    // à chaque reconnexion.
+    it("filtre ses propres threads via initiator_id, la colonne réellement exposée", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [
+          { id: "t-mine", status: "open", subject: "Le mien", initiator_id: "agent-1" },
+          { id: "t-other", status: "open", subject: "Celui d'un pair", initiator_id: "agent-2" },
+        ],
+      });
+
+      const listener = await connectWithCatchUp(fetchMock);
+
+      const msgs = listener.drain();
+      expect(msgs.map((m) => m.threadId)).toEqual(["t-other"]);
+    });
+
+    // `target_modules` est écrit en JSON.stringify et stocké en TEXT
+    // (consultation.ts:182), donc il revient en CHAÎNE. Array.isArray était
+    // toujours faux et le ciblage par module systématiquement perdu.
+    it("reparse target_modules, qui revient en JSON texte et non en tableau", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [
+          {
+            id: "t-mod",
+            status: "open",
+            subject: "Refonte auth",
+            initiator_id: "agent-2",
+            target_modules: '["auth","billing"]',
+          },
+        ],
+      });
+
+      const listener = await connectWithCatchUp(fetchMock);
+
+      const msgs = listener.drain();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].targetModules).toEqual(["auth", "billing"]);
+    });
+
+    it("survit à un target_modules illisible sans perdre le thread", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [
+          { id: "t-bad", status: "open", subject: "x", initiator_id: "agent-2", target_modules: "{pas du json" },
+        ],
+      });
+
+      const listener = await connectWithCatchUp(fetchMock);
+
+      const msgs = listener.drain();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].targetModules).toBeUndefined();
+    });
+
     it("does not reprocess a consultation already seen via a live message", async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
