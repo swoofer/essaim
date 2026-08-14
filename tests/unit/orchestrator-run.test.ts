@@ -114,6 +114,15 @@ function makeFetchMock(registerOk: Record<string, boolean>) {
   });
 }
 
+/** Résout en "PENDING" si la promesse n'a pas rendu la main dans les temps. */
+async function within<T>(p: Promise<T>, ms: number): Promise<T | "PENDING"> {
+  let timer: ReturnType<typeof setTimeout>;
+  const guard = new Promise<"PENDING">((r) => {
+    timer = setTimeout(() => r("PENDING"), ms);
+  });
+  return Promise.race([p, guard]).finally(() => clearTimeout(timer));
+}
+
 let TMP_DIR: string;
 let ORIGINAL_CWD: string;
 
@@ -330,6 +339,63 @@ describe("runProject — concurrency cap on agent fan-out", () => {
 
     expect(tracked.maxActive).toBe(3);
   });
+});
+
+// ── #97 — launch-loop robustness ───────────────────────────────────────────
+
+describe("runProject — launch loop", () => {
+  it("treats max_concurrency: 0 as 1 instead of waiting forever", async () => {
+    // `??` only substitutes null/undefined, so 0 built a limiter that never
+    // grants a slot — the first acquireLaunchSlot() never resolved. The run
+    // timeout cannot rescue it either: timeoutReject is only assigned AFTER
+    // the launch loop, so the run hangs with no agents and no deadline.
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      max_concurrency: 0,
+    });
+
+    const result = await within(
+      runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" }),
+      8000,
+    );
+
+    expect(result, "le run n'a jamais rendu la main — le limiteur n'accorde aucun slot").not.toBe("PENDING");
+    expect(launchAgentLoop).toHaveBeenCalledTimes(1);
+  }, 20000);
+
+  it("does not leak an unhandled rejection when an agent-loop rejects", async () => {
+    // `loopPromise.finally(release)` returns a NEW promise that rejects with
+    // the original. The original is handled at the await site; the derived one
+    // was not — an unhandled rejection warning today, a process kill under
+    // --unhandled-rejections=strict.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+      vi.mocked(launchAgentLoop).mockImplementation(async () => {
+        throw new Error("agent-loop exploded");
+      });
+
+      const project = makeProject({ agents: [makeAgent({ id: "a1", name: "Agent A" })] });
+
+      await runProject(project, "with_coordinator", false, {
+        coordinatorUrl: "http://coordinator.test",
+      }).catch(() => {});
+
+      // Laisse le microtask queue s'écouler pour que la rejection non gérée
+      // remonte si elle existe.
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  }, 20000);
 });
 
 // ── #56 — ESSAIM_RESET_BASE names the directory it is allowed to destroy ────
