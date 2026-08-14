@@ -60,20 +60,63 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
-# Normalize FILE_PATH to repo-relative, forward-slash form.
-# In team-mode the coordinator is on a different machine and cannot
-# resolve the agent's local repo root; only this client can.
-if [ -n "$FILE_PATH" ] && [ "$FILE_PATH" != "null" ]; then
-  # Prefer the SUPERPROJECT root when this file lives inside a submodule, so
-  # paths reported to the coordinator are workspace-relative (relative to the
-  # outer working tree, e.g. a nested multi-repo workspace) rather than
-  # submodule-relative. Falls back to the repo toplevel in a normal checkout.
-  REPO_ROOT=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-superproject-working-tree 2>/dev/null)
-  [ -z "$REPO_ROOT" ] && REPO_ROOT=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
-  if [ -n "$REPO_ROOT" ] && [[ "$FILE_PATH" == "$REPO_ROOT"/* ]]; then
-    FILE_PATH="${FILE_PATH#$REPO_ROOT/}"
+# Normalize a path to repo-relative, forward-slash form.
+# In team-mode the coordinator is on a different machine and cannot resolve the
+# agent's local repo root; only this client can.
+#
+# Kept as a function so tests can source it without triggering the hook's
+# stdin/curl side effects — see tests/track_activity_path_normalization.test.sh.
+normalize_file_path() {
+  local p="$1"
+  [ -z "$p" ] && { printf '%s' "$p"; return; }
+
+  # Backslashes first, so `dirname` and the comparisons below see one form.
+  p="${p//\\//}"
+
+  local dir base dir_real root root_real super guard
+  dir=$(dirname "$p")
+  base=$(basename "$p")
+
+  # Both sides are resolved through the SAME `cd` + `pwd -P`, and that is the
+  # whole point. Comparing the raw strings cannot work under Git Bash: the hook
+  # is handed `/tmp/x/repo/src/foo.ts` (MSYS form) while `git rev-parse` answers
+  # `C:/Users/…/Temp/x/repo` (Windows form). Different namespaces for the same
+  # directory — the prefix test never matched, the strip never happened, and the
+  # coordinator received an ABSOLUTE path it cannot match against anything.
+  # That made conflict detection silently blind on Windows, backslashes or not
+  # (#100, wider than reported).
+  dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || dir_real=""
+  [ -z "$dir_real" ] && { printf '%s' "$p"; return; }
+
+  root=$(cd "$dir_real" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+  [ -z "$root" ] && { printf '%s' "$p"; return; }
+
+  # Walk up to the OUTERMOST superproject. `--show-superproject-working-tree`
+  # only ever returns the IMMEDIATE one, so a submodule nested two levels deep
+  # still reported paths relative to the middle repo. The guard bounds a
+  # pathological loop; real nests are two or three deep.
+  guard=0
+  while [ "$guard" -lt 16 ]; do
+    super=$(cd "$root" 2>/dev/null && git rev-parse --show-superproject-working-tree 2>/dev/null)
+    [ -z "$super" ] && break
+    root="$super"
+    guard=$((guard + 1))
+  done
+
+  root_real=$(cd "$root" 2>/dev/null && pwd -P) || root_real=""
+  [ -z "$root_real" ] && { printf '%s' "$p"; return; }
+
+  if [ "$dir_real" = "$root_real" ]; then
+    printf '%s' "$base"
+  elif [[ "$dir_real" == "$root_real"/* ]]; then
+    printf '%s' "${dir_real#"$root_real"/}/$base"
+  else
+    printf '%s' "$p"
   fi
-  FILE_PATH="${FILE_PATH//\\//}"
+}
+
+if [ -n "$FILE_PATH" ] && [ "$FILE_PATH" != "null" ]; then
+  FILE_PATH=$(normalize_file_path "$FILE_PATH")
 fi
 
 # v0.6: include file content in the payload if under 256 KB and not sensitive
