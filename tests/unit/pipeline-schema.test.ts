@@ -175,3 +175,77 @@ steps:
     expect(def.steps[0]!.set).toEqual({ "behavior.count": "42", "behavior.enabled": "true" });
   });
 });
+
+// ── #99 — formes scalaires/objet acceptées en silence ──────────────────────
+//
+// #59 avait corrigé la TypeError brute sur hooks.before/after et ajouté
+// coerceScalar sur modules/set/set_file. Restaient trois formes qui ne lèvent
+// pas mais dégradent : le pas se charge avec la valeur absente ou NaN, et rien
+// dans un --dry-run ne le trahit. Un auteur de YAML obtient un run qui fait
+// autre chose, plutôt qu'une erreur nommant sa ligne.
+describe("loadPipeline — formes invalides pour modules et agents (#99)", () => {
+  it("refuse un modules scalaire au lieu de le laisser disparaître", () => {
+    const p = write(
+      "scalaire.yaml",
+      `name: p
+steps:
+  - name: s
+    template: t
+    project: .
+    modules: platform
+`,
+    );
+
+    expect(() => loadPipeline(p)).toThrow(/modules/);
+  });
+
+  it("refuse un modules en mapping", () => {
+    const p = write(
+      "mapping.yaml",
+      `name: p
+steps:
+  - name: s
+    template: t
+    project: .
+    modules:
+      id: platform
+`,
+    );
+
+    expect(() => loadPipeline(p)).toThrow(/modules/);
+  });
+
+  it("refuse un agents non numérique au lieu de stocker NaN", () => {
+    const p = write(
+      "agents.yaml",
+      `name: p
+steps:
+  - name: s
+    template: t
+    project: .
+    agents:
+      n: 2
+`,
+    );
+
+    expect(() => loadPipeline(p)).toThrow(/agents/);
+  });
+
+  it("accepte toujours les formes valides — pas de régression", () => {
+    const p = write(
+      "ok.yaml",
+      `name: p
+steps:
+  - name: s
+    template: t
+    project: .
+    modules: [a, b]
+    agents: 3
+`,
+    );
+
+    const def = loadPipeline(p);
+    expect(def.steps[0].modules).toEqual(["a", "b"]);
+    expect(def.steps[0].agents).toBe(3);
+  });
+});
