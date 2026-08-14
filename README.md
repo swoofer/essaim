@@ -346,6 +346,21 @@ Every agent turn is logged via the `tokens` component logger (`input_tokens`, `o
 | `COORDINATOR_AGENT_ID` / `_NAME` / `_MODULES` | `alice-12345` · `Alice` · `src/auth,src/users` |
 | `MAX_QUOTA_PCT` | `95` (overrides the pre-flight default) |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+| `ESSAIM_RESET_BASE` | `/tmp/essaim-sandbox` — **destructive**, see below |
+
+### `ESSAIM_RESET_BASE` — destructive, and it names its own target
+
+Before creating worktrees, essaim can reset the base checkout with `git checkout -- .` followed by `git clean -fd`. That discards every uncommitted change and every untracked file in that directory. It is off by default.
+
+The variable holds **the path to reset**, and that path must match the run's base — it is not a boolean:
+
+```bash
+ESSAIM_RESET_BASE=/tmp/essaim-sandbox essaim run raid -p /tmp/essaim-sandbox
+```
+
+Any other value, including the old `=1`, is refused with an error naming both the directory you authorized and the one the run would actually reset. You cannot destroy a directory you did not name, which is the entire point: the previous boolean form authorized the wipe without saying what it applied to, so a stray `-p` was enough to lose uncommitted work.
+
+You rarely need this. `git worktree add` snapshots from a git ref, so worktrees are unaffected by a dirty base — without the opt-in essaim just logs a warning and carries on.
 
 Resolution priority: CLI flag → env var → `config.json` → default. If the coordinator has JWT auth on, `essaim init` provisions a token into `.coordinator-env` and essaim attaches it to every MCP HTTP and MQTT request automatically.
 
