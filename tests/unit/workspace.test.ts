@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import { createWorkspaces, cleanupWorkspaces } from "../../src/orchestrator/workspace.js";
+import { createWorkspaces, cleanupWorkspaces, resetBase } from "../../src/orchestrator/workspace.js";
 import type { AgentConfig, WorkspaceResult } from "../../src/orchestrator/types.js";
 
 function testAgent(partial: Partial<AgentConfig> & Pick<AgentConfig, "id" | "name" | "profile">): AgentConfig {
@@ -69,6 +69,88 @@ describe("createWorkspaces", () => {
     );
     expect(result.type).toBe("none");
     expect(result.paths.size).toBe(1);
+  });
+});
+
+// ── #56 — ESSAIM_RESET_BASE nomme le répertoire à détruire ──────────────────
+//
+// resetBase lance `git checkout -- .` + `git clean -fd`. Le contrat booléen
+// `=1` autorisait l'opération sans dire SUR QUOI : le répertoire visé venait
+// d'ailleurs (workspace.base, défaut cwd), donc un `-p` distrait suffisait à
+// perdre son travail non commité. Aucune heuristique ne rattrape ça — refuser
+// quand la base vaut le cwd casse l'usage recommandé (`cd /tmp/sandbox &&
+// essaim run -p .`). Nommer le chemin est la seule autorisation sans faux
+// positif ni faux négatif : on ne peut pas détruire ce qu'on n'a pas nommé.
+describe("resetBase — ESSAIM_RESET_BASE (#56)", () => {
+  const ORIGINAL = process.env.ESSAIM_RESET_BASE;
+
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.ESSAIM_RESET_BASE;
+    else process.env.ESSAIM_RESET_BASE = ORIGINAL;
+  });
+
+  /** Salit le bac à sable : un fichier suivi modifié + un fichier non suivi. */
+  function dirty(): void {
+    fs.writeFileSync(path.join(SANDBOX_DIR, "file.txt"), "MODIFIÉ");
+    fs.writeFileSync(path.join(SANDBOX_DIR, "untracked.txt"), "x");
+  }
+
+  function isClean(): boolean {
+    return (
+      fs.readFileSync(path.join(SANDBOX_DIR, "file.txt"), "utf-8") === "hello" &&
+      !fs.existsSync(path.join(SANDBOX_DIR, "untracked.txt"))
+    );
+  }
+
+  it("ne touche à rien quand la variable est absente", () => {
+    delete process.env.ESSAIM_RESET_BASE;
+    dirty();
+
+    resetBase(SANDBOX_DIR);
+
+    expect(isClean()).toBe(false);
+  });
+
+  it("refuse l'ancien contrat booléen =1", () => {
+    process.env.ESSAIM_RESET_BASE = "1";
+    dirty();
+
+    expect(() => resetBase(SANDBOX_DIR)).toThrow(/resetBase refused/);
+    expect(isClean()).toBe(false);
+  });
+
+  it("refuse quand la variable nomme un AUTRE répertoire", () => {
+    process.env.ESSAIM_RESET_BASE = path.join(TMP_DIR, "ailleurs");
+    dirty();
+
+    expect(() => resetBase(SANDBOX_DIR)).toThrow(/resetBase refused/);
+    expect(isClean()).toBe(false);
+  });
+
+  it("nomme les deux chemins dans le refus, pour que l'erreur soit actionnable", () => {
+    process.env.ESSAIM_RESET_BASE = "1";
+
+    expect(() => resetBase(SANDBOX_DIR)).toThrow(new RegExp(SANDBOX_DIR.replace(/[\\^$*+?.()|[\]{}]/g, "\\$&")));
+  });
+
+  it("réinitialise quand la variable nomme exactement la base", () => {
+    process.env.ESSAIM_RESET_BASE = SANDBOX_DIR;
+    dirty();
+
+    resetBase(SANDBOX_DIR);
+
+    expect(isClean()).toBe(true);
+  });
+
+  it("accepte une forme non normalisée du même chemin", () => {
+    // Un opérateur qui copie-colle avec une barre finale, ou passe par `.`,
+    // désigne bien le même répertoire — refuser là-dessus serait du zèle.
+    process.env.ESSAIM_RESET_BASE = path.join(SANDBOX_DIR, ".") + path.sep;
+    dirty();
+
+    resetBase(SANDBOX_DIR);
+
+    expect(isClean()).toBe(true);
   });
 });
 

@@ -332,9 +332,9 @@ describe("runProject — concurrency cap on agent fan-out", () => {
   });
 });
 
-// ── resetBase refuses an implicit cwd fallback ──────────────────────────────
+// ── #56 — ESSAIM_RESET_BASE names the directory it is allowed to destroy ────
 
-describe("runProject — resetBase refuses implicit cwd fallback", () => {
+describe("runProject — resetBase authorization", () => {
   const ORIGINAL_ENV = process.env.ESSAIM_RESET_BASE;
 
   afterEach(() => {
@@ -342,27 +342,44 @@ describe("runProject — resetBase refuses implicit cwd fallback", () => {
     else process.env.ESSAIM_RESET_BASE = ORIGINAL_ENV;
   });
 
-  it("refuses to run (and never touches cwd) when ESSAIM_RESET_BASE=1 and workspace.base is unset", async () => {
+  it("refuses the legacy boolean, and never launches an agent when it does", async () => {
+    // `=1` authorized the destruction without naming its target, so whatever
+    // workspace.base happened to be — cwd by default — got wiped.
     process.env.ESSAIM_RESET_BASE = "1";
     vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
     vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
 
     const project = makeProject({
       agents: [makeAgent({ id: "a1", name: "Agent A" })],
-      workspace: { type: "worktree" }, // base intentionally omitted
+      workspace: { type: "worktree" }, // base omitted → would have fallen back to cwd
     });
 
     await expect(
       runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
     ).rejects.toThrow(/resetBase refused/);
 
-    // The agent must never have been launched — the refusal happens before
-    // any workspace/agent setup.
+    // The refusal must happen before any workspace or agent setup.
     expect(launchAgentLoop).not.toHaveBeenCalled();
   });
 
-  it("proceeds normally when ESSAIM_RESET_BASE=1 and workspace.base IS set", async () => {
-    process.env.ESSAIM_RESET_BASE = "1";
+  it("refuses when the variable names a different directory than the run's base", async () => {
+    process.env.ESSAIM_RESET_BASE = path.join(TMP_DIR, "some-other-dir");
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "worktree", base: TMP_DIR },
+    });
+
+    await expect(
+      runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
+    ).rejects.toThrow(/resetBase refused/);
+    expect(launchAgentLoop).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the variable names exactly the run's base", async () => {
+    process.env.ESSAIM_RESET_BASE = TMP_DIR;
     vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
     vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
 
