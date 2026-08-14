@@ -1,0 +1,19 @@
+# Configuration Jekyll de GitHub Pages (source : branche main, dossier /docs).
+#
+# Pages sert TOUT ce que contient /docs. Les documents de travail superpowers —
+# les 4 plans d'implémentation du sous-système de sécurité et leurs specs de
+# design, ~210 Ko — se retrouvaient donc publiés sur le site vitrine, avec un
+# robots.txt en `Allow: /` qui n'empêchait rien de les indexer.
+#
+# Ce sont des artefacts d'exécution internes, pas de la documentation produit :
+# ils décrivent des étapes déjà livrées, et l'un d'eux porte même un pan périmé
+# explicitement signalé. Les exclure ici les retire de la PUBLICATION, pas
+# seulement de l'indexation — Jekyll ne les copie pas dans le site généré.
+#
+# Ils restent lisibles sur le dépôt, qui est public, et à leur chemin habituel :
+# rien ne bouge sur disque, donc aucune référence croisée ne casse.
+#
+# `docs/security/` reste publié : licensing.md et THIRD_PARTY_LICENSES.md sont
+# de la conformité de licence, qui a vocation à être consultable.
+exclude:
+  - superpowers/
