@@ -86,15 +86,93 @@ export function computeMetrics(events: SseEvent[]): CoordinatorMetrics {
  * run full of real threads (#29). Metrics that silently read as zero are worse
  * than metrics that fail loudly.
  */
-async function getWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+interface BudgetedResponse {
+  ok: boolean;
+  status: number;
+  body: string;
+}
+
+/**
+ * GET/POST and read the body, the whole thing under ONE time budget.
+ *
+ * `/api/events` is an SSE stream the coordinator NEVER closes: `handleSse`
+ * writes the replay, registers a listener, then starts a keep-alive heartbeat
+ * and returns (mcp-coordinator `serve-http.ts`). Its body has no end, so
+ * `resp.text()` — which waits for exactly that — can never resolve.
+ *
+ * Two failure modes, both real, and a fix has to dodge both:
+ *
+ *   1. Releasing the abort timer once the HEADERS land leaves the body read
+ *      with no deadline at all. That was the bug (#58): `fetchLatestEventId`
+ *      runs BEFORE `/api/reset`, before workspaces, before any agent spawns,
+ *      so the whole run hung at startup against a real coordinator.
+ *   2. Letting the budget abort mid-body throws away everything buffered —
+ *      which IS the replay we came for. The call returns fast and empty, and
+ *      the report prints zeros, the exact symptom #29 was about.
+ *
+ * So the body is read INCREMENTALLY and whatever arrived is kept. The replay
+ * lands in one burst right after the headers; a short silence after it means
+ * "that's all there is" — that is what `idleMs` detects, and it is why this
+ * returns in milliseconds rather than sitting out the full budget. The budget
+ * remains as a hard backstop for a server that dribbles forever.
+ *
+ * `idleMs` is opt-in: endpoints whose response actually ENDS (hot-files) pass
+ * nothing and are read to completion, so a slow transfer is never truncated.
+ */
+async function getWithBudget(
+  url: string,
+  init: RequestInit,
+  budgetMs: number,
+  idleMs?: number,
+): Promise<BudgetedResponse> {
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  const timer = setTimeout(() => abort.abort(), budgetMs);
   try {
-    return await fetch(url, { ...init, signal: abort.signal });
+    const resp = await fetch(url, { ...init, signal: abort.signal });
+    if (!resp.ok || !resp.body) return { ok: resp.ok, status: resp.status, body: "" };
+    return { ok: true, status: resp.status, body: await readBody(resp.body, idleMs) };
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** Accumulate a stream until it ends, goes quiet for `idleMs`, or is aborted. */
+async function readBody(stream: ReadableStream<Uint8Array>, idleMs?: number): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let out = "";
+  try {
+    for (;;) {
+      // Swallow the read's rejection here rather than letting it dangle: when
+      // the idle race wins, this promise is still in flight and the cancel()
+      // below settles it — an unhandled rejection would crash the process.
+      const read = reader.read().catch(() => ({ done: true, value: undefined }) as ReadableStreamReadResult<Uint8Array>);
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const chunk =
+        idleMs === undefined
+          ? await read
+          : await Promise.race([
+              read,
+              new Promise<"idle">((r) => {
+                idleTimer = setTimeout(() => r("idle"), idleMs);
+              }),
+            ]).finally(() => clearTimeout(idleTimer));
+
+      if (chunk === "idle" || chunk.done) break;
+      out += decoder.decode(chunk.value, { stream: true });
+    }
+    out += decoder.decode();
+  } catch {
+    // Budget abort, or a torn socket. Keep whatever arrived — partial metrics
+    // beat none, and an SSE replay is complete long before the budget expires.
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  return out;
+}
+
+/** Silence after the SSE replay burst that means "the replay is complete". */
+const SSE_REPLAY_IDLE_MS = 250;
 
 /**
  * Capture the coordinator's current max event id, to be used as the
@@ -107,13 +185,14 @@ async function getWithTimeout(url: string, init: RequestInit, timeoutMs: number)
  */
 export async function fetchLatestEventId(coordinatorUrl: string): Promise<number> {
   try {
-    const resp = await getWithTimeout(
+    const resp = await getWithBudget(
       `${coordinatorUrl}/api/events`,
       { headers: { "Last-Event-ID": "0", ...authHeaders() } },
       3000,
+      SSE_REPLAY_IDLE_MS,
     );
     if (!resp.ok) return 0;
-    const events = parseSseEvents(await resp.text());
+    const events = parseSseEvents(resp.body);
     return events.reduce((max, e) => Math.max(max, e.id), 0);
   } catch {
     // Coordinator unreachable — degrade to "no baseline" (0), matching the
@@ -140,13 +219,14 @@ export async function fetchCoordinatorMetrics(coordinatorUrl: string, sinceEvent
     // (the previous hardcoded value) so a fresh coordinator with no prior
     // events still gets the full replay instead of the last-50 fallback.
     const cursor = Math.max(sinceEventId, 1);
-    const resp = await getWithTimeout(
+    const resp = await getWithBudget(
       `${coordinatorUrl}/api/events`,
       { headers: { "Last-Event-ID": String(cursor), ...authHeaders() } },
       3000,
+      SSE_REPLAY_IDLE_MS,
     );
     if (resp.ok) {
-      sseRaw = await resp.text();
+      sseRaw = resp.body;
     } else {
       console.warn(`[metrics] /api/events → ${resp.status} — counters will read 0`);
     }
@@ -158,7 +238,9 @@ export async function fetchCoordinatorMetrics(coordinatorUrl: string, sinceEvent
   const metrics = computeMetrics(parseSseEvents(sseRaw));
 
   try {
-    const resp = await getWithTimeout(
+    // No idle cutoff: unlike /api/events this response actually ends, so it is
+    // read to completion and a slow transfer can never be truncated mid-JSON.
+    const resp = await getWithBudget(
       `${coordinatorUrl}/api/hot-files`,
       {
         method: "POST",
@@ -168,7 +250,7 @@ export async function fetchCoordinatorMetrics(coordinatorUrl: string, sinceEvent
       2000,
     );
     if (resp.ok) {
-      const hotFiles = (await resp.json()) as { file_path: string }[];
+      const hotFiles = JSON.parse(resp.body) as { file_path: string }[];
       metrics.hot_files = hotFiles.map((f) => f.file_path);
     }
   } catch {}
