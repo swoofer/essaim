@@ -288,6 +288,55 @@ describe("CoordinationProtocol", () => {
     }
   });
 
+  // #53 — le garde d'idempotence n'existait que sur onThreadMessage. Or
+  // agent-loop.ts:638-640 appelle onTimeout sur le chemin NOMINAL : après un
+  // quorum la phase vaut toujours "waiting", donc sa condition laisse passer et
+  // une SECONDE décision LLM était enfilée à chaque round — un appel modèle
+  // payé pour rien, sur exactement le même buffer de réponses.
+  it("ne redemande pas de décision quand le timeout suit un quorum déjà décidé", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-dup",
+      status: "open",
+      expectedRespondents: ["agent-2"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    protocol.onThreadMessage("t-dup", "agent-2", "je touche session.ts aussi");
+    expect(protocol.nextAction()?.type).toBe("ask_llm_decide");
+    expect(protocol.getThreadState("t-dup")?.decideRequested).toBe(true);
+
+    protocol.onTimeout("t-dup");
+
+    expect(protocol.nextAction()).toBeNull();
+  });
+
+  // Contrepartie : sans quorum, le timeout DOIT décider — c'est sa raison
+  // d'être. Un garde trop large gèlerait le round au lieu de le trancher.
+  it("décide bien au timeout quand aucun quorum n'a été atteint", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-silence",
+      status: "open",
+      expectedRespondents: ["agent-2", "agent-3"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    // Un seul des deux répond : pas de quorum, donc aucune décision enfilée.
+    protocol.onThreadMessage("t-silence", "agent-2", "je regarde");
+    expect(protocol.nextAction()).toBeNull();
+
+    protocol.onTimeout("t-silence");
+
+    expect(protocol.nextAction()?.type).toBe("ask_llm_decide");
+  });
+
   it("proceeds to work instead of reopening once ADJUST reaches MAX_ROUNDS", () => {
     protocol.startWork(WORK);
     drainActions(protocol);
