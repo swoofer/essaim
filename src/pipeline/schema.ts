@@ -114,6 +114,18 @@ function parseStep(raw: unknown, index: number, baseDir: string): PipelineStep {
     }
   }
 
+  // `modules` non-liste levait autrefois... rien : Array.isArray était faux, le
+  // champ était simplement omis du pas, et le run ciblait tout au lieu de ce
+  // qu'on lui demandait. Silencieux dans un --dry-run comme dans un vrai run
+  // (#99). Mieux vaut nommer la ligne fautive.
+  if (s.modules !== undefined && !Array.isArray(s.modules)) {
+    throw new Error(
+      `Step ${where}: 'modules' must be a list (e.g. [a, b]), got ${
+        s.modules === null ? "null" : typeof s.modules
+      } — a scalar or mapping would be silently dropped`,
+    );
+  }
+
   const hasModules = Array.isArray(s.modules);
   const hasModulesFile = typeof s.modules_file === "string" && s.modules_file.trim() !== "";
   if (hasModules && hasModulesFile) {
@@ -136,7 +148,17 @@ function parseStep(raw: unknown, index: number, baseDir: string): PipelineStep {
 
   if (s.set !== undefined) step.set = coerceStringMap(s.set, where, "set");
   if (s.set_file !== undefined) step.set_file = coerceStringMap(s.set_file, where, "set_file");
-  if (s.agents !== undefined) step.agents = Number(s.agents);
+  if (s.agents !== undefined) {
+    // Number({n: 2}) vaut NaN, et le NaN partait tel quel dans la boucle de
+    // lancement (#99).
+    const agents = Number(s.agents);
+    if (!Number.isInteger(agents) || agents < 1) {
+      throw new Error(
+        `Step ${where}: 'agents' must be a positive integer, got ${JSON.stringify(s.agents)}`,
+      );
+    }
+    step.agents = agents;
+  }
   if (s.timeout_minutes !== undefined) step.timeout_minutes = Number(s.timeout_minutes);
   if (s.hooks !== undefined) step.hooks = parseHooks(s.hooks, where);
 
