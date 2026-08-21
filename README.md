@@ -52,7 +52,7 @@ Developer A                    Developer B
 
 The consultation cycle — **announce → detect → consult → resolve** — runs in the agent-loop without a sidecar. Agents call `announce_work` before coding; the coordinator scores impact and opens a thread on score ≥ 90; MQTT pushes the thread to affected peers between turns; the thread closes on consensus, timeout, or gray-zone auto-resolve.
 
-essaim ships the orchestrator (agent-loop, preset runner, phase scheduler) and the behavior catalog (32 behaviors, 21 presets, 3 composition rules). The coordination server lives in [`mcp-coordinator`](https://github.com/swoofer/mcp-coordinator#readme); the prompt assembly engine in [`@swoofer/promptweave`](https://github.com/swoofer/promptweave#readme). essaim wires them together and ships the CLI.
+essaim ships the orchestrator (agent-loop, preset runner, phase scheduler) and the behavior catalog (46 behaviors, 29 presets, 3 composition rules). The coordination server lives in [`mcp-coordinator`](https://github.com/swoofer/mcp-coordinator#readme); the prompt assembly engine in [`@swoofer/promptweave`](https://github.com/swoofer/promptweave#readme). essaim wires them together and ships the CLI.
 
 ---
 
@@ -105,7 +105,7 @@ essaim (this package)
   +-- mcp-coordinator        (coordination server: MCP tools, SQLite, MQTT broker, dashboard)
 ```
 
-essaim owns the **catalog** (32 behaviors, 21 presets, 3 composition rules, 6 hook scripts), the **orchestrator** (phase scheduler, effort router, work-stealing loop), and the **CLI**. `@swoofer/promptweave` owns the BCE engine (resolver, validator, assembler). `mcp-coordinator` owns everything coordination-side: 26 MCP tools, impact scoring, MQTT broker + topic protocol, SQLite, and the dashboard at `http://localhost:3100/dashboard`.
+essaim owns the **catalog** (46 behaviors, 29 presets, 3 composition rules, 7 hook scripts), the **orchestrator** (phase scheduler, effort router, work-stealing loop), and the **CLI**. `@swoofer/promptweave` owns the BCE engine (resolver, validator, assembler). `mcp-coordinator` owns everything coordination-side: 26 MCP tools, impact scoring, MQTT broker + topic protocol, SQLite, and the dashboard at `http://localhost:3100/dashboard`.
 
 **For the tool reference, scoring layers, MQTT topics, dashboard panels, and server-side config, read [mcp-coordinator's README](https://github.com/swoofer/mcp-coordinator#readme).** This file documents only essaim's own surface.
 
@@ -116,7 +116,7 @@ essaim owns the **catalog** (32 behaviors, 21 presets, 3 composition rules, 6 ho
 Every agent prompt, hook, and MCP config is **assembled, not written**. essaim ships a catalog of reusable YAML modules; `@swoofer/promptweave` resolves the preset, validates, composes, and emits `prompt.md` + `hooks/*.sh` + `.mcp.json` for each agent.
 
 ```
-32 behaviors    21 presets    3 composition rules    6 hook scripts    3 workflow phases
+46 behaviors    29 presets    3 composition rules    7 hook scripts    3 workflow phases
 ```
 
 ### Three behavioral layers
@@ -308,6 +308,9 @@ Language-agnostic templates. `essaim scan` auto-detects the stack; the template 
 | `arene` | Code quiz / trivia | 3 | one-shot, keep_open |
 | `carrefour` | Intentional conflict test | 2-3 | one-shot |
 | `babel` | Documentation translation | 2 | sequential |
+| `phare` | 4 audit specialists + reconciler | 5 | one-shot, staggered |
+| `sentinelle` | Fixes security findings ingested in the coordinator | dynamic | one-shot |
+| `migrate-phase2` | Scaffolder, then one migrator per slice | 1 + per-module | one-shot, staggered |
 
 For per-template descriptions and the preset roles each one wires together, run `essaim list presets` or read [`compositions/`](./compositions/) in this repo.
 

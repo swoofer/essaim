@@ -44,4 +44,4 @@ Open an issue with the "feature" template. Explain the use case before proposing
 
 ## Architecture
 
-essaim is the orchestrator. It composes behaviors via [@swoofer/promptweave](https://github.com/swoofer/promptweave) and runs them against an embedded [mcp-coordinator](https://github.com/swoofer/mcp-coordinator) instance. The 32-behavior catalog ships bundled. See `README.md` for the high-level model.
+essaim is the orchestrator. It composes behaviors via [@swoofer/promptweave](https://github.com/swoofer/promptweave) and runs them against an embedded [mcp-coordinator](https://github.com/swoofer/mcp-coordinator) instance. The 46-behavior catalog ships bundled. See `README.md` for the high-level model.
