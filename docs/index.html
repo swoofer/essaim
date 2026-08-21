@@ -2383,36 +2383,36 @@
       <div class="timeline-item">
         <div class="timeline-dot dot-done"></div>
         <div class="timeline-badge badge-done" data-i18n="roadmap.badge.done">Done</div>
-        <h4 data-i18n="roadmap.v30.title">v0.1 &mdash; Initial release</h4>
-        <p data-i18n="roadmap.v30.desc">12 portable templates, 32 BCE behaviors, 21 presets, 4 effort levels. Work-stealing phases (discover &rarr; review &rarr; execute). MQTT coordination via embedded Aedes broker. Token diagnostics and quota pre-flight.</p>
+        <h4 data-i18n="roadmap.v30.title">v0.1 &rarr; v0.7 &mdash; Foundations and pipelines</h4>
+        <p data-i18n="roadmap.v30.desc">Portable templates, the BCE behavior catalog, and work-stealing phases (discover &rarr; review &rarr; execute). MQTT coordination via the embedded Aedes broker. Coordinator auth on every REST call and every MQTT connection. Sequential multi-repo runs with essaim pipeline, and external catalogs via --catalog, ESSAIM_CATALOG or a project's own .essaim/ directory.</p>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot dot-done"></div>
+        <div class="timeline-badge badge-done" data-i18n="roadmap.badge.done">Done</div>
+        <h4 data-i18n="roadmap.v40.title">v0.8 &mdash; Multi-engine security subsystem</h4>
+        <p data-i18n="roadmap.v40.desc">Pluggable security scanning, v1 on Strix: scan, normalize through SARIF, ingest into the coordinator, let the swarm fix, then verify deterministically. Engines are always invoked arm's-length, and a permissive-license gate refuses to register anything else.</p>
       </div>
 
       <div class="timeline-item">
         <div class="timeline-dot dot-progress"></div>
         <div class="timeline-badge badge-progress" data-i18n="roadmap.badge.progress">In Progress</div>
-        <h4 data-i18n="roadmap.v40.title">v0.2 &mdash; Stabilization</h4>
-        <p data-i18n="roadmap.v40.desc">Test coverage to 100%. Gray-zone introspection (score 30&ndash;89) validated end-to-end. TLS + remote MQTT for team setups. Per-team quota partitioning.</p>
+        <h4 data-i18n="roadmap.v50.title">v0.9+ &mdash; Remote-first hardening</h4>
+        <p data-i18n="roadmap.v50.desc">ESSAIM_RESET_BASE now names the directory it resets, so no run can wipe a base you did not authorize. In flight: MQTT reconnection against a remote coordinator (#33), and putting the revised plan from decideAdjust to work (#108).</p>
       </div>
 
       <div class="timeline-item">
         <div class="timeline-dot dot-planned"></div>
         <div class="timeline-badge badge-planned" data-i18n="roadmap.badge.planned">Planned</div>
-        <h4 data-i18n="roadmap.v50.title">v0.3 &mdash; Plugin presets</h4>
-        <p data-i18n="roadmap.v50.desc">Community preset registry. Publish and install presets via npm. Custom behavior authoring guide. IDE integration for preset browsing.</p>
-      </div>
-
-      <div class="timeline-item">
-        <div class="timeline-dot dot-planned"></div>
-        <div class="timeline-badge badge-planned" data-i18n="roadmap.badge.planned">Planned</div>
-        <h4 data-i18n="roadmap.v51.title">v1.0 &mdash; Cross-repo swarms</h4>
-        <p data-i18n="roadmap.v51.desc">Coordinate agent swarms across multiple repositories. Shared dependency map across microservice and monorepo boundaries. Directed lead&rarr;worker dispatch for large-scale raids.</p>
+        <h4 data-i18n="roadmap.v51.title">Security engines v2/v3 and team setups</h4>
+        <p data-i18n="roadmap.v51.desc">HexStrike AI (MIT, over MCP/REST), then PentAGI (MIT, over REST/GraphQL) &mdash; both arm's-length, like Strix. TLS and a remote MQTT broker for shared coordinators, per-team quota partitioning, and a guide to authoring your own behaviors.</p>
       </div>
 
       <div class="timeline-item">
         <div class="timeline-dot dot-future"></div>
         <div class="timeline-badge badge-future" data-i18n="roadmap.badge.future">Future</div>
-        <h4 data-i18n="roadmap.v52.title">Long-term &mdash; Semantic conflict detection</h4>
-        <p data-i18n="roadmap.v52.desc">AST-level analysis above filename scoring. Detect API contract changes, interface incompatibilities, and breaking changes before any thread opens. tengu_harbor server-gated push integration.</p>
+        <h4 data-i18n="roadmap.v52.title">Cross-repo swarms and semantic conflicts</h4>
+        <p data-i18n="roadmap.v52.desc">Swarms spanning several repositories at once, beyond today's sequential pipeline. A shared dependency map across microservice and monorepo boundaries. AST-level detection of API contract breaks, before any thread opens.</p>
       </div>
 
     </div>
@@ -2429,7 +2429,7 @@
     <a href="https://github.com/sponsors/swoofer" target="_blank">Sponsor</a>
     <a href="https://buymeacoffee.com/swoofer" target="_blank">Buy Me A Coffee</a>
   </div>
-  <p data-i18n="footer.text">MIT License &nbsp;&middot;&nbsp; Built with <a href="https://claude.ai/code" target="_blank">Claude Code</a> &nbsp;&middot;&nbsp; essaim v0.1.x</p>
+  <p data-i18n="footer.text">MIT License &nbsp;&middot;&nbsp; Built with <a href="https://claude.ai/code" target="_blank">Claude Code</a> &nbsp;&middot;&nbsp; essaim v0.9.x</p>
 </footer>
 
 <script>
@@ -2538,7 +2538,7 @@
       "nav.templates": "Templates",
       "nav.roadmap": "Roadmap",
       "nav.getstarted": "Get Started",
-      "hero.eyebrow": "Open Source &middot; MIT License &middot; v0.1.x",
+      "hero.eyebrow": "Open Source &middot; MIT License &middot; v0.9.x",
       "hero.subtitle": "Spawn N coordinated Claude Code agents on your repo. Pick a preset &mdash; the orchestrator does the rest.",
       "hero.stat.tools": "templates",
       "hero.stat.behaviors": "BCE behaviors",
@@ -2746,17 +2746,17 @@
       "roadmap.badge.progress": "In Progress",
       "roadmap.badge.planned": "Planned",
       "roadmap.badge.future": "Future",
-      "roadmap.v30.title": "v0.1 &mdash; Initial release",
-      "roadmap.v30.desc": "12 portable templates, 32 BCE behaviors, 21 presets, 4 effort levels. Work-stealing phases (discover &rarr; review &rarr; execute). MQTT coordination via embedded Aedes broker. Token diagnostics and quota pre-flight.",
-      "roadmap.v40.title": "v0.2 &mdash; Stabilization",
-      "roadmap.v40.desc": "Test coverage to 100%. Gray-zone introspection (score 30&ndash;89) validated end-to-end. TLS + remote MQTT for team setups. Per-team quota partitioning.",
-      "roadmap.v50.title": "v0.3 &mdash; Plugin presets",
-      "roadmap.v50.desc": "Community preset registry. Publish and install presets via npm. Custom behavior authoring guide. IDE integration for preset browsing.",
-      "roadmap.v51.title": "v1.0 &mdash; Cross-repo swarms",
-      "roadmap.v51.desc": "Coordinate agent swarms across multiple repositories. Shared dependency map across microservice and monorepo boundaries. Directed lead&rarr;worker dispatch for large-scale raids.",
-      "roadmap.v52.title": "Long-term &mdash; Semantic conflict detection",
-      "roadmap.v52.desc": "AST-level analysis above filename scoring. Detect API contract changes, interface incompatibilities, and breaking changes before any thread opens. tengu_harbor server-gated push integration.",
-      "footer.text": "MIT License &nbsp;&middot;&nbsp; Built with <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.1.x</a>"
+      "roadmap.v30.title": "v0.1 &rarr; v0.7 &mdash; Foundations and pipelines",
+      "roadmap.v30.desc": "Portable templates, the BCE behavior catalog, and work-stealing phases (discover &rarr; review &rarr; execute). MQTT coordination via the embedded Aedes broker. Coordinator auth on every REST call and every MQTT connection. Sequential multi-repo runs with essaim pipeline, and external catalogs via --catalog, ESSAIM_CATALOG or a project's own .essaim/ directory.",
+      "roadmap.v40.title": "v0.8 &mdash; Multi-engine security subsystem",
+      "roadmap.v40.desc": "Pluggable security scanning, v1 on Strix: scan, normalize through SARIF, ingest into the coordinator, let the swarm fix, then verify deterministically. Engines are always invoked arm's-length, and a permissive-license gate refuses to register anything else.",
+      "roadmap.v50.title": "v0.9+ &mdash; Remote-first hardening",
+      "roadmap.v50.desc": "ESSAIM_RESET_BASE now names the directory it resets, so no run can wipe a base you did not authorize. In flight: MQTT reconnection against a remote coordinator (#33), and putting the revised plan from decideAdjust to work (#108).",
+      "roadmap.v51.title": "Security engines v2/v3 and team setups",
+      "roadmap.v51.desc": "HexStrike AI (MIT, over MCP/REST), then PentAGI (MIT, over REST/GraphQL) &mdash; both arm's-length, like Strix. TLS and a remote MQTT broker for shared coordinators, per-team quota partitioning, and a guide to authoring your own behaviors.",
+      "roadmap.v52.title": "Cross-repo swarms and semantic conflicts",
+      "roadmap.v52.desc": "Swarms spanning several repositories at once, beyond today's sequential pipeline. A shared dependency map across microservice and monorepo boundaries. AST-level detection of API contract breaks, before any thread opens.",
+      "footer.text": "MIT License &nbsp;&middot;&nbsp; Built with <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.9.x</a>"
     },
     fr: {
       "nav.why": "Pourquoi",
@@ -2765,7 +2765,7 @@
       "nav.templates": "Templates",
       "nav.roadmap": "Feuille de route",
       "nav.getstarted": "Commencer",
-      "hero.eyebrow": "Open Source &middot; Licence MIT &middot; v0.1.x",
+      "hero.eyebrow": "Open Source &middot; Licence MIT &middot; v0.9.x",
       "hero.subtitle": "Lancez N agents Claude Code coordonn&eacute;s sur votre repo. Choisissez un preset &mdash; l'orchestrateur fait le reste.",
       "hero.stat.tools": "templates",
       "hero.stat.behaviors": "behaviors BCE",
@@ -2973,17 +2973,17 @@
       "roadmap.badge.progress": "En cours",
       "roadmap.badge.planned": "Planifi&eacute;",
       "roadmap.badge.future": "Futur",
-      "roadmap.v30.title": "v0.1 &mdash; Premi&egrave;re version",
-      "roadmap.v30.desc": "12 templates portables, 32 behaviors BCE, 21 presets, 4 niveaux d'effort. Phases work-stealing (discover &rarr; review &rarr; execute). Coordination MQTT via broker Aedes int&eacute;gr&eacute;. Diagnostics tokens et pr&eacute;-vol quota.",
-      "roadmap.v40.title": "v0.2 &mdash; Stabilisation",
-      "roadmap.v40.desc": "Couverture de tests &agrave; 100%. Introspection zone grise (score 30&ndash;89) valid&eacute;e end-to-end. TLS + MQTT remote pour les configs &eacute;quipe. Partitionnement quota par &eacute;quipe.",
-      "roadmap.v50.title": "v0.3 &mdash; Presets plugin",
-      "roadmap.v50.desc": "Registre de presets communautaire. Publier et installer des presets via npm. Guide de cr&eacute;ation de behaviors personnalis&eacute;s. Int&eacute;gration IDE pour la navigation des presets.",
-      "roadmap.v51.title": "v1.0 &mdash; Essaims cross-repo",
-      "roadmap.v51.desc": "Coordonner des essaims d'agents sur plusieurs repos. Carte de d&eacute;pendances partag&eacute;e entre microservices et monorepos. Dispatch lead&rarr;worker dirig&eacute; pour les raids &agrave; grande &eacute;chelle.",
-      "roadmap.v52.title": "Long terme &mdash; D&eacute;tection s&eacute;mantique de conflits",
-      "roadmap.v52.desc": "Analyse AST au-dessus du scoring par nom. D&eacute;tecter les changements de contrat API, les incompatibilit&eacute;s d'interface et les breaking changes avant qu'un thread s'ouvre. Int&eacute;gration push server-gated tengu_harbor.",
-      "footer.text": "Licence MIT &nbsp;&middot;&nbsp; Construit avec <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.1.x</a>"
+      "roadmap.v30.title": "v0.1 &rarr; v0.7 &mdash; Fondations et pipelines",
+      "roadmap.v30.desc": "Templates portables, catalogue de behaviors BCE, phases work-stealing (discover &rarr; review &rarr; execute). Coordination MQTT via broker Aedes int&eacute;gr&eacute;. Authentification du coordinateur sur chaque appel REST et chaque connexion MQTT. Runs multi-d&eacute;p&ocirc;ts s&eacute;quentiels avec essaim pipeline, et catalogues externes via --catalog, ESSAIM_CATALOG ou le r&eacute;pertoire .essaim/ du projet.",
+      "roadmap.v40.title": "v0.8 &mdash; Sous-syst&egrave;me de s&eacute;curit&eacute; multi-moteurs",
+      "roadmap.v40.desc": "Scan de s&eacute;curit&eacute; enfichable, v1 sur Strix : scanner, normaliser via SARIF, ing&eacute;rer dans le coordinateur, laisser l'essaim corriger, puis v&eacute;rifier de mani&egrave;re d&eacute;terministe. Les moteurs sont toujours invoqu&eacute;s &agrave; distance de bras, et un garde-fou de licence permissive refuse d'enregistrer quoi que ce soit d'autre.",
+      "roadmap.v50.title": "v0.9+ &mdash; Durcissement remote-first",
+      "roadmap.v50.desc": "ESSAIM_RESET_BASE nomme d&eacute;sormais le r&eacute;pertoire qu'il r&eacute;initialise : aucun run ne peut effacer une base que vous n'avez pas autoris&eacute;e. En cours : reconnexion MQTT contre un coordinateur distant (#33), et exploitation du plan r&eacute;vis&eacute; produit par decideAdjust (#108).",
+      "roadmap.v51.title": "Moteurs de s&eacute;curit&eacute; v2/v3 et setups d'&eacute;quipe",
+      "roadmap.v51.desc": "HexStrike AI (MIT, via MCP/REST), puis PentAGI (MIT, via REST/GraphQL) &mdash; tous deux &agrave; distance de bras, comme Strix. TLS et broker MQTT distant pour coordinateurs partag&eacute;s, partitionnement du quota par &eacute;quipe, et un guide pour &eacute;crire vos propres behaviors.",
+      "roadmap.v52.title": "Essaims multi-d&eacute;p&ocirc;ts et conflits s&eacute;mantiques",
+      "roadmap.v52.desc": "Des essaims couvrant plusieurs d&eacute;p&ocirc;ts simultan&eacute;ment, au-del&agrave; du pipeline s&eacute;quentiel actuel. Une carte de d&eacute;pendances partag&eacute;e par-dessus les fronti&egrave;res microservices et monorepo. D&eacute;tection au niveau AST des ruptures de contrat d'API, avant m&ecirc;me qu'un thread s'ouvre.",
+      "footer.text": "Licence MIT &nbsp;&middot;&nbsp; Construit avec <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.9.x</a>"
     },
     es: {
       "nav.why": "Por qu&eacute;",
@@ -2992,7 +2992,7 @@
       "nav.templates": "Plantillas",
       "nav.roadmap": "Hoja de ruta",
       "nav.getstarted": "Empezar",
-      "hero.eyebrow": "C&oacute;digo abierto &middot; Licencia MIT &middot; v0.1.x",
+      "hero.eyebrow": "C&oacute;digo abierto &middot; Licencia MIT &middot; v0.9.x",
       "hero.subtitle": "Lanza N agentes Claude Code coordinados en tu repo. Elige un preset &mdash; el orquestador hace el resto.",
       "hero.stat.tools": "plantillas",
       "hero.stat.behaviors": "behaviors BCE",
@@ -3200,17 +3200,17 @@
       "roadmap.badge.progress": "En progreso",
       "roadmap.badge.planned": "Planeado",
       "roadmap.badge.future": "Futuro",
-      "roadmap.v30.title": "v0.1 &mdash; Lanzamiento inicial",
-      "roadmap.v30.desc": "12 templates portables, 32 behaviors BCE, 21 presets, 4 niveles de esfuerzo. Fases work-stealing (discover &rarr; review &rarr; execute). Coordinaci&oacute;n MQTT via broker Aedes embebido. Diagn&oacute;sticos de tokens y pre-vuelo de cuota.",
-      "roadmap.v40.title": "v0.2 &mdash; Estabilizaci&oacute;n",
-      "roadmap.v40.desc": "Cobertura de tests al 100%. Introspecci&oacute;n zona gris (score 30&ndash;89) validada end-to-end. TLS + MQTT remoto para configuraciones de equipo. Particionamiento de cuota por equipo.",
-      "roadmap.v50.title": "v0.3 &mdash; Presets plugin",
-      "roadmap.v50.desc": "Registro de presets comunitario. Publicar e instalar presets v&iacute;a npm. Gu&iacute;a de creaci&oacute;n de behaviors personalizados. Integraci&oacute;n IDE para explorar presets.",
-      "roadmap.v51.title": "v1.0 &mdash; Enjambres cross-repo",
-      "roadmap.v51.desc": "Coordinar enjambres de agentes en m&uacute;ltiples repos. Mapa de dependencias compartido entre microservicios y monorepos. Dispatch lead&rarr;worker dirigido para raids a gran escala.",
-      "roadmap.v52.title": "Largo plazo &mdash; Detecci&oacute;n sem&aacute;ntica de conflictos",
-      "roadmap.v52.desc": "An&aacute;lisis AST sobre el scoring por nombre. Detectar cambios de contrato API, incompatibilidades de interfaz y breaking changes antes de que un thread se abra. Integraci&oacute;n push server-gated tengu_harbor.",
-      "footer.text": "Licencia MIT &nbsp;&middot;&nbsp; Construido con <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.1.x</a>"
+      "roadmap.v30.title": "v0.1 &rarr; v0.7 &mdash; Fundamentos y pipelines",
+      "roadmap.v30.desc": "Plantillas portables, cat&aacute;logo de behaviors BCE, fases work-stealing (discover &rarr; review &rarr; execute). Coordinaci&oacute;n MQTT via broker Aedes embebido. Autenticaci&oacute;n del coordinador en cada llamada REST y cada conexi&oacute;n MQTT. Ejecuciones multi-repo secuenciales con essaim pipeline, y cat&aacute;logos externos via --catalog, ESSAIM_CATALOG o el directorio .essaim/ del proyecto.",
+      "roadmap.v40.title": "v0.8 &mdash; Subsistema de seguridad multi-motor",
+      "roadmap.v40.desc": "Escaneo de seguridad conectable, v1 sobre Strix: escanear, normalizar via SARIF, ingerir en el coordinador, dejar que el enjambre corrija, y despu&eacute;s verificar de forma determinista. Los motores siempre se invocan como programas separados, y una barrera de licencia permisiva se niega a registrar cualquier otra cosa.",
+      "roadmap.v50.title": "v0.9+ &mdash; Endurecimiento remote-first",
+      "roadmap.v50.desc": "ESSAIM_RESET_BASE ahora nombra el directorio que reinicia, as&iacute; ninguna ejecuci&oacute;n puede borrar una base que no autorizaste. En curso: reconexi&oacute;n MQTT contra un coordinador remoto (#33), y aprovechar el plan revisado que produce decideAdjust (#108).",
+      "roadmap.v51.title": "Motores de seguridad v2/v3 y despliegues de equipo",
+      "roadmap.v51.desc": "HexStrike AI (MIT, via MCP/REST), luego PentAGI (MIT, via REST/GraphQL) &mdash; ambos como programas separados, igual que Strix. TLS y broker MQTT remoto para coordinadores compartidos, particionado de cuota por equipo, y una gu&iacute;a para escribir tus propios behaviors.",
+      "roadmap.v52.title": "Enjambres multi-repo y conflictos sem&aacute;nticos",
+      "roadmap.v52.desc": "Enjambres que abarcan varios repositorios a la vez, m&aacute;s all&aacute; del pipeline secuencial actual. Un mapa de dependencias compartido a trav&eacute;s de fronteras de microservicios y monorepo. Detecci&oacute;n a nivel AST de rupturas de contrato de API, antes de que se abra ning&uacute;n thread.",
+      "footer.text": "Licencia MIT &nbsp;&middot;&nbsp; Construido con <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.9.x</a>"
     },
     de: {
       "nav.why": "Warum",
@@ -3219,7 +3219,7 @@
       "nav.templates": "Vorlagen",
       "nav.roadmap": "Roadmap",
       "nav.getstarted": "Loslegen",
-      "hero.eyebrow": "Open Source &middot; MIT-Lizenz &middot; v0.1.x",
+      "hero.eyebrow": "Open Source &middot; MIT-Lizenz &middot; v0.9.x",
       "hero.subtitle": "Starte N koordinierte Claude-Code-Agenten auf deinem Repo. W&auml;hle ein Preset &mdash; der Orchestrator erledigt den Rest.",
       "hero.stat.tools": "Vorlagen",
       "hero.stat.behaviors": "BCE-Behaviors",
@@ -3427,17 +3427,17 @@
       "roadmap.badge.progress": "In Arbeit",
       "roadmap.badge.planned": "Geplant",
       "roadmap.badge.future": "Zukunft",
-      "roadmap.v30.title": "v0.1 &mdash; Erstver&ouml;ffentlichung",
-      "roadmap.v30.desc": "12 portable Vorlagen, 32 BCE-Behaviors, 21 Presets, 4 Effort-Level. Work-Stealing-Phasen (discover &rarr; review &rarr; execute). MQTT-Koordination via eingebettetem Aedes-Broker. Token-Diagnostik und Quota-Pre-Flight.",
-      "roadmap.v40.title": "v0.2 &mdash; Stabilisierung",
-      "roadmap.v40.desc": "Testabdeckung auf 100%. Graubereich-Introspektion (Score 30&ndash;89) end-to-end validiert. TLS + Remote-MQTT f&uuml;r Team-Setups. Quota-Partitionierung pro Team.",
-      "roadmap.v50.title": "v0.3 &mdash; Plugin-Presets",
-      "roadmap.v50.desc": "Community-Preset-Registry. Presets via npm ver&ouml;ffentlichen und installieren. Anleitung zur Custom-Behavior-Erstellung. IDE-Integration zum Preset-Durchsuchen.",
-      "roadmap.v51.title": "v1.0 &mdash; Cross-Repo-Schw&auml;rme",
-      "roadmap.v51.desc": "Agentenschw&auml;rme &uuml;ber mehrere Repos koordinieren. Geteilte Dependency-Map &uuml;ber Microservices und Monorepos. Directed Lead&rarr;Worker-Dispatch f&uuml;r gro&szlig;angelegte Raids.",
-      "roadmap.v52.title": "Langfristig &mdash; Semantische Konflikterkennung",
-      "roadmap.v52.desc": "AST-Analyse &uuml;ber dem Dateinamen-Scoring. API-Vertrags&auml;nderungen, Interface-Inkompatibilit&auml;ten und Breaking Changes erkennen, bevor ein Thread &ouml;ffnet. tengu_harbor Server-gated-Push-Integration.",
-      "footer.text": "MIT-Lizenz &nbsp;&middot;&nbsp; Gebaut mit <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.1.x</a>"
+      "roadmap.v30.title": "v0.1 &rarr; v0.7 &mdash; Grundlagen und Pipelines",
+      "roadmap.v30.desc": "Portable Vorlagen, BCE-Behavior-Katalog, Work-Stealing-Phasen (discover &rarr; review &rarr; execute). MQTT-Koordination via eingebettetem Aedes-Broker. Coordinator-Authentifizierung bei jedem REST-Aufruf und jeder MQTT-Verbindung. Sequentielle Multi-Repo-L&auml;ufe mit essaim pipeline und externe Kataloge via --catalog, ESSAIM_CATALOG oder dem .essaim/-Verzeichnis des Projekts.",
+      "roadmap.v40.title": "v0.8 &mdash; Multi-Engine-Security-Subsystem",
+      "roadmap.v40.desc": "Steckbares Security-Scanning, v1 mit Strix: scannen, via SARIF normalisieren, in den Coordinator einspeisen, den Schwarm beheben lassen, dann deterministisch verifizieren. Engines werden stets als eigenst&auml;ndige Programme aufgerufen, und ein Lizenz-Gate f&uuml;r permissive Lizenzen weigert sich, alles andere zu registrieren.",
+      "roadmap.v50.title": "v0.9+ &mdash; Remote-First-H&auml;rtung",
+      "roadmap.v50.desc": "ESSAIM_RESET_BASE benennt jetzt das Verzeichnis, das es zur&uuml;cksetzt &mdash; kein Lauf kann eine Basis l&ouml;schen, die Sie nicht autorisiert haben. In Arbeit: MQTT-Reconnect gegen einen entfernten Coordinator (#33) und die Verwertung des von decideAdjust revidierten Plans (#108).",
+      "roadmap.v51.title": "Security-Engines v2/v3 und Team-Setups",
+      "roadmap.v51.desc": "HexStrike AI (MIT, via MCP/REST), dann PentAGI (MIT, via REST/GraphQL) &mdash; beide als eigenst&auml;ndige Programme, wie Strix. TLS und ein entfernter MQTT-Broker f&uuml;r geteilte Coordinator-Instanzen, Quota-Partitionierung pro Team und ein Leitfaden zum Schreiben eigener Behaviors.",
+      "roadmap.v52.title": "Repo-&uuml;bergreifende Schw&auml;rme und semantische Konflikte",
+      "roadmap.v52.desc": "Schw&auml;rme &uuml;ber mehrere Repositories gleichzeitig, jenseits der heutigen sequentiellen Pipeline. Eine geteilte Abh&auml;ngigkeitskarte &uuml;ber Microservice- und Monorepo-Grenzen hinweg. Erkennung von API-Vertragsbr&uuml;chen auf AST-Ebene, bevor ein Thread &uuml;berhaupt ge&ouml;ffnet wird.",
+      "footer.text": "MIT-Lizenz &nbsp;&middot;&nbsp; Gebaut mit <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.9.x</a>"
     },
     zh: {
       "nav.why": "为什么",
@@ -3446,7 +3446,7 @@
       "nav.templates": "模板",
       "nav.roadmap": "路线图",
       "nav.getstarted": "开始使用",
-      "hero.eyebrow": "开源 &middot; MIT 许可证 &middot; v0.1.x",
+      "hero.eyebrow": "开源 &middot; MIT 许可证 &middot; v0.9.x",
       "hero.subtitle": "在你的仓库上启动 N 个协调的 Claude Code 智能体。选择 preset &mdash; 编排器负责其余的一切。",
       "hero.stat.tools": "模板",
       "hero.stat.behaviors": "BCE 行为",
@@ -3654,17 +3654,17 @@
       "roadmap.badge.progress": "进行中",
       "roadmap.badge.planned": "已计划",
       "roadmap.badge.future": "未来",
-      "roadmap.v30.title": "v0.1 &mdash; 初始发布",
-      "roadmap.v30.desc": "12 个可移植模板，32 个 BCE behaviors，21 个 presets，4 个 effort 级别。work-stealing 阶段（discover &rarr; review &rarr; execute）。通过嵌入式 Aedes broker 的 MQTT 协调。Token 诊断和配额预检。",
-      "roadmap.v40.title": "v0.2 &mdash; 稳定化",
-      "roadmap.v40.desc": "测试覆盖率达到 100%。灰色区内省（分数 30&ndash;89）端到端验证。团队配置的 TLS + 远程 MQTT。按团队配额分区。",
-      "roadmap.v50.title": "v0.3 &mdash; 插件 presets",
-      "roadmap.v50.desc": "社区 preset 注册表。通过 npm 发布和安装 presets。自定义 behavior 编写指南。IDE 集成以浏览 presets。",
-      "roadmap.v51.title": "v1.0 &mdash; 跨仓库 swarms",
-      "roadmap.v51.desc": "在多个仓库间协调智能体 swarms。跨微服务和 monorepo 边界的共享依赖图。大规模 raid 的定向 lead&rarr;worker dispatch。",
-      "roadmap.v52.title": "长期 &mdash; 语义冲突检测",
-      "roadmap.v52.desc": "在文件名评分之上的 AST 级分析。线程打开前检测 API 契约变化、接口不兼容和破坏性更改。tengu_harbor server-gated push 集成。",
-      "footer.text": "MIT 许可证 &nbsp;&middot;&nbsp; 用 <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> 构建 &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.1.x</a>"
+      "roadmap.v30.title": "v0.1 &rarr; v0.7 &mdash; 基础与流水线",
+      "roadmap.v30.desc": "可移植模板、BCE behaviors 目录、work-stealing 阶段（discover &rarr; review &rarr; execute）。通过嵌入式 Aedes broker 的 MQTT 协调。每次 REST 调用和每次 MQTT 连接都带 coordinator 认证。用 essaim pipeline 顺序执行跨仓库任务，并支持通过 --catalog、ESSAIM_CATALOG 或项目自带的 .essaim/ 目录使用外部目录。",
+      "roadmap.v40.title": "v0.8 &mdash; 多引擎安全子系统",
+      "roadmap.v40.desc": "可插拔的安全扫描，v1 基于 Strix：扫描、经 SARIF 归一化、注入 coordinator、交由 swarm 修复，然后确定性验证。引擎始终以独立进程方式调用，宽松许可证闸门拒绝注册其他任何引擎。",
+      "roadmap.v50.title": "v0.9+ &mdash; 面向远程的加固",
+      "roadmap.v50.desc": "ESSAIM_RESET_BASE 现在必须写明要重置的目录，因此任何运行都无法清除你未授权的基准目录。进行中：针对远程 coordinator 的 MQTT 重连（#33），以及让 decideAdjust 产出的修订计划真正发挥作用（#108）。",
+      "roadmap.v51.title": "安全引擎 v2/v3 与团队部署",
+      "roadmap.v51.desc": "HexStrike AI（MIT，经 MCP/REST），随后是 PentAGI（MIT，经 REST/GraphQL）&mdash; 与 Strix 一样均以独立进程方式调用。为共享 coordinator 提供 TLS 与远程 MQTT broker、按团队划分配额，以及编写自定义 behaviors 的指南。",
+      "roadmap.v52.title": "跨仓库 swarm 与语义冲突",
+      "roadmap.v52.desc": "同时横跨多个仓库的 swarm，超越目前的顺序流水线。跨微服务与 monorepo 边界的共享依赖图。在任何 thread 打开之前，就在 AST 层面检测 API 契约破坏。",
+      "footer.text": "MIT 许可证 &nbsp;&middot;&nbsp; 用 <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> 构建 &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.9.x</a>"
     },
     ja: {
       "nav.why": "なぜ",
@@ -3673,7 +3673,7 @@
       "nav.templates": "テンプレート",
       "nav.roadmap": "ロードマップ",
       "nav.getstarted": "始める",
-      "hero.eyebrow": "オープンソース &middot; MIT ライセンス &middot; v0.1.x",
+      "hero.eyebrow": "オープンソース &middot; MIT ライセンス &middot; v0.9.x",
       "hero.subtitle": "リポジトリ上に N 個の協調 Claude Code エージェントを起動。preset を選ぶだけ &mdash; あとはオーケストレーターが対処する。",
       "hero.stat.tools": "テンプレート",
       "hero.stat.behaviors": "BCE behavior",
@@ -3881,17 +3881,17 @@
       "roadmap.badge.progress": "進行中",
       "roadmap.badge.planned": "計画中",
       "roadmap.badge.future": "将来",
-      "roadmap.v30.title": "v0.1 &mdash; 初期リリース",
-      "roadmap.v30.desc": "12 個のポータブルテンプレート、32 BCE behaviors、21 presets、4 effort レベル。work-stealing フェーズ（discover &rarr; review &rarr; execute）。埋込み Aedes broker 経由の MQTT 連携。トークン診断とクォータプリフライト。",
-      "roadmap.v40.title": "v0.2 &mdash; 安定化",
-      "roadmap.v40.desc": "テストカバレッジ 100%。グレーゾーン内省（スコア 30&ndash;89）エンドツーエンドで検証。チーム設定向け TLS + リモート MQTT。チームごとのクォータ分割。",
-      "roadmap.v50.title": "v0.3 &mdash; プラグイン presets",
-      "roadmap.v50.desc": "コミュニティ preset レジストリ。npm 経由で preset を公開・インストール。カスタム behavior 作成ガイド。IDE 統合で preset を閲覧。",
-      "roadmap.v51.title": "v1.0 &mdash; クロスリポジトリ swarms",
-      "roadmap.v51.desc": "複数リポジトリにわたるエージェント swarm の連携。マイクロサービスと monorepo 境界を跨ぐ共有依存マップ。大規模 raid 向けの directed lead&rarr;worker dispatch。",
-      "roadmap.v52.title": "長期 &mdash; セマンティックコンフリクト検出",
-      "roadmap.v52.desc": "ファイル名スコアリングの上の AST レベル分析。スレッドが開く前に API 契約変更、インターフェース非互換、破壊的変更を検出。tengu_harbor server-gated push 統合。",
-      "footer.text": "MIT ライセンス &nbsp;&middot;&nbsp; <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> で構築 &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.1.x</a>"
+      "roadmap.v30.title": "v0.1 &rarr; v0.7 &mdash; 基盤とパイプライン",
+      "roadmap.v30.desc": "ポータブルテンプレート、BCE behaviors カタログ、work-stealing フェーズ（discover &rarr; review &rarr; execute）。埋込み Aedes broker 経由の MQTT 連携。すべての REST 呼び出しと MQTT 接続に coordinator 認証。essaim pipeline による複数リポジトリの逐次実行と、--catalog / ESSAIM_CATALOG / プロジェクト固有の .essaim/ ディレクトリによる外部カタログ。",
+      "roadmap.v40.title": "v0.8 &mdash; マルチエンジン・セキュリティサブシステム",
+      "roadmap.v40.desc": "差し替え可能なセキュリティスキャン、v1 は Strix。スキャン、SARIF による正規化、coordinator への取り込み、swarm による修正、そして決定的な検証。エンジンは常に別プロセスとして呼び出され、パーミッシブライセンス・ゲートがそれ以外の登録を拒否します。",
+      "roadmap.v50.title": "v0.9+ &mdash; リモート前提の堅牢化",
+      "roadmap.v50.desc": "ESSAIM_RESET_BASE はリセット対象のディレクトリ自体を指定する方式になり、承認していないベースが消えることはなくなりました。進行中：リモート coordinator に対する MQTT 再接続（#33）と、decideAdjust が生成する修正済みプランの活用（#108）。",
+      "roadmap.v51.title": "セキュリティエンジン v2/v3 とチーム構成",
+      "roadmap.v51.desc": "HexStrike AI（MIT、MCP/REST 経由）、続いて PentAGI（MIT、REST/GraphQL 経由）&mdash; いずれも Strix と同様に別プロセスとして呼び出します。共有 coordinator 向けの TLS とリモート MQTT broker、チーム単位のクォータ分割、独自 behaviors の作成ガイド。",
+      "roadmap.v52.title": "リポジトリ横断 swarm と意味的コンフリクト",
+      "roadmap.v52.desc": "現在の逐次パイプラインを超えて、複数リポジトリにまたがる swarm。マイクロサービスと monorepo の境界をまたぐ共有依存マップ。thread が開く前に、AST レベルで API 契約の破壊を検出。",
+      "footer.text": "MIT ライセンス &nbsp;&middot;&nbsp; <a href=\"https://claude.ai/code\" target=\"_blank\">Claude Code</a> で構築 &nbsp;&middot;&nbsp; <a href=\"https://github.com/swoofer/essaim\" target=\"_blank\">essaim v0.9.x</a>"
     }
   };
 

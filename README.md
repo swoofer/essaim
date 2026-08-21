@@ -316,6 +316,27 @@ For per-template descriptions and the preset roles each one wires together, run 
 
 ---
 
+## External Catalogs
+
+The bundled catalog is a starting point, not a ceiling. essaim resolves behaviors, presets, templates, compositions and scripts across several catalog roots — **the last one wins**:
+
+```
+bundled  <  ESSAIM_CATALOG  <  --catalog  <  <project>/.essaim
+```
+
+From the most general to the most local. The explicit flag beats the ambient environment — an `ESSAIM_CATALOG` exported months ago must not quietly outrank what you just typed — and a project's own `.essaim/` beats everything.
+
+```bash
+ESSAIM_CATALOG=~/catalogs/house-style essaim run raid -p ~/my-app
+essaim run raid -p ~/my-app --catalog ~/catalogs/client-a --catalog ~/catalogs/client-b
+```
+
+`ESSAIM_CATALOG` accepts several paths separated by the platform's path delimiter (`:` on POSIX, `;` on Windows). `--catalog` is repeatable. A catalog root holds any subset of `behaviors/`, `presets/`, `templates/`, `compositions/`, `scripts/` — missing subdirectories are skipped, so a catalog that only overrides two behaviors is valid.
+
+A catalog you **name** and that does not exist is a hard error, never a silent no-op: the typo would otherwise resurface two screens later as an opaque `Unknown template`.
+
+---
+
 ## Anthropic Quota Pre-flight
 
 `run` and `solo` check your Anthropic workspace quota before launching N agents, to avoid 429 storms mid-session.
