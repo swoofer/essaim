@@ -16,3 +16,5 @@ tmp-data/
 tmp-essaim/
 .tmp-*.cjs
 reports/
+.claude/
+graphify-out/
