@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.10.0](https://github.com/swoofer/essaim/compare/v0.9.0...v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **coordinator:** migration vers mcp-coordinator 2.2.1 ([#117](https://github.com/swoofer/essaim/issues/117)) ([57f3b23](https://github.com/swoofer/essaim/commit/57f3b23ad48f5afafb6cac9342951b8072513aa0))
+
+
+### Bug Fixes
+
+* **agent-loop:** libère les tâches réclamées au CLEANUP ([#101](https://github.com/swoofer/essaim/issues/101)) ([#111](https://github.com/swoofer/essaim/issues/111)) ([bbd237d](https://github.com/swoofer/essaim/commit/bbd237dcc9bef295db7cb37932cef6e34dd1ef46))
+* **catalog:** swarm.yaml double-encodé + compteurs de doc périmés ([#114](https://github.com/swoofer/essaim/issues/114)) ([600d271](https://github.com/swoofer/essaim/commit/600d271940469a5849421387d69eefa5d08f3e6d))
+* **hooks:** normalisation de chemin cassée sous Git Bash, et tests shell branchés ([#100](https://github.com/swoofer/essaim/issues/100)) ([#113](https://github.com/swoofer/essaim/issues/113)) ([4fe534c](https://github.com/swoofer/essaim/commit/4fe534c81f72fb2a671317340e2941d825837f49))
+* **mqtt:** le catch-up lisait deux colonnes que le coordinator n'expose pas ([#98](https://github.com/swoofer/essaim/issues/98)) ([#110](https://github.com/swoofer/essaim/issues/110)) ([80b7c17](https://github.com/swoofer/essaim/commit/80b7c17e502a0d50f7ee27163830aff822445286))
+* **orchestrator:** trois défauts de robustesse au lancement ([#96](https://github.com/swoofer/essaim/issues/96), [#97](https://github.com/swoofer/essaim/issues/97)) ([#109](https://github.com/swoofer/essaim/issues/109)) ([faa70e6](https://github.com/swoofer/essaim/commit/faa70e6df61fd36b3381eb5b6e9b4ac8e4e51c19))
+* **pipeline:** refuse les formes qui se chargeaient en silence ([#99](https://github.com/swoofer/essaim/issues/99)) ([#112](https://github.com/swoofer/essaim/issues/112)) ([5501b64](https://github.com/swoofer/essaim/commit/5501b64f6253d08156ea912cb5df992ab55b2fe3))
+
+
+### Documentation
+
+* remet la roadmap, les compteurs et la version affichée au niveau de la 0.9.0 ([#115](https://github.com/swoofer/essaim/issues/115)) ([7c1c36b](https://github.com/swoofer/essaim/commit/7c1c36b921fefd5f60aeaed6b991970458822b87))
+* **site:** remet le registry de presets et l'intégration IDE dans la v51 ([#116](https://github.com/swoofer/essaim/issues/116)) ([57c37d4](https://github.com/swoofer/essaim/commit/57c37d450367f2774fa5462cff5c40e4f8676c59))
+* **site:** retire les documents de travail superpowers de la publication ([#105](https://github.com/swoofer/essaim/issues/105)) ([0124d71](https://github.com/swoofer/essaim/commit/0124d710bb8f0a3043e5fc1dc4fdd26ac4836189))
+
 ## [0.9.0](https://github.com/swoofer/essaim/compare/v0.8.1...v0.9.0) (2026-08-14)
 
 
