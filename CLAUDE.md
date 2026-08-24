@@ -27,6 +27,13 @@ essaim (this repo)   catalog + orchestrator + CLI
 
 promptweave is ours too — if the BCE engine misbehaves, fix it upstream rather than working around it in essaim. Coordination semantics (impact scoring, MQTT topics, `/api/claim-task`) belong to mcp-coordinator; read its README before assuming essaim owns a behavior.
 
+MQTT topics are org-scoped from coordinator 2.x on: `coordinator/<org>/consultations/...`.
+The org comes from the `org` claim of `COORDINATOR_TOKEN`, and the broker silently
+refuses any subscription outside that prefix — a `coordinator/+/...` wildcard included,
+since the ACL test is a `startsWith`. A refusal arrives as a SUBACK failure code, not as
+a connection error, so `grantedTopics` reads those codes and warns. See `orgFromToken`
+in `src/agent-loop/mqtt-listener.ts`.
+
 ## Prompts are assembled, not written
 
 There are no prompt string literals to edit. An agent's `prompt.md`, `hooks/*.sh` and `.mcp.json` are emitted by promptweave from YAML:

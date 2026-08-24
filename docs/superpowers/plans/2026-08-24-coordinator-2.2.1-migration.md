@@ -707,9 +707,12 @@ ce préfixe — joker compris. Voir `orgFromToken` dans `src/agent-loop/mqtt-lis
 
 - [ ] **Step 4: Vérifier que le garde-fou CI reste vert**
 
+Le terme est **lu depuis le workflow**, jamais réécrit ici : l'épeler dans un fichier suivi ferait échouer le garde-fou sur ce document même — piège dans lequel la première rédaction de ce plan est tombée.
+
 ```bash
 git add -A
-git grep -In -i 'mekova' -- . ':!.github/workflows/test.yml' && echo "ECHEC - terme reintroduit" || echo "OK"
+TERME=$(grep -oE "git grep -In -i '[a-z]+'" .github/workflows/test.yml | grep -oE "'[a-z]+'" | tr -d "'")
+git grep -In -i "$TERME" -- . ':!.github/workflows/test.yml' && echo "ECHEC - terme reintroduit" || echo "OK"
 ```
 
 Attendu : `OK`.
