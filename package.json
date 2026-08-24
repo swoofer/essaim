@@ -83,7 +83,13 @@
   "engines": {
     "node": ">=22"
   },
-  "overrides": {
-    "ip-address": "^10.4.0"
+  "packageManager": "pnpm@10.34.5",
+  "pnpm": {
+    "overrides": {
+      "ip-address": "^10.4.0"
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   }
 }

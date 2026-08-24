@@ -400,15 +400,15 @@ JSON to stdout via [Pino](https://getpino.io/). Component loggers: `orchestrator
 
 ```bash
 # Tests
-npm test              # 302/303 unit tests pass on macOS/Linux; one Windows-only chmod test is skipped there
-npm run test:watch
+pnpm test              # 709/710 unit tests pass on macOS/Linux; one Windows-only chmod test is skipped there
+pnpm test:watch
 
 # CLI in dev
-npm run dev -- list
-npm run dev -- run raid -p ~/my-project --dry-run
+pnpm dev -- list
+pnpm dev -- run raid -p ~/my-project --dry-run
 
 # Build
-npm run build
+pnpm build
 ```
 
 essaim is exercised by its own catalog — the `swarm` template was used to refactor essaim's own source during development, producing a working dogfood loop.
