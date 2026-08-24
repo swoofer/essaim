@@ -60,7 +60,7 @@ essaim ships the orchestrator (agent-loop, preset runner, phase scheduler) and t
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js >= 22
 - `claude` CLI on PATH (install from [claude.ai/code](https://claude.ai/code))
 - `ANTHROPIC_API_KEY` environment variable set
 

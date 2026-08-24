@@ -105,43 +105,93 @@ export interface MqttListener {
   readonly connected: boolean;
 }
 
-const TOPICS = [
-  "coordinator/consultations/new",
-  "coordinator/consultations/+/messages",
-  "coordinator/consultations/+/status",
-  "coordinator/consultations/+/claimed",
-  "coordinator/consultations/+/completed",
-  "coordinator/broadcast",
-  "coordinator/agents/+/status",
-];
+/**
+ * Le segment org de chaque topic du coordinator (#330). Le coordinator le tire du
+ * claim `org` du token et refuse — SILENCIEUSEMENT, via `cb(null, null)` dans
+ * `authorizeSubscribe` — tout abonnement hors de `coordinator/<org>/`. Un joker
+ * `coordinator/+/...` est refusé aussi : le test est un `startsWith` sur le préfixe.
+ *
+ * On décode, on ne vérifie jamais : le serveur reste l'autorité, on n'a besoin que
+ * du préfixe de routage. Le repli sur "default" reproduit exactement celui du
+ * coordinator (src/auth.ts), sans quoi un token sans claim `org` s'abonnerait à un
+ * préfixe que le serveur n'emploie pas.
+ */
+export function orgFromToken(token: string | undefined): string {
+  if (!token) return "default";
+  const parts = token.split(".");
+  if (parts.length < 2) return "default";
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return typeof payload.org === "string" && payload.org ? payload.org : "default";
+  } catch {
+    return "default";
+  }
+}
 
-function classifyTopic(topic: string, payload: Record<string, unknown>): InterruptType | null {
+/**
+ * MQTT 3.1.1 §3.9.3 : le SUBACK rend un code par topic, et tout code >= 128 est
+ * un échec. Le coordinator refuse par `cb(null, null)` dans `authorizeSubscribe`,
+ * ce qui arrive ici sous cette forme — sans erreur de connexion. Un refus non
+ * signalé, c'est un run entier sans coordination et sans un mot (#33).
+ */
+export function grantedTopics(granted: Array<{ topic: string; qos: number }>): {
+  ok: string[];
+  refused: string[];
+} {
+  const ok: string[] = [];
+  const refused: string[] = [];
+  for (const g of granted) {
+    (g.qos >= 128 ? refused : ok).push(g.topic);
+  }
+  return { ok, refused };
+}
+
+/** Les sept topics auxquels l'agent s'abonne, préfixés par son org. */
+export function topicsForOrg(org: string): string[] {
+  const p = `coordinator/${org}`;
+  return [
+    `${p}/consultations/new`,
+    `${p}/consultations/+/messages`,
+    `${p}/consultations/+/status`,
+    `${p}/consultations/+/claimed`,
+    `${p}/consultations/+/completed`,
+    `${p}/broadcast`,
+    `${p}/agents/+/status`,
+  ];
+}
+
+export function classifyTopic(
+  topic: string,
+  payload: Record<string, unknown>,
+): InterruptType | null {
   const parts = topic.split("/");
+  // coordinator/<org>/... : le genre est en [2], l'identifiant en [3], la feuille en [4].
+  if (parts[0] !== "coordinator" || parts.length < 3) return null;
 
-  if (parts[1] === "consultations") {
-    if (parts[2] === "new") return "consultation_new";
-    if (parts[3] === "messages") return "consultation_message";
-    if (parts[3] === "claimed") return "consultation_claimed";
-    if (parts[3] === "completed") return "consultation_completed";
-    if (parts[3] === "status") {
+  if (parts[2] === "consultations") {
+    if (parts[3] === "new") return "consultation_new";
+    if (parts[4] === "messages") return "consultation_message";
+    if (parts[4] === "claimed") return "consultation_claimed";
+    if (parts[4] === "completed") return "consultation_completed";
+    if (parts[4] === "status") {
       const status = payload.status as string | undefined;
       if (status === "resolved") return "consultation_resolved";
       return "consultation_resolving";
     }
   }
 
-  if (parts[1] === "agents" && parts[3] === "status") {
+  if (parts[2] === "agents" && parts[4] === "status") {
     const status = payload.status as string | undefined;
     if (status === "offline") return "agent_offline";
     return "agent_online";
   }
 
-  if (parts[1] === "broadcast") return "broadcast";
+  if (parts[2] === "broadcast") return "broadcast";
 
   return null;
 }
 
-function buildInterrupt(
+export function buildInterrupt(
   type: InterruptType,
   topic: string,
   payload: Record<string, unknown>,
@@ -153,9 +203,9 @@ function buildInterrupt(
     raw: payload,
   };
 
-  // Extract threadId from topic structure: coordinator/consultations/{id}/messages|status
-  if (parts[1] === "consultations" && parts.length >= 4 && parts[2] !== "new") {
-    interrupt.threadId = parts[2];
+  // Extrait le threadId : coordinator/<org>/consultations/{id}/messages|status|claimed|completed
+  if (parts[2] === "consultations" && parts.length >= 5 && parts[3] !== "new") {
+    interrupt.threadId = parts[3];
   }
 
   // Map common payload fields
@@ -169,9 +219,9 @@ function buildInterrupt(
   if (payload.status !== undefined) interrupt.status = payload.status as string;
   if (payload.summary !== undefined) interrupt.content = payload.summary as string;
 
-  // For agent status topics, extract agentId from topic
-  if (parts[1] === "agents" && parts[3] === "status") {
-    interrupt.agentId = parts[2];
+  // Topic de statut d'agent : coordinator/<org>/agents/{agentId}/status
+  if (parts[2] === "agents" && parts[4] === "status") {
+    interrupt.agentId = parts[3];
   }
 
   return interrupt;
@@ -358,12 +408,18 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
           isConnected = true;
           reconnectAttempts = 0; // a successful connect earns a fresh budget
           void catchUpOpenConsultations();
-          client!.subscribe(TOPICS, (err) => {
+          const org = orgFromToken(coordinatorToken());
+          const topics = topicsForOrg(org);
+          client!.subscribe(topics, (err, granted) => {
             if (err) {
               reject(err);
               return;
             }
-            log.info("connected", { url });
+            const { ok, refused } = grantedTopics(granted ?? []);
+            if (refused.length > 0) {
+              log.warn("subscriptions refused by the coordinator", { org, refused });
+            }
+            log.info("connected", { url, org, subscribed: ok.length });
             resolve();
           });
         });
@@ -393,6 +449,12 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         client.on("close", () => {
           isConnected = false;
           log.debug("disconnected");
+        });
+
+        // Sans ceci, une erreur d'upgrade WS ou d'authentification est purement
+        // avalée : `close` ne porte aucune cause, et son niveau debug la masque.
+        client.on("error", (err: Error) => {
+          log.warn("mqtt error", { url, message: err.message });
         });
 
         client.on("reconnect", () => {

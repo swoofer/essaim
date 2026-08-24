@@ -56,10 +56,12 @@ describe("Types", () => {
       introspection_completed: true,
       agent_activity: true,
       task_claimed: true,
-      token_usage: true,
+      // token_usage a disparu de EventType dans le coordinator 2.x, en même temps
+      // que la route /api/token-usage. Le `satisfies` ci-dessous est ce qui l'a
+      // signalé : une clé de trop y est une erreur de compilation, pas un test rouge.
       quota_update: true,
     } as const satisfies Record<CoordinatorEvent["type"], true>;
-    expect(Object.keys(keys)).toHaveLength(16);
+    expect(Object.keys(keys)).toHaveLength(15);
   });
 
   it("ConflictReport types are exhaustive", () => {

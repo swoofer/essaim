@@ -228,17 +228,9 @@ async function _runProjectBody(
     }
   }
 
-  // 1b. Push run config to dashboard
-  await postJson(`${effectiveCoordinatorUrl}/api/run-config`, {
-    name: project.name,
-    description: project.description,
-    phase: project.phase,
-    agents: project.agents.map(a => ({ name: a.name, profile: a.profile, role: a.role })),
-    workspace: project.workspace,
-    stagger: project.stagger,
-    timeout_minutes: project.timeout_minutes,
-    compare_mode: project.compare_mode,
-  });
+  // 1b. L'en-tête de run partait vers /api/run-config, route supprimée dans le
+  // coordinator 2.x. postJson avalait déjà l'échec ; on ne garde pas un appel
+  // dont on sait qu'il ne peut plus aboutir.
 
   // 2. Create workspaces (resetBase FIRST, then setup, then worktrees)
   const basePath = project.workspace.base || DEFAULT_BASE;
