@@ -452,29 +452,10 @@ export async function runAgentLoop(
     return String(n);
   }
 
-  async function postTokenUsageSse(detail: TurnDetail): Promise<void> {
-    try {
-      await fetch(`${config.coordinatorUrl}/api/token-usage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({
-          agent_id: config.agentId,
-          agent_name: config.agentName,
-          turn: detail.turn,
-          phase: detail.phase,
-          model: detail.model,
-          cost_usd: detail.costUsd,
-          duration_ms: detail.durationMs,
-          input_tokens: detail.inputTokens,
-          output_tokens: detail.outputTokens,
-          cache_read_tokens: detail.cacheReadTokens,
-          cache_creation_tokens: detail.cacheCreationTokens,
-        }),
-      });
-    } catch {
-      // Never block on telemetry — coordinator might be down
-    }
-  }
+  // La télémétrie par tour partait vers /api/token-usage, route supprimée dans le
+  // coordinator 2.x. Le try/catch avalait déjà l'échec ; on ne garde pas un appel
+  // dont on sait qu'il ne peut plus aboutir. Le compteur local et le rapport
+  // reports/YYYY-MM-DD-<run-id>.md sont indépendants et restent en place.
 
   async function send(content: string, opts?: SendOptions): Promise<AssistantResponse> {
     logger.info(`Sending to claude (${content.length} chars): ${content.slice(0, 80)}...`);
@@ -523,9 +504,6 @@ export async function runAgentLoop(
       `hit=${cacheHitPct}% cost=$${resp.costUsd.toFixed(4)} ` +
       `(${resp.durationMs}ms, ${resp.toolCalls.length} tools)`,
     );
-
-    // Fire-and-forget telemetry to coordinator for live dashboard — never blocks
-    void postTokenUsageSse(detail);
 
     return resp;
   }
