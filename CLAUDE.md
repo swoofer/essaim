@@ -5,15 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test                                    # vitest run — 62 unit files, fileParallelism: false
-npm run test:watch
+pnpm test                                    # vitest run — 64 unit files, fileParallelism: false
+pnpm test:watch
 npx vitest run tests/unit/effort.test.ts    # one file
 npx vitest run -t "nom du cas"              # one case by name
-npm run build                               # tsc → dist/src + dist/cli (rootDir is ".")
-npm run dev -- run raid -p ~/proj --dry-run # CLI via tsx, no build step
+pnpm build                               # tsc → dist/src + dist/cli (rootDir is ".")
+pnpm dev -- run raid -p ~/proj --dry-run # CLI via tsx, no build step
 ```
 
-CI (`.github/workflows/test.yml`) runs exactly `npm install && npm test && npm run build` on Node 24. There is no lint or format script — don't invent one.
+CI (`.github/workflows/test.yml`) runs exactly `pnpm install && pnpm test && pnpm build` on Node 24. There is no lint or format script — don't invent one.
 
 **CI guard:** the `no-domain-artifacts` job fails any PR that reintroduces client-specific catalog content — it greps every tracked file for the client name and rejects `templates|presets|behaviors|compositions/<client>-*`. The term is spelled out only in `.github/workflows/test.yml`; never repeat it in another tracked file or the guard trips on its own repo. Domain-specific catalog content lives in the private repo, not here.
 
