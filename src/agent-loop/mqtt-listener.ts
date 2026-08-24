@@ -128,6 +128,24 @@ export function orgFromToken(token: string | undefined): string {
   }
 }
 
+/**
+ * MQTT 3.1.1 §3.9.3 : le SUBACK rend un code par topic, et tout code >= 128 est
+ * un échec. Le coordinator refuse par `cb(null, null)` dans `authorizeSubscribe`,
+ * ce qui arrive ici sous cette forme — sans erreur de connexion. Un refus non
+ * signalé, c'est un run entier sans coordination et sans un mot (#33).
+ */
+export function grantedTopics(granted: Array<{ topic: string; qos: number }>): {
+  ok: string[];
+  refused: string[];
+} {
+  const ok: string[] = [];
+  const refused: string[] = [];
+  for (const g of granted) {
+    (g.qos >= 128 ? refused : ok).push(g.topic);
+  }
+  return { ok, refused };
+}
+
 /** Les sept topics auxquels l'agent s'abonne, préfixés par son org. */
 export function topicsForOrg(org: string): string[] {
   const p = `coordinator/${org}`;
@@ -392,12 +410,16 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
           void catchUpOpenConsultations();
           const org = orgFromToken(coordinatorToken());
           const topics = topicsForOrg(org);
-          client!.subscribe(topics, (err) => {
+          client!.subscribe(topics, (err, granted) => {
             if (err) {
               reject(err);
               return;
             }
-            log.info("connected", { url, org });
+            const { ok, refused } = grantedTopics(granted ?? []);
+            if (refused.length > 0) {
+              log.warn("subscriptions refused by the coordinator", { org, refused });
+            }
+            log.info("connected", { url, org, subscribed: ok.length });
             resolve();
           });
         });
@@ -427,6 +449,12 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
         client.on("close", () => {
           isConnected = false;
           log.debug("disconnected");
+        });
+
+        // Sans ceci, une erreur d'upgrade WS ou d'authentification est purement
+        // avalée : `close` ne porte aucune cause, et son niveau debug la masque.
+        client.on("error", (err: Error) => {
+          log.warn("mqtt error", { url, message: err.message });
         });
 
         client.on("reconnect", () => {
