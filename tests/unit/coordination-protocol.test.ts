@@ -281,11 +281,46 @@ describe("CoordinationProtocol", () => {
     expect(thread?.decideRequested).toBe(false);
     expect(thread?.status).toBe("waiting");
 
+    // #108 : le plan révisé doit d'abord partir vers les pairs, sinon la ronde
+    // rouverte attend des réponses que personne n'a de raison d'envoyer.
+    const post = protocol.nextAction();
+    expect(post?.type).toBe("post_to_thread");
+    if (post?.type === "post_to_thread") {
+      expect(post.threadId).toBe("t-adjust");
+      expect(post.content).toContain("Avoid session.ts, focus on login.ts instead");
+    }
+
     const action = protocol.nextAction();
     expect(action?.type).toBe("wait_responses");
     if (action?.type === "wait_responses") {
       expect(action.threadId).toBe("t-adjust");
     }
+  });
+
+  it("#108 — pousse aussi le plan révisé quand le plafond de rondes est atteint", () => {
+    protocol.startWork(WORK);
+    drainActions(protocol);
+
+    protocol.onAnnounceResult({
+      threadId: "t-cap",
+      status: "open",
+      expectedRespondents: ["agent-2"],
+      context: "",
+    });
+    drainActions(protocol);
+
+    // Pousser le thread au plafond : chaque ADJUST rouvre une ronde.
+    for (let i = 0; i < 3; i++) {
+      protocol.onThreadMessage("t-cap", "agent-2", `objection ${i}`);
+      protocol.nextAction(); // ask_llm_decide
+      protocol.decideAdjust(`plan v${i + 2}`);
+      drainActions(protocol);
+    }
+
+    const thread = protocol.getThreadState("t-cap");
+    expect(thread?.work.plan).toBe("plan v4");
+    // Au plafond on passe au travail, mais les pairs ont reçu le dernier plan.
+    expect(protocol.phase).toBe("working");
   });
 
   // #53 — le garde d'idempotence n'existait que sur onThreadMessage. Or
@@ -369,6 +404,13 @@ describe("CoordinationProtocol", () => {
     expect(thread?.round).toBe(3); // not bumped past the cap
     expect(thread?.status).toBe("working");
     expect(protocol.phase).toBe("working");
+    // #108 : même au plafond, le plan adopté part vers les pairs avant qu'on
+    // se mette au travail — sinon ils resteraient sur une version périmée.
+    const capPost = protocol.nextAction();
+    expect(capPost?.type).toBe("post_to_thread");
+    if (capPost?.type === "post_to_thread") {
+      expect(capPost.content).toContain("plan v4");
+    }
     expect(protocol.nextAction()?.type).toBe("work");
   });
 

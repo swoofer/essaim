@@ -607,6 +607,19 @@ export async function runAgentLoop(
           protocol.onAnnounceResult(result);
           break;
         }
+        case "post_to_thread": {
+          // #108 : porte le plan révisé jusqu'aux pairs. Le coordinator le
+          // rediffuse sur consultations/<id>/messages, donc ils le reçoivent
+          // en push sans qu'on ait à ré-annoncer.
+          await postToThreadViaRest(
+            config.coordinatorUrl,
+            action.threadId,
+            config.agentId,
+            config.agentName,
+            action.content,
+          );
+          break;
+        }
         case "wait_responses": {
           // Wait for MQTT messages for the timeout period
           await new Promise((r) => setTimeout(r, Math.min(action.timeoutMs, RESPONSE_WAIT_MS)));
