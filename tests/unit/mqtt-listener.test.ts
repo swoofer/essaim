@@ -50,7 +50,7 @@ describe("MqttListener", () => {
   describe("topic classification", () => {
     it("classifies consultation_new", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/new", {
+      simulateMessage("coordinator/default/consultations/new", {
         thread_id: "t-1",
         subject: "Auth redesign",
         target_modules: ["auth"],
@@ -65,7 +65,7 @@ describe("MqttListener", () => {
 
     it("classifies consultation_message", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/t-42/messages", {
+      simulateMessage("coordinator/default/consultations/t-42/messages", {
         agent_id: "agent-2",
         type: "opinion",
         content: "I agree",
@@ -80,7 +80,7 @@ describe("MqttListener", () => {
 
     it("classifies consultation_resolving", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/t-42/status", {
+      simulateMessage("coordinator/default/consultations/t-42/status", {
         status: "resolving",
         summary: "Proposed consensus",
       });
@@ -92,7 +92,7 @@ describe("MqttListener", () => {
 
     it("classifies consultation_resolved", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/t-42/status", {
+      simulateMessage("coordinator/default/consultations/t-42/status", {
         status: "resolved",
         summary: "Final decision",
       });
@@ -104,7 +104,7 @@ describe("MqttListener", () => {
 
     it("classifies consultation_claimed", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/t-42/claimed", {
+      simulateMessage("coordinator/default/consultations/t-42/claimed", {
         agent_id: "agent-2",
         status: "claimed",
       });
@@ -117,7 +117,7 @@ describe("MqttListener", () => {
 
     it("classifies consultation_completed", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/t-42/completed", {
+      simulateMessage("coordinator/default/consultations/t-42/completed", {
         agent_id: "agent-2",
         status: "completed",
         summary: "Task finished successfully",
@@ -132,7 +132,7 @@ describe("MqttListener", () => {
 
     it("classifies agent_online", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/agents/agent-2/status", {
+      simulateMessage("coordinator/default/agents/agent-2/status", {
         status: "online",
         name: "Backend Agent",
       });
@@ -145,7 +145,7 @@ describe("MqttListener", () => {
 
     it("classifies agent_offline", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/agents/agent-2/status", {
+      simulateMessage("coordinator/default/agents/agent-2/status", {
         status: "offline",
       });
       const msgs = listener.drain();
@@ -156,7 +156,7 @@ describe("MqttListener", () => {
 
     it("classifies broadcast", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/broadcast", {
+      simulateMessage("coordinator/default/broadcast", {
         agent_id: "agent-2",
         message: "Deploying in 5 min",
       });
@@ -170,7 +170,7 @@ describe("MqttListener", () => {
   describe("self-message filtering", () => {
     it("filters messages from own agent_id", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/new", {
+      simulateMessage("coordinator/default/consultations/new", {
         agent_id: "agent-1", // same as OPTIONS.agentId
         thread_id: "t-self",
         subject: "My own consultation",
@@ -182,7 +182,7 @@ describe("MqttListener", () => {
 
     it("accepts messages from other agents", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/consultations/new", {
+      simulateMessage("coordinator/default/consultations/new", {
         agent_id: "agent-2",
         thread_id: "t-other",
         subject: "Other consultation",
@@ -195,9 +195,9 @@ describe("MqttListener", () => {
   describe("drain and peek", () => {
     it("drain empties the queue and returns all messages", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/broadcast", { agent_id: "a2", message: "msg1" });
-      simulateMessage("coordinator/broadcast", { agent_id: "a3", message: "msg2" });
-      simulateMessage("coordinator/broadcast", { agent_id: "a4", message: "msg3" });
+      simulateMessage("coordinator/default/broadcast", { agent_id: "a2", message: "msg1" });
+      simulateMessage("coordinator/default/broadcast", { agent_id: "a3", message: "msg2" });
+      simulateMessage("coordinator/default/broadcast", { agent_id: "a4", message: "msg3" });
 
       expect(listener.peek()).toBe(3);
       const msgs = listener.drain();
@@ -208,8 +208,8 @@ describe("MqttListener", () => {
 
     it("peek returns correct count without consuming", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/broadcast", { agent_id: "a2", message: "msg1" });
-      simulateMessage("coordinator/broadcast", { agent_id: "a3", message: "msg2" });
+      simulateMessage("coordinator/default/broadcast", { agent_id: "a2", message: "msg1" });
+      simulateMessage("coordinator/default/broadcast", { agent_id: "a3", message: "msg2" });
 
       expect(listener.peek()).toBe(2);
       expect(listener.peek()).toBe(2); // still 2 — not consumed
@@ -243,13 +243,13 @@ describe("MqttListener", () => {
   describe("malformed messages", () => {
     it("ignores non-JSON payloads", async () => {
       const listener = await connectListener();
-      mockClient.emit("message", "coordinator/broadcast", Buffer.from("not json"));
+      mockClient.emit("message", "coordinator/default/broadcast", Buffer.from("not json"));
       expect(listener.peek()).toBe(0);
     });
 
     it("ignores unrecognized topics", async () => {
       const listener = await connectListener();
-      simulateMessage("coordinator/unknown/something", { agent_id: "a2" });
+      simulateMessage("coordinator/default/unknown/something", { agent_id: "a2" });
       expect(listener.peek()).toBe(0);
     });
   });
@@ -289,7 +289,7 @@ describe("MqttListener", () => {
         target_modules: ["auth"],
         extra_field: 42,
       };
-      simulateMessage("coordinator/consultations/new", payload);
+      simulateMessage("coordinator/default/consultations/new", payload);
       const msgs = listener.drain();
       expect(msgs[0].raw).toEqual(payload);
     });
@@ -412,7 +412,7 @@ describe("MqttListener", () => {
       await connectPromise;
 
       // The live message arrives (and is queued) before the catch-up fetch resolves.
-      simulateMessage("coordinator/consultations/new", {
+      simulateMessage("coordinator/default/consultations/new", {
         agent_id: "agent-2",
         thread_id: "t-1",
         subject: "Auth redesign",
