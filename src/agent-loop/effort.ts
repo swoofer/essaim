@@ -24,7 +24,13 @@ export const EFFORT_PROFILES: Record<ConcreteEffortLevel, EffortProfile> = {
   // against the turn limit, and with tools in the loop a "turn" can burn
   // multiple explorations before the model even attempts to synthesise text.
   low:  { model: "claude-haiku-4-5-20251001", thinking: "none",       maxTurns: 15 },
-  mid:  { model: "claude-sonnet-4-6",         thinking: "think",      maxTurns: 8 },
+  // 8 → 16 : sur un raid mesuré, 21 `error_max_turns` pour 19 tâches
+  // abandonnées — c'est le plafond, pas la qualité de l'agent, qui causait
+  // l'abandon. On DOUBLE sans aller plus loin : à ~3,9 min pour 8 tours, un
+  // mid à 25 produirait un envoi de ~12 min contre un timeout de run par
+  // défaut de 15 min (orchestrator.ts), donc une mort par deadline en pleine
+  // tâche — l'état le plus destructeur, puisqu'il la laisse réclamée.
+  mid:  { model: "claude-sonnet-4-6",         thinking: "think",      maxTurns: 16 },
   high: { model: "claude-opus-4-6",           thinking: "think-hard", maxTurns: 20 },
   max:  { model: "claude-opus-4-6",           thinking: "ultrathink", maxTurns: 60 },
 };

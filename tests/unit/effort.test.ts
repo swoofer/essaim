@@ -10,11 +10,11 @@ describe("EFFORT_PROFILES", () => {
     });
   });
 
-  it("maps mid to sonnet with 8 turns and think", () => {
+  it("maps mid to sonnet with 16 turns and think", () => {
     expect(EFFORT_PROFILES.mid).toEqual({
       model: "claude-sonnet-4-6",
       thinking: "think",
-      maxTurns: 8,
+      maxTurns: 16,
     });
   });
 

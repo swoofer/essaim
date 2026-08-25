@@ -1082,12 +1082,12 @@ describe("runAgentLoop — phased mode", () => {
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
     await loopPromise;
 
-    // Second send() = execute for task t-1. Should be nudged to mid (Sonnet, 8 turns).
+    // Second send() = execute for task t-1. Should be nudged to mid (Sonnet, 16 turns).
     const executeCall = mockSend.mock.calls[1];
     expect(executeCall[1]).toMatchObject({
       model: "claude-sonnet-4-6",
       thinking: "think",
-      maxTurns: 8,
+      maxTurns: 16,
     });
   });
 
@@ -1130,7 +1130,7 @@ describe("runAgentLoop — phased mode", () => {
     expect(executeCall[1]).toMatchObject({
       model: "claude-sonnet-4-6",
       thinking: "think",
-      maxTurns: 8,
+      maxTurns: 16,
     });
   });
 

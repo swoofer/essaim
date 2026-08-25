@@ -62,3 +62,21 @@ describe('extractDoneSummary (#31)', () => {
     expect(extractDoneSummary('rien ici', 'fallback')).toBe('fallback');
   });
 });
+
+describe('hasDoneMarker — ancrage et fenêtre de fin', () => {
+  it('refuse un DONE: annoncé en milieu de phrase', () => {
+    expect(hasDoneMarker('je terminerai par DONE: <résumé> quand ce sera fini')).toBe(false);
+  });
+
+  it('refuse un DONE: enfoui loin de la fin du contenu cumulé', () => {
+    // `content` concatène tous les tours internes du CLI : un marqueur promis
+    // au premier tour ne doit pas résoudre le thread au dernier.
+    const contenu = 'DONE: je vais le faire\n' + 'exploration du code...\n'.repeat(200);
+    expect(hasDoneMarker(contenu)).toBe(false);
+  });
+
+  it('accepte un DONE: en début de ligne à la fin du contenu', () => {
+    const contenu = 'exploration...\n'.repeat(200) + '\nDONE: bug exposé dans work-stealing.ts';
+    expect(hasDoneMarker(contenu)).toBe(true);
+  });
+});
