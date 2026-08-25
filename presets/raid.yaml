@@ -47,3 +47,4 @@ params:
     # à "high" (Opus), l'agent dépensait son budget en exploration avant
     # d'atteindre DONE. Sonnet + scope strict ci-dessus = moins d'excursions.
     effort: mid
+    requireFailingTest: true

@@ -11,6 +11,8 @@ import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, unclaim
 import { createLogger } from "../logger.js";
 import { resolveEffort, upgradeEffort, parseSeverity, EFFORT_PROFILES, isThinkingLevel, type EffortLevel, type ConcreteEffortLevel, type ThinkingLevel } from "./effort.js";
 import { authHeaders } from "../coordinator-auth.js";
+import { verifyFailingTest, type FalsifiabilityDeps } from "./falsifiability.js";
+import { spawn } from "node:child_process";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -59,6 +61,9 @@ export interface AgentLoopConfig {
     effort?: string;
     model?: string;
     thinking?: string;
+    // Opt-in, propagé par promptweave depuis le YAML du behavior. Quand vrai,
+    // un DONE: n'est accepté que si le test ajouté échoue SANS le patch.
+    requireFailingTest?: boolean;
   }>;
 }
 
@@ -112,6 +117,29 @@ export interface AgentLoopLogger {
   info(msg: string, data?: Record<string, unknown>): void;
   warn(msg: string, data?: Record<string, unknown>): void;
   error(msg: string, data?: Record<string, unknown>): void;
+}
+
+/**
+ * Commande de test du dépôt cible. `vitest run <fichiers>` filtre par chemin,
+ * donc seuls les tests que l'agent vient d'écrire sont rejoués — pas les 64
+ * fichiers de la suite.
+ */
+const TEST_COMMAND = { cmd: "pnpm", args: ["exec", "vitest", "run"] };
+
+/** Exécuteur réel pour le contrôle de falsifiabilité. Ne jette jamais. */
+function gitExec(cwd: string): FalsifiabilityDeps {
+  return {
+    exec(cmd, args) {
+      return new Promise((resolve) => {
+        const child = spawn(cmd, args, { cwd, shell: process.platform === "win32" });
+        let stdout = "";
+        child.stdout?.on("data", (d) => { stdout += String(d); });
+        child.stderr?.on("data", (d) => { stdout += String(d); });
+        child.on("error", () => resolve({ code: -1, stdout }));
+        child.on("close", (code) => resolve({ code: code ?? -1, stdout }));
+      });
+    },
+  };
 }
 
 const DEFAULT_MAX_TURNS = 50;
@@ -1068,9 +1096,23 @@ export async function runAgentLoop(
               // blocking the real work from ever happening.
               if (hasDoneMarker(resp.content)) {
                 const taskSummary = extractDoneSummary(resp.content, "Done");
-                logger.info(`Work-stealing: completed — "${taskSummary.slice(0, 80)}"`);
-                await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
-                tasksDone++;
+                // Le DONE: ne suffit pas quand le behavior exige une preuve.
+                // Mesuré : un agent a « corrigé » deux champs non contrôlables
+                // par le moteur, avec un test qui passait avant comme après.
+                const verdict = phase.requireFailingTest
+                  ? await verifyFailingTest(gitExec(config.workspacePath), TEST_COMMAND)
+                  : null;
+                if (verdict && !verdict.falsifiable) {
+                  logger.warn(`Work-stealing: DONE refusé — ${verdict.reason}`, {
+                    taskId: task.id,
+                    testFiles: verdict.testFiles,
+                  });
+                  await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
+                } else {
+                  logger.info(`Work-stealing: completed — "${taskSummary.slice(0, 80)}"`);
+                  await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
+                  tasksDone++;
+                }
               } else {
                 // subtype distingue « l'agent a divagué » (success) de « il a
                 // manqué de tours » (error_max_turns). On le JOURNALISE sans

@@ -58,11 +58,11 @@
     "test:watch": "vitest",
     "cli": "tsx cli/index.ts",
     "dev": "tsx cli/index.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
-    "@swoofer/promptweave": "^0.4.0",
+    "@swoofer/promptweave": "^0.5.1",
     "commander": "^14.0.3",
     "handlebars": "^4.7.0",
     "mcp-coordinator": "^2.2.1",

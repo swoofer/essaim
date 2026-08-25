@@ -20,3 +20,4 @@ params:
       strict : uniquement ton fichier ciblé (+ son test). Résous "DONE: <résumé>" ou
       "FALSE_POSITIVE: <raison>". N'exécute jamais de PoC contre un système vivant.
     effort: high
+    requireFailingTest: true
