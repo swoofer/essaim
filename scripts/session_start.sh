@@ -2,7 +2,7 @@
 # BCE hook: session start
 # Registers the agent with the coordinator and prints the briefing
 # to stdout so Claude sees it in its context on SessionStart.
-COORDINATOR_URL="${COORDINATOR_URL:-http://localhost:3100}"
+COORDINATOR_URL="${COORDINATOR_URL:-http://127.0.0.1:3100}"
 AGENT_ID="${COORDINATOR_AGENT_ID:-unknown}"
 AGENT_NAME="${COORDINATOR_AGENT_NAME:-unknown}"
 AGENT_MODULES="${COORDINATOR_AGENT_MODULES:-}"

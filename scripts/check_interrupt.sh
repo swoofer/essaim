@@ -3,7 +3,7 @@
 # Called as PreToolUse (before Edit/Write) and PostToolUse (after Edit/Write).
 # If a thread is waiting for this agent's response, outputs a message that
 # Claude sees in its context — triggering it to respond before continuing.
-COORDINATOR_URL="${COORDINATOR_URL:-http://localhost:3100}"
+COORDINATOR_URL="${COORDINATOR_URL:-http://127.0.0.1:3100}"
 AGENT_ID="${COORDINATOR_AGENT_ID:-unknown}"
 
 if [ "$AGENT_ID" = "unknown" ]; then

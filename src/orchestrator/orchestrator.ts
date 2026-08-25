@@ -65,7 +65,7 @@ async function postJson(url: string, body: unknown, timeoutMs = 5000): Promise<b
   }
 }
 
-const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://localhost:3100";
+const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://127.0.0.1:3100";
 const DEFAULT_BASE = process.cwd(); // default to current working directory
 const DEFAULT_MAX_CONCURRENCY = 8;
 
@@ -136,7 +136,7 @@ export async function runProject(
     const dataDir = process.env.COORDINATOR_DATA_DIR || "./tmp-essaim/coordinator-data";
     log.info(`Starting in-process coordinator on port ${port} (dataDir: ${dataDir})`);
     coordinatorHandle = await startServer({ port, dataDir, registerSignalHandlers: false });
-    runOpts = { ...runOpts, coordinatorUrl: `http://localhost:${coordinatorHandle.port}` };
+    runOpts = { ...runOpts, coordinatorUrl: `http://127.0.0.1:${coordinatorHandle.port}` };
     log.info(`In-process coordinator ready at ${runOpts.coordinatorUrl}`);
   }
 

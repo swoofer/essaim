@@ -3,7 +3,7 @@
 # Called by Claude Code as a PostToolUse hook.
 # Claude Code passes hook input as JSON on stdin, not positional args.
 # See: https://code.claude.com/docs/en/hooks.md
-COORDINATOR_URL="${COORDINATOR_URL:-http://localhost:3100}"
+COORDINATOR_URL="${COORDINATOR_URL:-http://127.0.0.1:3100}"
 AGENT_ID="${COORDINATOR_AGENT_ID:-unknown}"
 AGENT_NAME="${COORDINATOR_AGENT_NAME:-unknown}"
 

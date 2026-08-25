@@ -451,12 +451,6 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
           log.debug("disconnected");
         });
 
-        // Sans ceci, une erreur d'upgrade WS ou d'authentification est purement
-        // avalée : `close` ne porte aucune cause, et son niveau debug la masque.
-        client.on("error", (err: Error) => {
-          log.warn("mqtt error", { url, message: err.message });
-        });
-
         client.on("reconnect", () => {
           isConnected = false;
           if (++reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
