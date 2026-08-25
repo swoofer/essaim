@@ -127,8 +127,22 @@ const APPROVAL_WAIT_MS = 20_000;
 // maxTurns cap before exiting non-zero (#31).
 const DONE_PATTERN = /\bDONE\b[ \t  ]*[*_`]*[ \t  ]*:/i;
 
+/**
+ * Même tolérance typographique, mais ANCRÉ en début de ligne — et testé sur la
+ * seule FIN du contenu.
+ *
+ * `content` concatène le texte de tous les tours internes du CLI. Sans ancrage
+ * ni fenêtre, un agent qui écrit « je terminerai par DONE: ... » dans un tour
+ * intermédiaire — comportement que `extractDoneSummary` documente juste en
+ * dessous comme courant — résout le thread avant d'avoir travaillé. C'est
+ * précisément ce que la règle « pas de marqueur = jamais complete » devait
+ * empêcher.
+ */
+const DONE_LINE_PATTERN = new RegExp("^[ \t*_`]*" + DONE_PATTERN.source, "im");
+const DONE_TAIL_CHARS = 500;
+
 export function hasDoneMarker(content: string): boolean {
-  return DONE_PATTERN.test(content);
+  return DONE_LINE_PATTERN.test(content.slice(-DONE_TAIL_CHARS));
 }
 
 /**
@@ -337,6 +351,9 @@ export async function runAgentLoop(
   const startTime = Date.now();
   let totalCost = 0;
   let turnsCount = 0;
+  // Durée du dernier envoi. Sert d'estimation du coût en temps d'une tâche
+  // avant d'en réclamer une nouvelle (voir la boucle de work-stealing).
+  let lastSendMs = 0;
   let mqttMessagesProcessed = 0;
   let exitReason: ExitReason = "done";
   let summary = "";
@@ -495,6 +512,7 @@ export async function runAgentLoop(
       toolCallCount: resp.toolCalls.length,
       contentLength: resp.content.length,
     };
+    lastSendMs = resp.durationMs;
     turnDetails.push(detail);
 
     logger.info(
@@ -891,6 +909,24 @@ export async function runAgentLoop(
                 break;
               }
 
+              // Ne pas réclamer ce qu'on n'a pas le temps de finir. Le budget
+              // contraignant est l'horloge, pas maxTurns : mesuré, 7 à 17 envois
+              // pour un plafond de 50. Un SIGKILL du timeout en plein envoi
+              // laisse la tâche réclamée ; le balayage la désréclame, et cette
+              // désréclamation compte vers l'empoisonnement du thread au même
+              // titre qu'un abandon de qualité. 1,5 × la durée du dernier envoi
+              // est la marge la moins arbitraire dont on dispose.
+              if (lastSendMs > 0) {
+                const need = lastSendMs * 1.5;
+                const left = remainingBudgetMs();
+                if (left < need) {
+                  logger.info(
+                    `Work-stealing: pas de nouvelle réclamation — ${Math.round(left / 1000)}s restantes < ${Math.round(need / 1000)}s estimées`,
+                  );
+                  break;
+                }
+              }
+
               // Claim next task
               logger.debug(`Work-stealing: attempting claim (turn ${turnsCount}/${maxTurns}, done=${tasksDone})`);
               const task = await claimNextTask(config.coordinatorUrl, config.agentId);
@@ -1011,7 +1047,7 @@ export async function runAgentLoop(
                     await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
                     tasksDone++;
                   } else {
-                    logger.warn(`Work-stealing: aborting task after retry (no DONE:) — unclaiming thread=${task.id}`);
+                    logger.warn(`Work-stealing: aborting task after retry (no DONE:) — unclaiming thread=${task.id} subtype=${retryResp.subtype ?? "?"}`);
                     await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
                     claimedThreadIds.delete(task.id);
                   }
@@ -1036,7 +1072,11 @@ export async function runAgentLoop(
                 await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
                 tasksDone++;
               } else {
-                logger.warn(`Work-stealing: aborting task (no DONE: marker) — unclaiming thread=${task.id}`);
+                // subtype distingue « l'agent a divagué » (success) de « il a
+                // manqué de tours » (error_max_turns). On le JOURNALISE sans
+                // brancher dessus : la décision reste l'abandon, mais elle
+                // devient diagnosticable.
+                logger.warn(`Work-stealing: aborting task (no DONE: marker) — unclaiming thread=${task.id} subtype=${resp.subtype ?? "?"}`);
                 await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
                 claimedThreadIds.delete(task.id);
               }

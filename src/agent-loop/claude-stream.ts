@@ -50,6 +50,16 @@ export interface AssistantResponse {
   rateLimited: boolean;
   rateLimitResetsAt?: number;  // Unix timestamp (seconds)
   tokens: TokenUsage;
+  /**
+   * Subtype du `result` renvoyé par le CLI : "success", "error_max_turns", …
+   *
+   * Le parseur le connaissait déjà et le journalisait, mais le jetait ensuite.
+   * Sans lui, la boucle de work-stealing ne peut pas distinguer un agent qui a
+   * divagué d'un agent qui a simplement épuisé ses tours — les deux arrivent
+   * comme « pas de marqueur DONE: ». Exposé pour être JOURNALISÉ, pas pour
+   * changer une décision : voir les deux sites d'abandon dans agent-loop.ts.
+   */
+  subtype?: string;
 }
 
 export interface ToolCall {
@@ -350,6 +360,7 @@ function runOneTurn(
           durationMs: (eventRec.duration_ms as number) ?? 0,
           sessionId: resultSessionId,
           tokens,
+          subtype,
         });
         return;
       }
