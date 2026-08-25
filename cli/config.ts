@@ -18,7 +18,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
     data_dir: join(homedir(), ".mcp-coordinator", "data"),
   },
   defaults: {
-    coordinator_url: "http://localhost:3100",
+    coordinator_url: "http://127.0.0.1:3100",
   },
 };
 

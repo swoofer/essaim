@@ -6,7 +6,7 @@ export function createInitCommand(): Command {
   return new Command("init")
     .description("Setup coordination in a project")
     .argument("[path]", "Project path", ".")
-    .option("--url <url>", "Coordinator URL", "http://localhost:3100")
+    .option("--url <url>", "Coordinator URL", "http://127.0.0.1:3100")
     .option("--name <name>", "Agent name", process.env.USER || "developer")
     .option("--modules <list>", "Comma-separated modules", "")
     .option("--security", "Also scaffold security config + .gitignore")
