@@ -405,6 +405,11 @@ export async function processReviewActions(
         target_modules: [],
         target_files: file !== "__ungrouped__" ? [file] : [],
         keep_open: true,
+        // Même estampille que le chemin de découverte plus haut (#32) : sans
+        // elle, le schéma du coordinator traite le thread comme non scopé,
+        // « visible to every run », et un run suivant hérite des découvertes
+        // de la phase review d'un run mort.
+        run_id: currentRunId(),
       });
       posted++;
     } catch (err) { log.warn("NOUVEAU group post failed", { error: (err as Error).message }); }
