@@ -41,6 +41,11 @@ export type ProtocolAction =
   | { type: "wait_responses"; threadId: string; timeoutMs: number }
   | { type: "ask_llm_respond"; threadId: string; context: string }
   | { type: "ask_llm_decide"; threadId: string; responses: string }
+  // #108 : porter un message vers le thread. Le coordinator le rediffuse sur
+  // `coordinator/<org>/consultations/<id>/messages`, donc les pairs le
+  // reçoivent en push. C'est la voie qui évite de ré-annoncer — ré-annoncer
+  // rouvrirait la question de l'identité du thread côté coordinator.
+  | { type: "post_to_thread"; threadId: string; content: string }
   | { type: "propose_resolution"; threadId: string }
   | { type: "wait_approvals"; threadId: string; timeoutMs: number }
   | { type: "work" }
@@ -308,6 +313,17 @@ export function createCoordinationProtocol(agentId: string): CoordinationProtoco
       if (!thread) return;
 
       thread.work.plan = newPlan;
+
+      // #108 : sans ceci le plan révisé n'atteignait personne. `resetForNewRound`
+      // n'enfile que `wait_responses`, donc la ronde rouverte attendait des
+      // réponses que les pairs n'avaient aucune raison d'envoyer — ils avaient
+      // déjà répondu, et rien ne leur disait que quoi que ce soit avait changé.
+      // On le pousse dans le thread : le coordinator le rediffuse en MQTT.
+      enqueue({
+        type: "post_to_thread",
+        threadId: thread.threadId,
+        content: `Plan révisé après consultation :\n\n${newPlan}`,
+      });
 
       // Bound re-planning the same way onContestation bounds re-rounds: an LLM
       // that keeps replying ADJUST would otherwise reopen rounds indefinitely.
