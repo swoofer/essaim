@@ -1611,3 +1611,23 @@ describe("runAgentLoop — phased mode", () => {
 });
 
 
+
+describe("FALSE_POSITIVE_PATTERN", () => {
+  // Une résolution « ce n'en est pas un » n'a ni patch ni test : le garde-fou
+  // de falsifiabilité doit la laisser passer. Mesuré sur un vrai swarm, où un
+  // agent a correctement identifié le faux positif et s'est fait refuser.
+  it("reconnaît ce qu'un agent écrit vraiment", async () => {
+    const { FALSE_POSITIVE_PATTERN } = await import("../../src/agent-loop/agent-loop.js");
+    // Sortie littérale d'un agent sentinelle : tiret cadratin, pas deux-points.
+    expect(FALSE_POSITIVE_PATTERN.test(
+      "FALSE_POSITIVE — `f.severity` and `f.fingerprint` are already sanitized",
+    )).toBe(true);
+    expect(FALSE_POSITIVE_PATTERN.test("FALSE_POSITIVE: pas contrôlable")).toBe(true);
+    expect(FALSE_POSITIVE_PATTERN.test("false positive : allowlist stricte")).toBe(true);
+  });
+
+  it("ne s'active pas sur un vrai correctif", async () => {
+    const { FALSE_POSITIVE_PATTERN } = await import("../../src/agent-loop/agent-loop.js");
+    expect(FALSE_POSITIVE_PATTERN.test("Échappement ajouté sur f.title + test")).toBe(false);
+  });
+});
