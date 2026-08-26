@@ -33,6 +33,10 @@ params:
     type: number
     required: false
     description: "Override maxTurns explicitly. Omit to use maxTurns from effort profile. Note: phase-execute's maxTurns override is deliberately ignored at runtime because per-task severity upgrades drive the turn budget."
+  requireFailingTest:
+    type: boolean
+    required: false
+    description: "Quand true, un DONE: n'est accepté que si le test ajouté échoue SANS le patch. Opt-in : réservé aux missions qui exigent explicitement un test qui échoue d'abord."
 
 sections:
   "030-execute":

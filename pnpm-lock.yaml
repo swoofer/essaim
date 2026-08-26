@@ -15,8 +15,8 @@ importers:
         specifier: ^0.30.0
         version: 0.30.1
       '@swoofer/promptweave':
-        specifier: ^0.4.0
-        version: 0.4.1
+        specifier: ^0.5.1
+        version: 0.5.1
       commander:
         specifier: ^14.0.3
         version: 14.0.3
@@ -425,8 +425,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@swoofer/promptweave@0.4.1':
-    resolution: {integrity: sha512-HJy/TAEffB1Wh/9Qn0l00jA4jtTR5oDBaonsVDzGQ/0pb/1+Bz/qBlH68joMA7po/+d0+qNilvf5aBV5FlaBrA==}
+  '@swoofer/promptweave@0.5.1':
+    resolution: {integrity: sha512-hA1tpAO/qfx3Veke7XnKvalE/7RHA/3wj0xhoAUzipshdqXeKjeC2zil6ixQM8hzCJZAC8AtzePiSqVHi4MB4A==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1934,7 +1934,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@swoofer/promptweave@0.4.1':
+  '@swoofer/promptweave@0.5.1':
     dependencies:
       commander: 14.0.3
       handlebars: 4.7.9

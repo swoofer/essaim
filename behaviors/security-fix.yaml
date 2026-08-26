@@ -21,6 +21,10 @@ params:
     type: string
     default: high
     description: "Effort profile — security patches need code-writing capability"
+  requireFailingTest:
+    type: boolean
+    required: false
+    description: "Quand true, un DONE: n'est accepté que si le test ajouté échoue SANS le patch. Opt-in : réservé aux missions qui exigent explicitement un test qui échoue d'abord."
 
 sections:
   "030-security-fix":
