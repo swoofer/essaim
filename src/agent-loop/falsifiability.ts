@@ -88,6 +88,22 @@ export async function verifyFailingTest(
   // `--include-untracked` : un patch qui CRÉE un fichier source ne serait pas
   // remisé sans lui, la remise échouerait, et le contrôle s'ouvrirait en grand
   // sur exactement le cas qu'il doit surveiller.
+  // MESURE DE RÉFÉRENCE, patch en place. Sans elle, un lanceur qui ne démarre
+  // pas — mauvaise commande pour ce dépôt, dépendance absente, config cassée —
+  // sort non-zéro APRÈS la remise et se lit comme « le test échoue sans le
+  // patch » : le garde-fou accepte, en silence, exactement ce qu'il surveille.
+  // Mesuré : sur un dépôt sans vitest, `pnpm exec vitest run` produisait un
+  // faux ACCEPT sur un test dont le verdict correct était « ne prouve rien ».
+  const baseline = await deps.exec(testCommand.cmd, [...testCommand.args, ...testFiles]);
+  if (baseline.code !== 0) {
+    return {
+      falsifiable: true,
+      reason: `le lanceur de tests échoue déjà AVEC le patch (${testCommand.cmd}, code ${baseline.code}) — contrôle sauté`,
+      testFiles,
+      sourceFiles,
+    };
+  }
+
   const stash = await deps.exec("git", ["stash", "push", "--quiet", "--include-untracked", "--", ...sourceFiles]);
   if (stash.code !== 0) {
     return { falsifiable: true, reason: "remise impossible — contrôle sauté", testFiles, sourceFiles };

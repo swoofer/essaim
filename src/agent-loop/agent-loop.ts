@@ -13,6 +13,7 @@ import { resolveEffort, upgradeEffort, parseSeverity, EFFORT_PROFILES, isThinkin
 import { authHeaders } from "../coordinator-auth.js";
 import { verifyFailingTest, type FalsifiabilityDeps } from "./falsifiability.js";
 import { spawn } from "node:child_process";
+import { detectLanguage } from "../orchestrator/scanner.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -120,11 +121,24 @@ export interface AgentLoopLogger {
 }
 
 /**
- * Commande de test du dépôt cible. `vitest run <fichiers>` filtre par chemin,
- * donc seuls les tests que l'agent vient d'écrire sont rejoués — pas les 64
- * fichiers de la suite.
+ * Commande de test DU DÉPÔT CIBLE, pas du nôtre.
+ *
+ * Codée en dur à `pnpm exec vitest run`, elle défaisait le garde-fou sur tout
+ * dépôt qui n'est pas pnpm+vitest : la commande échouait faute de vitest, et
+ * cet échec se lisait comme « le test échoue sans le patch ». On réutilise la
+ * détection du scanner — même source de vérité que le reste de l'orchestrateur
+ * — appliquée au worktree réel de l'agent.
+ *
+ * La plupart des lanceurs filtrent par chemin (`vitest run <f>`, `pytest <f>`),
+ * donc seuls les tests que l'agent vient d'écrire sont rejoués. Ceux qui ne le
+ * font pas (`go test ./...`, `cargo test`) échoueront sur l'argument ajouté —
+ * la mesure de référence de `verifyFailingTest` transforme alors le cas en
+ * abandon explicite et journalisé, plus en acceptation silencieuse.
  */
-const TEST_COMMAND = { cmd: "pnpm", args: ["exec", "vitest", "run"] };
+function testCommandFor(workspacePath: string): { cmd: string; args: string[] } {
+  const parts = detectLanguage(workspacePath).test_command.trim().split(/\s+/);
+  return { cmd: parts[0] || "npm", args: parts.slice(1) };
+}
 
 /** Exécuteur réel pour le contrôle de falsifiabilité. Ne jette jamais. */
 function gitExec(cwd: string): FalsifiabilityDeps {
@@ -140,6 +154,40 @@ function gitExec(cwd: string): FalsifiabilityDeps {
       });
     },
   };
+}
+
+/**
+ * Résolution « ce n'en est pas un » — la mission de sentinelle la prévoit
+ * noir sur blanc. Aucun patch, donc aucun test à exiger.
+ */
+export const FALSE_POSITIVE_PATTERN = /FALSE[_ ]?POSITIVE/i;
+
+/** Publie le motif du refus dans le thread, pour que la reprise soit informée. */
+async function postRefusal(
+  config: AgentLoopConfig,
+  threadId: string,
+  reason: string,
+): Promise<void> {
+  try {
+    await fetch(`${config.coordinatorUrl}/api/post-to-thread`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        thread_id: threadId,
+        agent_id: config.agentId,
+        agent_name: config.agentName,
+        type: "context",
+        content:
+          `Résolution refusée par le garde-fou de falsifiabilité : ${reason}.
+
+` +
+          `Écris un test qui ÉCHOUE sans ton patch avant de conclure DONE:. ` +
+          `Si le défaut n'existe pas, conclus FALSE_POSITIVE: <raison>.`,
+      }),
+    });
+  } catch {
+    // Le refus tient même si le thread ne peut pas être annoté.
+  }
 }
 
 const DEFAULT_MAX_TURNS = 50;
@@ -1099,14 +1147,24 @@ export async function runAgentLoop(
                 // Le DONE: ne suffit pas quand le behavior exige une preuve.
                 // Mesuré : un agent a « corrigé » deux champs non contrôlables
                 // par le moteur, avec un test qui passait avant comme après.
-                const verdict = phase.requireFailingTest
-                  ? await verifyFailingTest(gitExec(config.workspacePath), TEST_COMMAND)
-                  : null;
+                // Un FALSE_POSITIVE n'a ni patch ni test : c'est une issue que
+                // la mission de sentinelle autorise explicitement. Mesuré sur un
+                // vrai swarm — un agent a correctement identifié le faux positif
+                // et s'est fait refuser sa résolution, faute de test à montrer.
+                const verdict =
+                  phase.requireFailingTest && !FALSE_POSITIVE_PATTERN.test(taskSummary)
+                    ? await verifyFailingTest(gitExec(config.workspacePath), testCommandFor(config.workspacePath))
+                    : null;
                 if (verdict && !verdict.falsifiable) {
                   logger.warn(`Work-stealing: DONE refusé — ${verdict.reason}`, {
                     taskId: task.id,
                     testFiles: verdict.testFiles,
                   });
+                  // Dire POURQUOI dans le thread. Sans ça le prochain agent
+                  // reprend la tâche sans savoir ce qui a été refusé et refait
+                  // la même chose : mesuré, trois refus d'affilée pour « aucun
+                  // test » sur des tâches reprises en boucle.
+                  await postRefusal(config, task.id, verdict.reason);
                   await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
                 } else {
                   logger.info(`Work-stealing: completed — "${taskSummary.slice(0, 80)}"`);

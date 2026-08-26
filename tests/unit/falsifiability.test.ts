@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -92,6 +92,21 @@ describe("verifyFailingTest", () => {
     expect(v.falsifiable).toBe(true);
   });
 
+  it("n'accepte PAS quand le lanceur de tests ne démarre pas", async () => {
+    // Le défaut le plus grave trouvé sur le terrain : la commande était codée
+    // en dur à `pnpm exec vitest run`. Sur un dépôt sans vitest elle sortait
+    // non-zéro APRÈS la remise, ce qui se lisait « le test échoue sans le
+    // patch » — un ACCEPT silencieux sur exactement le cas surveillé.
+    const { deps, calls } = fakeExec({
+      "git status": { code: 0, stdout: " M src/a.ts\n M tests/unit/x.test.ts\n" },
+      "pnpm exec": { code: 1, stdout: "vitest: not found" },
+    });
+    const v = await verifyFailingTest(deps, TEST_CMD);
+    expect(v.reason).toContain("échoue déjà AVEC le patch");
+    // Rien n'a été remisé : on abandonne AVANT de toucher au worktree.
+    expect(calls.some((c) => c.startsWith("git stash push"))).toBe(false);
+  });
+
   it("restaure toujours le patch remise", async () => {
     const { deps, calls } = fakeExec({
       "git status": { code: 0, stdout: " M src/a.ts\n M tests/unit/x.test.ts\n" },
@@ -148,12 +163,18 @@ describe("verifyFailingTest contre un vrai dépôt git", () => {
   afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
   it("voit le test non suivi et refuse un test complaisant", async () => {
-    // « Le test » sort 0 tant que le patch est absent du worktree — donc il
-    // ne sort 0 QUE si la remise a réellement retiré newsrc.js. Un verdict
-    // négatif prouve d'un coup que le fichier de test a été vu ET remisé.
+    // Sonde délibérément COMPLAISANTE : elle sort 0 quel que soit l'état du
+    // worktree — exactement le test que le garde-fou doit refuser. Elle note
+    // au passage ce qu'elle a vu, ce qui prouve que la remise a bien retiré
+    // le fichier source sans faire dépendre la preuve du code de sortie
+    // (la mesure de référence exige que la sonde passe AVEC le patch).
     const probe = {
       cmd: process.execPath,
-      args: ["-e", "process.exit(require('fs').existsSync('newsrc.js') ? 1 : 0)"],
+      args: [
+        "-e",
+        "const fs=require('fs');" +
+          "fs.appendFileSync('probe.log', fs.existsSync('newsrc.js')?'present\\n':'absent\\n');",
+      ],
     };
     const v = await verifyFailingTest(realExec(repo), probe);
 
@@ -161,6 +182,11 @@ describe("verifyFailingTest contre un vrai dépôt git", () => {
     expect(v.sourceFiles).toEqual(["newsrc.js"]);
     expect(v.falsifiable).toBe(false);
     expect(v.reason).toContain("passe SANS le patch");
+
+    // Référence patch en place, puis contrôle patch remisé : la sonde doit
+    // avoir vu le fichier source disparaître entre les deux.
+    const seen = readFileSync(join(repo, "probe.log"), "utf8").trim().split("\n");
+    expect(seen).toEqual(["present", "absent"]);
   });
 
   it("restaure le patch non suivi et ne laisse aucune remise", async () => {
