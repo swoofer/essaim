@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/swoofer/essaim/compare/v0.12.0...v0.12.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **release:** la compilation Windows échouait et emportait darwin-arm64 ([#129](https://github.com/swoofer/essaim/issues/129)) ([a5fab7d](https://github.com/swoofer/essaim/commit/a5fab7d41f3f64e5381a23695bb336a8efef4c15))
+
 ## [0.12.0](https://github.com/swoofer/essaim/compare/v0.11.0...v0.12.0) (2026-08-26)
 
 
