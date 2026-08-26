@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/swoofer/essaim/compare/v0.11.0...v0.12.0) (2026-08-26)
+
+
+### Features
+
+* **release:** binaire Windows, et la version cesse de répondre 0.0.0 ([#126](https://github.com/swoofer/essaim/issues/126)) ([de4f90a](https://github.com/swoofer/essaim/commit/de4f90aa10b0673c4872f9328ecc784960ac406e))
+
+
+### Bug Fixes
+
+* **falsifiability:** la commande de test codée en dur défaisait le garde-fou ([#127](https://github.com/swoofer/essaim/issues/127)) ([c7dd9b8](https://github.com/swoofer/essaim/commit/c7dd9b8b276e1c3168049fe76ea2c45b0eb37d9e))
+
 ## [0.11.0](https://github.com/swoofer/essaim/compare/v0.10.0...v0.11.0) (2026-08-26)
 
 
