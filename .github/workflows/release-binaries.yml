@@ -41,14 +41,22 @@ jobs:
             platform: darwin
             arch: arm64
             bun_target: bun-darwin-aarch64
+            ext: ""
           - os: macos-15
             platform: darwin
             arch: x64
             bun_target: bun-darwin-x64
+            ext: ""
           - os: ubuntu-latest
             platform: linux
             arch: x64
             bun_target: bun-linux-x64
+            ext: ""
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            bun_target: bun-windows-x64
+            ext: ".exe"
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -71,10 +79,18 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # `shell: bash` sur toutes les plateformes : le shell par défaut du runner
+      # Windows est pwsh, où `mkdir -p`, `cp -r` et `${TAG#v}` sont des erreurs.
+      # Git Bash est préinstallé sur windows-latest.
       - name: Build binary
+        shell: bash
         run: |
           mkdir -p bin
-          bun build --compile cli/index.ts --outfile bin/essaim
+          # La version DOIT être injectée : le binaire compilé n'a pas de
+          # package.json résolvable (bunfs), et sans ce --define `essaim
+          # --version` répond "0.0.0".
+          TAG="${{ inputs.tag || github.ref_name }}"
+          bun build --compile cli/index.ts             --define "__ESSAIM_VERSION__=\"${TAG#v}\""             --outfile "bin/essaim${{ matrix.ext }}"
 
       - name: Sign binary (macOS)
         if: matrix.platform == 'darwin'
@@ -96,12 +112,14 @@ jobs:
           EOF
 
       - name: Verify binary
+        shell: bash
         run: |
-          ./bin/essaim --version
-          ./bin/essaim --help
-          ./bin/essaim list
+          ./bin/essaim${{ matrix.ext }} --version
+          ./bin/essaim${{ matrix.ext }} --help
+          ./bin/essaim${{ matrix.ext }} list
 
       - name: Package tarball
+        shell: bash
         run: |
           # When called via workflow_dispatch / workflow_call, GITHUB_REF_NAME
           # is the caller's branch (typically `main`), not the tag — so we use
@@ -112,7 +130,7 @@ jobs:
           DIST_NAME="essaim-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "dist/${DIST_NAME}/behaviors" "dist/${DIST_NAME}/presets" "dist/${DIST_NAME}/compositions" "dist/${DIST_NAME}/scripts"
 
-          cp bin/essaim "dist/${DIST_NAME}/"
+          cp "bin/essaim${{ matrix.ext }}" "dist/${DIST_NAME}/"
           cp package.json "dist/${DIST_NAME}/"
           cp -r behaviors/* "dist/${DIST_NAME}/behaviors/"
           cp -r presets/* "dist/${DIST_NAME}/presets/"

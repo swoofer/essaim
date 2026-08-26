@@ -19,3 +19,6 @@ reports/
 .claude/
 graphify-out/
 runs/
+
+# Binaire natif produit par `bun build --compile` (release-binaries.yml)
+bin/
