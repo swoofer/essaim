@@ -9,7 +9,7 @@ interface LangDetection {
   extensions: string[];
 }
 
-function detectLanguage(projectPath: string): LangDetection {
+export function detectLanguage(projectPath: string): LangDetection {
   if (fs.existsSync(path.join(projectPath, "package.json"))) {
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, "package.json"), "utf-8"));

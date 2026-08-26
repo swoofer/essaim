@@ -13,6 +13,7 @@ import { resolveEffort, upgradeEffort, parseSeverity, EFFORT_PROFILES, isThinkin
 import { authHeaders } from "../coordinator-auth.js";
 import { verifyFailingTest, type FalsifiabilityDeps } from "./falsifiability.js";
 import { spawn } from "node:child_process";
+import { detectLanguage } from "../orchestrator/scanner.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -120,11 +121,24 @@ export interface AgentLoopLogger {
 }
 
 /**
- * Commande de test du dépôt cible. `vitest run <fichiers>` filtre par chemin,
- * donc seuls les tests que l'agent vient d'écrire sont rejoués — pas les 64
- * fichiers de la suite.
+ * Commande de test DU DÉPÔT CIBLE, pas du nôtre.
+ *
+ * Codée en dur à `pnpm exec vitest run`, elle défaisait le garde-fou sur tout
+ * dépôt qui n'est pas pnpm+vitest : la commande échouait faute de vitest, et
+ * cet échec se lisait comme « le test échoue sans le patch ». On réutilise la
+ * détection du scanner — même source de vérité que le reste de l'orchestrateur
+ * — appliquée au worktree réel de l'agent.
+ *
+ * La plupart des lanceurs filtrent par chemin (`vitest run <f>`, `pytest <f>`),
+ * donc seuls les tests que l'agent vient d'écrire sont rejoués. Ceux qui ne le
+ * font pas (`go test ./...`, `cargo test`) échoueront sur l'argument ajouté —
+ * la mesure de référence de `verifyFailingTest` transforme alors le cas en
+ * abandon explicite et journalisé, plus en acceptation silencieuse.
  */
-const TEST_COMMAND = { cmd: "pnpm", args: ["exec", "vitest", "run"] };
+function testCommandFor(workspacePath: string): { cmd: string; args: string[] } {
+  const parts = detectLanguage(workspacePath).test_command.trim().split(/\s+/);
+  return { cmd: parts[0] || "npm", args: parts.slice(1) };
+}
 
 /** Exécuteur réel pour le contrôle de falsifiabilité. Ne jette jamais. */
 function gitExec(cwd: string): FalsifiabilityDeps {
@@ -1100,7 +1114,7 @@ export async function runAgentLoop(
                 // Mesuré : un agent a « corrigé » deux champs non contrôlables
                 // par le moteur, avec un test qui passait avant comme après.
                 const verdict = phase.requireFailingTest
-                  ? await verifyFailingTest(gitExec(config.workspacePath), TEST_COMMAND)
+                  ? await verifyFailingTest(gitExec(config.workspacePath), testCommandFor(config.workspacePath))
                   : null;
                 if (verdict && !verdict.falsifiable) {
                   logger.warn(`Work-stealing: DONE refusé — ${verdict.reason}`, {
