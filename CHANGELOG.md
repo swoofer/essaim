@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.0](https://github.com/swoofer/essaim/compare/v0.10.0...v0.11.0) (2026-08-26)
+
+
+### Features
+
+* **agent-loop:** un DONE: n'est plus accepté sans test qui échoue (opt-in) ([#124](https://github.com/swoofer/essaim/issues/124)) ([dd70f0a](https://github.com/swoofer/essaim/commit/dd70f0a0b268a9156a5c1e7aa3b88cab5a580791))
+
+
+### Bug Fixes
+
+* **coordination:** le plan révisé d'un ADJUST atteint enfin les pairs ([#108](https://github.com/swoofer/essaim/issues/108)) ([#120](https://github.com/swoofer/essaim/issues/120)) ([53ceee5](https://github.com/swoofer/essaim/commit/53ceee5fb73fd65c2a316879cdbd30f69457cbc8))
+* **falsifiability:** git repliait les fichiers non suivis, le garde-fou passait à côté ([#125](https://github.com/swoofer/essaim/issues/125)) ([48407eb](https://github.com/swoofer/essaim/commit/48407eba877a3b690ffa6aeac5ddcf085b2f9514))
+* **orchestrator:** vise 127.0.0.1, pas localhost — le coordinator n'écoute pas en IPv6 ([#122](https://github.com/swoofer/essaim/issues/122)) ([13b5044](https://github.com/swoofer/essaim/commit/13b50449081b7a7fc29a529290fe613c5da3c701))
+* **work-stealing:** rend les abandons diagnosticables et moins mécaniques ([#123](https://github.com/swoofer/essaim/issues/123)) ([533d4a5](https://github.com/swoofer/essaim/commit/533d4a5bb6b7af61dd1db96f285e398aecc4861f))
+
 ## [0.10.0](https://github.com/swoofer/essaim/compare/v0.9.0...v0.10.0) (2026-08-24)
 
 
