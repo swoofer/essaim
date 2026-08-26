@@ -35,6 +35,9 @@ concurrency:
 jobs:
   build:
     strategy:
+      # Sans ceci, l'échec d'UNE plateforme annule les autres : la 0.12.0 a
+      # perdu darwin-arm64 en dommage collatéral de l'échec Windows.
+      fail-fast: false
       matrix:
         include:
           - os: macos-14
@@ -77,7 +80,13 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      - run: pnpm install --frozen-lockfile
+      # `--ignore-scripts` : `better-sqlite3` (transitif via mcp-coordinator)
+      # n'a de prebuild que pour darwin, donc les autres plateformes le
+      # compilent depuis les sources — ce qui échoue sur Windows faute de
+      # Visual Studio. Le code d'essaim ne le référence jamais et le binaire
+      # bun n'en a pas besoin : l'étape Verify ci-dessous le prouve sur les
+      # quatre plateformes.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       # `shell: bash` sur toutes les plateformes : le shell par défaut du runner
       # Windows est pwsh, où `mkdir -p`, `cp -r` et `${TAG#v}` sont des erreurs.
