@@ -63,7 +63,11 @@ export async function verifyFailingTest(
   deps: FalsifiabilityDeps,
   testCommand: { cmd: string; args: string[] },
 ): Promise<FalsifiabilityVerdict> {
-  const status = await deps.exec("git", ["status", "--porcelain"]);
+  // `--untracked-files=all` est obligatoire : sans lui, git REPLIE un
+  // répertoire entièrement non suivi en une seule entrée (`?? tests/`) et le
+  // fichier de test que l'agent vient d'écrire n'est jamais vu — le verdict
+  // devient « aucun fichier de test » sur une tâche qui en a bien produit un.
+  const status = await deps.exec("git", ["status", "--porcelain", "--untracked-files=all"]);
   if (status.code !== 0) {
     return { falsifiable: true, reason: "git status indisponible — contrôle sauté", testFiles: [], sourceFiles: [] };
   }
@@ -81,7 +85,10 @@ export async function verifyFailingTest(
     return { falsifiable: true, reason: "test ajouté sans patch de production", testFiles, sourceFiles };
   }
 
-  const stash = await deps.exec("git", ["stash", "push", "--quiet", "--", ...sourceFiles]);
+  // `--include-untracked` : un patch qui CRÉE un fichier source ne serait pas
+  // remisé sans lui, la remise échouerait, et le contrôle s'ouvrirait en grand
+  // sur exactement le cas qu'il doit surveiller.
+  const stash = await deps.exec("git", ["stash", "push", "--quiet", "--include-untracked", "--", ...sourceFiles]);
   if (stash.code !== 0) {
     return { falsifiable: true, reason: "remise impossible — contrôle sauté", testFiles, sourceFiles };
   }
