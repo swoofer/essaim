@@ -41,6 +41,28 @@ export interface TokenUsage {
   cacheCreationTokens: number; // input written to prompt cache (expensive, one-time)
 }
 
+/**
+ * Compactions de contexte observées pendant UN envoi.
+ *
+ * C'est le signal qui lève l'ambiguïté de `error_max_turns`. Sans lui, un
+ * abandon veut dire « plafond de tours trop bas » — remède : monter maxTurns.
+ * Avec lui, il veut dire « la fenêtre de contexte a débordé », et le remède est
+ * OPPOSÉ : DESCENDRE maxTurns, sinon on remplit la fenêtre plus vite et on paie
+ * deux compactions pour le même abandon.
+ *
+ * Voir le commentaire de EFFORT_PROFILES.mid dans effort.ts : maxTurns y a été
+ * DOUBLÉ (8 → 16) sur la foi de « 21 error_max_turns pour 19 tâches
+ * abandonnées ». Ce compteur est ce qui permet enfin de qualifier ce 21.
+ */
+export interface CompactionInfo {
+  /** Nombre d'événements system/compact_boundary reçus pendant l'envoi. */
+  count: number;
+  /** Somme des tokens de contexte AVANT compaction, tous événements confondus. */
+  preTokens: number;
+  /** Somme des tokens APRÈS compaction. 0 si le CLI ne publie pas ce champ. */
+  postTokens: number;
+}
+
 export interface AssistantResponse {
   content: string;
   toolCalls: ToolCall[];
@@ -50,6 +72,12 @@ export interface AssistantResponse {
   rateLimited: boolean;
   rateLimitResetsAt?: number;  // Unix timestamp (seconds)
   tokens: TokenUsage;
+  /**
+   * Compactions subies pendant cet envoi. TOUJOURS présent — vaut
+   * `{ count: 0, preTokens: 0, postTokens: 0 }` quand rien n'a été compacté,
+   * pour que l'appelant n'ait jamais à tester undefined.
+   */
+  compaction: CompactionInfo;
   /**
    * Subtype du `result` renvoyé par le CLI : "success", "error_max_turns", …
    *
@@ -105,6 +133,10 @@ export class BudgetExceededError extends Error {
 
 export type StreamEvent =
   | { type: "system"; subtype: "init"; session_id?: string; [k: string]: unknown }
+  // Émis quand le CLI compacte la fenêtre de contexte. La forme du payload est
+  // SUPPOSÉE (voir readCompactTokens) : d'où l'index signature plutôt que des
+  // champs typés qu'on ne peut pas vérifier depuis ce dépôt.
+  | { type: "system"; subtype: "compact_boundary"; [k: string]: unknown }
   | { type: "system"; subtype: "hook_started"; [k: string]: unknown }
   | { type: "system"; subtype: "hook_response"; [k: string]: unknown }
   | { type: "assistant"; message: { role: "assistant"; content: ContentBlock[] }; [k: string]: unknown }
@@ -117,6 +149,30 @@ type ContentBlock =
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
 
 const NOISE_SUBTYPES = new Set(["hook_started", "hook_response"]);
+
+/**
+ * Lecture DÉFENSIVE du payload d'un compact_boundary.
+ *
+ * La forme exacte n'est PAS vérifiable depuis ce dépôt : node_modules ne
+ * contient que @anthropic-ai/sdk (le client HTTP de l'API), jamais les types du
+ * flux du CLI. On SUPPOSE `compact_metadata: { pre_tokens, post_tokens }` et on
+ * tolère les mêmes clés à la racine de l'événement. Tout champ absent, non
+ * numérique, null ou NaN vaut 0 — jamais une exception.
+ *
+ * Conséquence VOULUE : un événement de forme inconnue est quand même COMPTÉ par
+ * l'appelant, seuls ses tokens restent à 0. Le compteur d'occurrences — la
+ * moitié qui sert au diagnostic — reste juste quelle que soit la forme.
+ */
+function readCompactTokens(event: Record<string, unknown>): { pre: number; post: number } {
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  // `?? {}` couvre null/undefined ; un metadata non-objet (string, number)
+  // donne simplement undefined sur ses propriétés, donc 0 après num().
+  const meta = (event.compact_metadata ?? {}) as Record<string, unknown>;
+  return {
+    pre: num(meta.pre_tokens) || num(event.pre_tokens),
+    post: num(meta.post_tokens) || num(event.post_tokens),
+  };
+}
 
 /**
  * Produce a short human-readable summary of a tool_use input so the flow log
@@ -295,6 +351,8 @@ function runOneTurn(
     let resolved = false;
     let rateLimitResetsAt: number | undefined;
     let firstEventLogged = false;
+    // Accumulé sur tout l'envoi : le CLI peut compacter plusieurs fois par tour.
+    const compaction: CompactionInfo = { count: 0, preTokens: 0, postTokens: 0 };
 
     child.stderr?.on("data", (chunk: Buffer) => { stderrBuf += chunk.toString(); });
 
@@ -308,6 +366,17 @@ function runOneTurn(
           resultSessionId = event.session_id;
           log.info(`session ready (id=${event.session_id}, +${Date.now() - turnStart}ms)`);
         }
+        return;
+      }
+      if (event.type === "system" && event.subtype === "compact_boundary") {
+        const { pre, post } = readCompactTokens(event as Record<string, unknown>);
+        compaction.count++;
+        compaction.preTokens += pre;
+        compaction.postTokens += post;
+        // warn et non debug : une compaction est l'explication la plus probable
+        // d'un error_max_turns qui suit, et on veut la voir au niveau de log
+        // par défaut (LOG_LEVEL=info).
+        log.warn(`context compacted (#${compaction.count})`, { preTokens: pre, postTokens: post });
         return;
       }
       if (event.type === "system" && NOISE_SUBTYPES.has(event.subtype)) return;
@@ -351,9 +420,9 @@ function runOneTurn(
           cacheCreationTokens: (usageRaw.cache_creation_input_tokens as number) ?? 0,
         };
         if (subtype !== "success") {
-          log.warn(`result with non-success subtype: ${subtype ?? "?"} — resolving with partial content`);
+          log.warn(`result with non-success subtype: ${subtype ?? "?"} — resolving with partial content`, { compactions: compaction.count });
         } else {
-          log.info("turn complete", { durationMs: (eventRec.duration_ms as number) ?? 0, toolCalls: toolCalls.length, contentLength: content.length, rateLimited: isRateLimited, tokens });
+          log.info("turn complete", { durationMs: (eventRec.duration_ms as number) ?? 0, toolCalls: toolCalls.length, contentLength: content.length, rateLimited: isRateLimited, tokens, compactions: compaction.count });
         }
         resolve({
           content,
@@ -364,6 +433,10 @@ function runOneTurn(
           durationMs: (eventRec.duration_ms as number) ?? 0,
           sessionId: resultSessionId,
           tokens,
+          // COPIE, pas la référence : le flush de fin de buffer (readable "end")
+          // peut encore émettre un événement après le result, ce qui ferait
+          // muter en douce un objet que l'appelant a déjà lu.
+          compaction: { ...compaction },
           subtype,
         });
         return;

@@ -557,5 +557,65 @@ describe("createClaudeStream (spawn-per-turn)", () => {
       delete process.env.ANTHROPIC_API_KEY;
     }
   });
+
+  it("compte les compact_boundary et somme les tokens avant/après", async () => {
+    const client = createClaudeStream({ workspacePath: "/tmp" });
+
+    const p = client.send("long task");
+    const child = mockChildren[0];
+    await new Promise(r => process.nextTick(r));
+    child.stdout.push('{"type":"system","subtype":"init","session_id":"s-compact"}\n');
+    child.stdout.push('{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"auto","pre_tokens":150000,"post_tokens":42000}}\n');
+    child.stdout.push('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"partial"}]}}\n');
+    child.stdout.push('{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"auto","pre_tokens":148000,"post_tokens":40000}}\n');
+    child.stdout.push('{"type":"result","subtype":"error_max_turns","cost_usd":0.05,"duration_ms":3000,"session_id":"s-compact"}\n');
+    child.stdout.push(null);
+
+    const resp = await p;
+    expect(resp.compaction).toEqual({ count: 2, preTokens: 298000, postTokens: 82000 });
+    // C'est la CONJONCTION qui lève l'ambiguïté : error_max_turns AVEC
+    // compaction = fenêtre de contexte pleine, pas plafond de tours trop bas.
+    expect(resp.subtype).toBe("error_max_turns");
+    // Le contenu collecté avant la compaction n'est pas perdu.
+    expect(resp.content).toBe("partial");
+
+    client.close();
+  });
+
+  it("compte une compaction même quand le payload n'a pas la forme supposée", async () => {
+    const client = createClaudeStream({ workspacePath: "/tmp" });
+
+    const p = client.send("hello");
+    const child = mockChildren[0];
+    await new Promise(r => process.nextTick(r));
+    // Trois formes hostiles : aucun metadata, metadata non-objet, tokens non-numériques.
+    child.stdout.push('{"type":"system","subtype":"compact_boundary"}\n');
+    child.stdout.push('{"type":"system","subtype":"compact_boundary","compact_metadata":"pas-un-objet"}\n');
+    child.stdout.push('{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":"beaucoup","post_tokens":null}}\n');
+    child.stdout.push('{"type":"result","subtype":"success","cost_usd":0.01,"duration_ms":100,"session_id":"s1"}\n');
+    child.stdout.push(null);
+
+    const resp = await p;
+    // Le compteur reste juste quelle que soit la forme ; seuls les tokens tombent à 0.
+    expect(resp.compaction).toEqual({ count: 3, preTokens: 0, postTokens: 0 });
+
+    client.close();
+  });
+
+  it("expose compaction à zéro quand aucun compact_boundary n'arrive", async () => {
+    const client = createClaudeStream({ workspacePath: "/tmp" });
+
+    const p = client.send("court");
+    const child = mockChildren[0];
+    await new Promise(r => process.nextTick(r));
+    child.stdout.push('{"type":"result","subtype":"success","cost_usd":0.01,"duration_ms":100,"session_id":"s1"}\n');
+    child.stdout.push(null);
+
+    const resp = await p;
+    // Champ toujours présent : l'appelant n'a jamais à tester undefined.
+    expect(resp.compaction).toEqual({ count: 0, preTokens: 0, postTokens: 0 });
+
+    client.close();
+  });
 });
 
