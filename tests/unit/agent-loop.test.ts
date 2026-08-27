@@ -183,6 +183,60 @@ describe("runAgentLoop", () => {
     expect(mockMqttClose).toHaveBeenCalled();
   });
 
+  it("reporte les compactions du tour dans turnDetails", async () => {
+    mockSend.mockResolvedValue({
+      content: "DONE: patch posé",
+      toolCalls: [],
+      costUsd: 0.05,
+      durationMs: 1000,
+      sessionId: "s1",
+      tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      compaction: { count: 1, preTokens: 150000, postTokens: 42000 },
+    });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.turnDetails).toHaveLength(1);
+    expect(result.turnDetails[0]).toMatchObject({
+      compactions: 1,
+      compactionPreTokens: 150000,
+      compactionPostTokens: 42000,
+    });
+  });
+
+  it("un envoi sans champ compaction ne fait pas tomber la boucle", async () => {
+    // Les ~20 mockSend existants de ce fichier montent des réponses partielles
+    // sans `tokens` ni `compaction` : la lecture doit rester défensive.
+    mockSend.mockResolvedValue({
+      content: "DONE: ok",
+      toolCalls: [],
+      costUsd: 0.01,
+      durationMs: 100,
+      sessionId: "s1",
+    });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.exitReason).toBe("done");
+    expect(result.turnDetails[0].compactions).toBe(0);
+  });
+
+  it("étiquette les tours du mode one-shot phase=main, pas coordination", async () => {
+    // Sans phases, la ventilation par phase du rapport de run rangeait 100 % des
+    // tours sous "coordination" — l'instrument mentait sur un run entier.
+    mockSend.mockResolvedValue({
+      content: "DONE: ok",
+      toolCalls: [],
+      costUsd: 0.01,
+      durationMs: 100,
+      sessionId: "s1",
+    });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.turnDetails[0].phase).toBe("main");
+  });
+
   it("iterates multiple turns until DONE", async () => {
     let turnNum = 0;
     mockSend.mockImplementation(async () => {
@@ -728,6 +782,12 @@ describe("runAgentLoop — phased mode", () => {
     expect(mockClaimNextTask).not.toHaveBeenCalled();
     expect(mockCompleteTask).not.toHaveBeenCalled();
     expect(mockParseDiscoveries).not.toHaveBeenCalled();
+
+    // One-shot mode calls send(config.prompt) with NO opts at the call site —
+    // disallowedForMode() is never consulted on this path. AskUserQuestion
+    // must still be blocked, which only holds if the guard lives in the
+    // shared `send` wrapper rather than in per-phase option construction.
+    expect(mockSend.mock.calls[0][1]?.disallowedTools).toContain("AskUserQuestion");
   });
 
   it("substitutes task description into execute prompt", async () => {
@@ -1373,6 +1433,10 @@ describe("runAgentLoop — phased mode", () => {
     expect(discoverBlocked).toContain("NotebookEdit");
     expect(discoverBlocked).not.toContain("Read");
     expect(discoverBlocked).not.toContain("Bash");
+    // AskUserQuestion attend une réponse humaine qu'un run headless n'a pas,
+    // et --dangerously-skip-permissions ne l'auto-approuve pas : seule une
+    // règle de deny empêche l'agent de rester suspendu, tâche réclamée.
+    expect(discoverBlocked).toContain("AskUserQuestion");
 
     // review (none): block ALL user-facing tools
     const reviewBlocked = mockSend.mock.calls[1][1].disallowedTools;
@@ -1382,9 +1446,10 @@ describe("runAgentLoop — phased mode", () => {
     expect(reviewBlocked).toContain("Edit");
     expect(reviewBlocked).toContain("Write");
     expect(reviewBlocked).toContain("Skill");  // meta tool also blocked
+    expect(reviewBlocked).toContain("AskUserQuestion");
   });
 
-  it("disallowedTools only blocks nested-agent tools in full mode", async () => {
+  it("disallowedTools blocks nested-agent and human-interaction tools in full mode", async () => {
     vi.useFakeTimers();
 
     mockSend.mockResolvedValueOnce({
@@ -1406,10 +1471,12 @@ describe("runAgentLoop — phased mode", () => {
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
     await loopPromise;
 
-    // Nested-agent tools (Task / Agent) stay blocked even in full mode — they
-    // spawn sub-sessions whose tool calls escape the outer turn budget.
+    // Task / Agent spawn sub-sessions whose tool calls escape the outer turn
+    // budget; AskUserQuestion hangs the turn on a human who isn't there.
+    // Both stay blocked even in full mode — the permission bypass grants
+    // neither, and only the deny list actually stops AskUserQuestion.
     const blocked = mockSend.mock.calls[0][1].disallowedTools;
-    expect(blocked).toEqual(expect.arrayContaining(["Task", "Agent"]));
+    expect(blocked).toEqual(expect.arrayContaining(["Task", "Agent", "AskUserQuestion"]));
     expect(blocked).not.toContain("Read");
     expect(blocked).not.toContain("Edit");
   });
@@ -1607,6 +1674,102 @@ describe("runAgentLoop — phased mode", () => {
     // full mode → pass the session-level list through (no filter)
     const discoverOpts = mockSend.mock.calls[0][1];
     expect(discoverOpts.allowedTools).toEqual(["Read", "Edit", "mcp__coordinator__list_threads"]);
+  });
+
+  // promptweave aplatit `current_task` à l'assemblage : déclaré `default: ""`
+  // dans behaviors/phase-execute.yaml, le bloc `{{#if params.current_task}}`
+  // qui l'entoure est supprimé en entier et le marqueur n'existe plus dans le
+  // prompt rendu. Le prompt ci-dessous est donc celui que l'agent reçoit
+  // VRAIMENT. Mesuré : trois agents ont patché le même fichier faute de savoir
+  // quelle tâche ils avaient réclamée.
+  it("injecte la tâche réclamée quand le marqueur a disparu du prompt assemblé", async () => {
+    vi.useFakeTimers();
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Scan", toolsMode: "read_only", loop: false },
+        {
+          name: "execute",
+          // Prompt assemblé réel : plus aucun {{params.current_task}} dedans.
+          prompt: "## Tâche assignée\n\nCorrige la vulnérabilité du fichier de ta tâche.",
+          toolsMode: "full",
+          loop: true,
+        },
+      ],
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "No bugs.",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([]);
+
+    let claimCall = 0;
+    mockClaimNextTask.mockImplementation(async () => {
+      claimCall++;
+      if (claimCall === 1) {
+        return { id: "t-1", description: "src/render.ts:42 — XSS dans renderName()", file: undefined, severity: undefined };
+      }
+      return null;
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "DONE: échappement ajouté",
+      toolCalls: [], costUsd: 0.02, durationMs: 300, sessionId: "s1",
+    });
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    await loopPromise;
+
+    // call 0 = discover, call 1 = execute
+    const executePrompt = mockSend.mock.calls[1][0] as string;
+    expect(executePrompt).toContain("src/render.ts:42 — XSS dans renderName()");
+  });
+
+  // Même aplatissement côté review : `{{params.my_discoveries}}` et
+  // `{{params.existing_threads}}` sont déclarés `default: ""` dans
+  // behaviors/phase-review.yaml et interpolés à VIDE à l'assemblage. Les deux
+  // .replace() ne trouvaient rien : la phase censée dédoublonner NEW/DUPLICATE/
+  // ENRICHES recevait deux listes vides.
+  it("injecte discoveries et threads quand les marqueurs ont disparu du prompt de review", async () => {
+    vi.useFakeTimers();
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Find bugs", toolsMode: "read_only", loop: false },
+        // Prompt assemblé réel : les deux marqueurs ont été aplatis.
+        { name: "review", prompt: "## DATA À ANALYSER\n\nDédoublonne et réponds par REVIEW:.", toolsMode: "none", loop: false },
+        { name: "execute", prompt: "Corrige.", toolsMode: "full", loop: true },
+      ],
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/auth.ts | 42 | Missing null check | critical",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Missing null check", file: "src/auth.ts", line: 42, severity: "critical" },
+    ]);
+    mockFetchExistingThreads.mockResolvedValue("- [t-existing] Vieux bug dans auth.ts");
+
+    mockSend.mockResolvedValueOnce({
+      content: "REVIEW:\n(aucune action)",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "Missing null check" }]);
+
+    // Pool vide : la phase execute ne déclenche aucun send supplémentaire.
+    mockClaimNextTask.mockResolvedValue(null);
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    await loopPromise;
+
+    // call 0 = discover, call 1 = review
+    const reviewPrompt = mockSend.mock.calls[1][0] as string;
+    expect(reviewPrompt).toContain("DISCOVERY:\nsrc/auth.ts | 42 | Missing null check | critical");
+    expect(reviewPrompt).toContain("- [t-existing] Vieux bug dans auth.ts");
   });
 });
 

@@ -1,4 +1,4 @@
-import { createClaudeStream, type ClaudeStreamClient, type AssistantResponse, type SendOptions, type TokenUsage, BudgetExceededError, AbortError } from "./claude-stream.js";
+import { createClaudeStream, type ClaudeStreamClient, type AssistantResponse, type SendOptions, type TokenUsage, type CompactionInfo, BudgetExceededError, AbortError } from "./claude-stream.js";
 import { createMqttListener, type MqttListener, type MqttInterrupt, type InterruptType } from "./mqtt-listener.js";
 import {
   createCoordinationProtocol,
@@ -91,6 +91,12 @@ export interface TurnDetail {
   durationMs: number;
   toolCallCount: number;
   contentLength: number;
+  // Compactions de contexte subies pendant ce tour. `compactions > 0` sur un
+  // tour qui finit en error_max_turns veut dire « fenêtre de contexte pleine »,
+  // pas « plafond de tours trop bas » — deux diagnostics aux remèdes opposés.
+  compactions: number;
+  compactionPreTokens: number;
+  compactionPostTokens: number;
 }
 
 export interface AgentLoopResult {
@@ -275,6 +281,11 @@ const WRITE_USER_TOOLS: readonly string[] = ["Write", "Edit", "NotebookEdit"];
 // is already an agent, nested agents just explode the budget.
 const NESTED_AGENT_TOOLS: readonly string[] = ["Task", "Agent"];
 
+// Bloqué sur TOUS les envois, y compris ceux qui contournent le wrapper `send`
+// (la session d'interruption). Une entrée ajoutée ici s'applique aux deux sites ;
+// deux littéraux séparés laissaient le second dériver en silence.
+const ALWAYS_BLOCKED = ["AskUserQuestion"];
+
 function toolsForMode(
   toolsMode: "read_only" | "full" | "none",
   sessionAllowedTools: string[] | undefined,
@@ -324,6 +335,56 @@ function formatInterrupts(interrupts: MqttInterrupt[]): string {
 
 function formatCoordinationContext(context: string, responses: string): string {
   return `[CONTEXTE COORDINATION] ${context} Réponses des autres agents: ${responses} Que fais-tu? Réponds par CONTINUE, YIELD, ou ADJUST suivi de ton nouveau plan.`;
+}
+
+// promptweave APLATIT les params runtime à l'assemblage. `current_task`,
+// `my_discoveries` et `existing_threads` sont déclarés `default: ""` dans
+// behaviors/phase-execute.yaml, behaviors/security-fix.yaml et
+// behaviors/phase-review.yaml : au rendu du prompt ils valent "", donc le
+// marqueur DISPARAÎT — le bloc `{{#if params.current_task}}` est supprimé en
+// entier, `{{params.my_discoveries}}` est interpolé à vide. Les `.replace()`
+// d'ici ne trouvaient alors plus rien : l'agent d'execute ne savait jamais
+// quelle tâche il avait réclamée, et la phase review dédoublonnait sur deux
+// listes vides.
+//
+// On garde la substitution quand le marqueur a survécu (un prompt qui le
+// contient encore doit être substitué en place, pas se voir accoler un second
+// bloc), et on ne concatène qu'à défaut. Le marqueur survivant est substitué
+// MÊME par une valeur vide : c'est ce que faisait le .replace() d'origine, et
+// laisser un {{params.…}} littéral partir au LLM serait pire que rien.
+function injectRuntimeParam(prompt: string, param: string, heading: string, value: string): string {
+  return injectRuntimeParams(prompt, [{ param, heading, value }]);
+}
+
+/**
+ * Substitue tous les params EN UNE PASSE sur le prompt d'ORIGINE, puis concatène
+ * ceux dont le marqueur n'a pas survécu à l'assemblage.
+ *
+ * La passe unique est le point : enchaîner les injections ferait rescanner la
+ * valeur déjà injectée du param précédent — du texte produit par un LLM, et
+ * essaim lance ses swarms sur ce dépôt, dont les YAML contiennent justement ces
+ * marqueurs — à la recherche du marqueur du suivant.
+ */
+function injectRuntimeParams(
+  prompt: string,
+  params: { param: string; heading: string; value: string }[],
+): string {
+  const byName = new Map(params.map((p) => [p.param, p]));
+  const substituted = new Set<string>();
+  // Remplacement par fonction, délibérément : la valeur de retour d'un replacer
+  // est insérée littéralement, là où une chaîne de remplacement interpréterait
+  // les motifs $&, $' et $backtick du texte produit par le LLM.
+  const out = prompt.replace(/\{\{params\.(\w+)\}\}/g, (marker, name: string) => {
+    const p = byName.get(name);
+    if (!p) return marker;
+    substituted.add(name);
+    return p.value;
+  });
+  return params.reduce(
+    (acc, p) =>
+      substituted.has(p.param) || !p.value ? acc : `${acc}\n\n## ${p.heading}\n${p.value}`,
+    out,
+  );
 }
 
 // ── Coordinator REST helpers ───────────────────────────────────────────
@@ -552,13 +613,25 @@ export async function runAgentLoop(
 
   async function send(content: string, opts?: SendOptions): Promise<AssistantResponse> {
     logger.info(`Sending to claude (${content.length} chars): ${content.slice(0, 80)}...`);
-    const resp = await claude.send(content, opts);
+    // AskUserQuestion attend une réponse humaine ; un run headless n'en a pas.
+    // Le binaire renvoie "ask" sur requiresUserInteraction() AVANT d'évaluer
+    // bypassPermissions : --dangerously-skip-permissions ne le débloque donc
+    // jamais, mais ne le bloque pas non plus — seule une règle de deny mord.
+    // Le merge se fait ici, pas dans disallowedForMode(), parce que la moitié
+    // des envois de cette session ne passent aucune option : coordination
+    // (ask_llm_decide / ask_llm_respond / propose_resolution) et mode one-shot.
+    const blocked = new Set(opts?.disallowedTools ?? []);
+    for (const tool of ALWAYS_BLOCKED) blocked.add(tool);
+    const resp = await claude.send(content, { ...opts, disallowedTools: [...blocked] });
 
     totalCost += resp.costUsd;
     turnsCount++;
 
     // Accumulate tokens
     const t: TokenUsage = resp.tokens ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    // Même prudence que pour `tokens` juste au-dessus, et pour la même raison :
+    // les tests de ce module montent des AssistantResponse partielles.
+    const c: CompactionInfo = resp.compaction ?? { count: 0, preTokens: 0, postTokens: 0 };
     totalTokens.input += t.inputTokens;
     totalTokens.output += t.outputTokens;
     totalTokens.cacheRead += t.cacheReadTokens;
@@ -587,16 +660,25 @@ export async function runAgentLoop(
       durationMs: resp.durationMs,
       toolCallCount: resp.toolCalls.length,
       contentLength: resp.content.length,
+      compactions: c.count,
+      compactionPreTokens: c.preTokens,
+      compactionPostTokens: c.postTokens,
     };
     lastSendMs = resp.durationMs;
     turnDetails.push(detail);
+
+    // Suffixe conditionnel : n'apparaît que si le contexte a été compacté, pour
+    // ne pas noyer la ligne de tour normale sous des zéros.
+    const compactSuffix = c.count > 0
+      ? ` compact=${c.count} (${formatTokens(c.preTokens)}→${formatTokens(c.postTokens)})`
+      : "";
 
     logger.info(
       `Turn ${turnsCount} [${currentPhase}] ${model.split("-")[1] ?? model}: ` +
       `in=${formatTokens(t.inputTokens)} out=${formatTokens(t.outputTokens)} ` +
       `cache-r=${formatTokens(t.cacheReadTokens)} cache-w=${formatTokens(t.cacheCreationTokens)} ` +
       `hit=${cacheHitPct}% cost=$${resp.costUsd.toFixed(4)} ` +
-      `(${resp.durationMs}ms, ${resp.toolCalls.length} tools)`,
+      `(${resp.durationMs}ms, ${resp.toolCalls.length} tools)` + compactSuffix,
     );
 
     return resp;
@@ -681,119 +763,128 @@ export async function runAgentLoop(
     // Fix 5: send to separate session to avoid polluting main context
     logger.info("Processing important MQTT interrupts", { count: important.length, skipped: interrupts.length - important.length });
     const formatted = formatInterrupts(important);
-    await interruptClaude.send(formatted, { maxTurns: 1 });
+    await interruptClaude.send(formatted, { maxTurns: 1, disallowedTools: [...ALWAYS_BLOCKED] });
     return true;
   }
 
   // ── Helper: process protocol actions ──────────────────────────────
 
   async function processProtocolActions(): Promise<void> {
-    for (;;) {
-      const action = protocol.nextAction();
-      if (!action) break;
-      switch (action.type) {
-        case "announce": {
-          const result = await announceViaRest(
-            config.coordinatorUrl,
-            config.agentId,
-            action.work,
-          );
-          protocol.onAnnounceResult(result);
-          break;
-        }
-        case "post_to_thread": {
-          // #108 : porte le plan révisé jusqu'aux pairs. Le coordinator le
-          // rediffuse sur consultations/<id>/messages, donc ils le reçoivent
-          // en push sans qu'on ait à ré-annoncer.
-          await postToThreadViaRest(
-            config.coordinatorUrl,
-            action.threadId,
-            config.agentId,
-            config.agentName,
-            action.content,
-          );
-          break;
-        }
-        case "wait_responses": {
-          // Wait for MQTT messages for the timeout period
-          await new Promise((r) => setTimeout(r, Math.min(action.timeoutMs, RESPONSE_WAIT_MS)));
-          // Process any messages that arrived
-          await processInterrupts();
-          // If still waiting, timeout
-          if (protocol.phase === "waiting" && protocol.currentThreadId) {
-            protocol.onTimeout(protocol.currentThreadId);
+    // Le protocole envoie des tours (ask_llm_decide / ask_llm_respond /
+    // propose_resolution) à n'importe quel moment du run, phases commencées
+    // comprises : sans ça ils étaient facturés à la dernière phase traversée.
+    const prevPhase = currentPhase;
+    currentPhase = "coordination";
+    try {
+      for (;;) {
+        const action = protocol.nextAction();
+        if (!action) break;
+        switch (action.type) {
+          case "announce": {
+            const result = await announceViaRest(
+              config.coordinatorUrl,
+              config.agentId,
+              action.work,
+            );
+            protocol.onAnnounceResult(result);
+            break;
           }
-          break;
-        }
-        case "ask_llm_decide": {
-          const resp = await send(
-            formatCoordinationContext(action.threadId, action.responses),
-          );
-          const content = resp.content.trim();
-          const decision = content.toUpperCase();
-          if (decision.startsWith("YIELD")) {
-            protocol.decideYield();
-          } else if (decision.startsWith("ADJUST")) {
-            // The LLM's reply is "ADJUST" followed by its new plan — strip
-            // the leading token (and any separator like ":" or "-") to get
-            // the plan text.
-            const newPlan = content.slice("ADJUST".length).replace(/^[:\s-]+/, "").trim();
-            if (newPlan) {
-              protocol.decideAdjust(newPlan);
+          case "post_to_thread": {
+            // #108 : porte le plan révisé jusqu'aux pairs. Le coordinator le
+            // rediffuse sur consultations/<id>/messages, donc ils le reçoivent
+            // en push sans qu'on ait à ré-annoncer.
+            await postToThreadViaRest(
+              config.coordinatorUrl,
+              action.threadId,
+              config.agentId,
+              config.agentName,
+              action.content,
+            );
+            break;
+          }
+          case "wait_responses": {
+            // Wait for MQTT messages for the timeout period
+            await new Promise((r) => setTimeout(r, Math.min(action.timeoutMs, RESPONSE_WAIT_MS)));
+            // Process any messages that arrived
+            await processInterrupts();
+            // If still waiting, timeout
+            if (protocol.phase === "waiting" && protocol.currentThreadId) {
+              protocol.onTimeout(protocol.currentThreadId);
+            }
+            break;
+          }
+          case "ask_llm_decide": {
+            const resp = await send(
+              formatCoordinationContext(action.threadId, action.responses),
+            );
+            const content = resp.content.trim();
+            const decision = content.toUpperCase();
+            if (decision.startsWith("YIELD")) {
+              protocol.decideYield();
+            } else if (decision.startsWith("ADJUST")) {
+              // The LLM's reply is "ADJUST" followed by its new plan — strip
+              // the leading token (and any separator like ":" or "-") to get
+              // the plan text.
+              const newPlan = content.slice("ADJUST".length).replace(/^[:\s-]+/, "").trim();
+              if (newPlan) {
+                protocol.decideAdjust(newPlan);
+              } else {
+                // Malformed ADJUST (no plan attached) — don't let it wedge the
+                // loop on a plan we don't have. Fall back to the safe default.
+                logger.warn("ADJUST decision had no plan attached — falling back to CONTINUE", {
+                  threadId: action.threadId,
+                });
+                protocol.decideContinue();
+              }
             } else {
-              // Malformed ADJUST (no plan attached) — don't let it wedge the
-              // loop on a plan we don't have. Fall back to the safe default.
-              logger.warn("ADJUST decision had no plan attached — falling back to CONTINUE", {
-                threadId: action.threadId,
-              });
               protocol.decideContinue();
             }
-          } else {
-            protocol.decideContinue();
+            break;
           }
-          break;
-        }
-        case "ask_llm_respond": {
-          const respondResp = await send(`Réponds au thread ${action.threadId}:\n${action.context}`);
-          // Post the LLM's response to the coordinator via REST
-          await postToThreadViaRest(
-            config.coordinatorUrl,
-            action.threadId,
-            config.agentId,
-            config.agentName,
-            respondResp.content,
-          ).catch((err) => logger.warn("Failed to post to thread", { error: (err as Error).message }));
-          break;
-        }
-        case "propose_resolution": {
-          // Ask LLM for a summary, then propose via REST
-          const summaryResp = await send(
-            `Le travail est terminé. Résume en 1-2 phrases ce que tu as fait pour le thread ${action.threadId}.`,
-          );
-          await proposeResolutionViaRest(
-            config.coordinatorUrl,
-            action.threadId,
-            config.agentId,
-            summaryResp.content,
-          ).catch((err) => logger.warn("Failed to propose resolution", { error: (err as Error).message }));
-          protocol.onResolutionProposed(action.threadId);
-          break;
-        }
-        case "wait_approvals": {
-          await new Promise((r) => setTimeout(r, Math.min(action.timeoutMs, APPROVAL_WAIT_MS)));
-          await processInterrupts();
-          if (protocol.phase === "resolving" && protocol.currentThreadId) {
-            protocol.onTimeout(protocol.currentThreadId);
+          case "ask_llm_respond": {
+            const respondResp = await send(`Réponds au thread ${action.threadId}:\n${action.context}`);
+            // Post the LLM's response to the coordinator via REST
+            await postToThreadViaRest(
+              config.coordinatorUrl,
+              action.threadId,
+              config.agentId,
+              config.agentName,
+              respondResp.content,
+            ).catch((err) => logger.warn("Failed to post to thread", { error: (err as Error).message }));
+            break;
           }
-          break;
+          case "propose_resolution": {
+            // Ask LLM for a summary, then propose via REST
+            const summaryResp = await send(
+              `Le travail est terminé. Résume en 1-2 phrases ce que tu as fait pour le thread ${action.threadId}.`,
+            );
+            await proposeResolutionViaRest(
+              config.coordinatorUrl,
+              action.threadId,
+              config.agentId,
+              summaryResp.content,
+            ).catch((err) => logger.warn("Failed to propose resolution", { error: (err as Error).message }));
+            protocol.onResolutionProposed(action.threadId);
+            break;
+          }
+          case "wait_approvals": {
+            await new Promise((r) => setTimeout(r, Math.min(action.timeoutMs, APPROVAL_WAIT_MS)));
+            await processInterrupts();
+            if (protocol.phase === "resolving" && protocol.currentThreadId) {
+              protocol.onTimeout(protocol.currentThreadId);
+            }
+            break;
+          }
+          case "work":
+            // Proceed to work loop
+            return;
+          case "done":
+            summary = action.summary;
+            return;
         }
-        case "work":
-          // Proceed to work loop
-          return;
-        case "done":
-          summary = action.summary;
-          return;
       }
+    } finally {
+      currentPhase = prevPhase;
     }
   }
 
@@ -902,10 +993,12 @@ export async function runAgentLoop(
               logger.debug(`Review: existing threads:\n${existingThreads}`);
               logger.debug(`Review: my discovery content (${discoveryContent.length} chars)`);
 
-              // Inject both lists into the review prompt
-              const reviewPrompt = phase.prompt
-                .replace(/\{\{params\.my_discoveries\}\}/g, discoveryContent)
-                .replace(/\{\{params\.existing_threads\}\}/g, existingThreads);
+              // Inject both lists into the review prompt — substitution quand le
+              // marqueur a survécu à l'assemblage, concaténation sinon.
+              const reviewPrompt = injectRuntimeParams(phase.prompt, [
+                { param: "my_discoveries", heading: "Tes trouvailles (de la phase discovery)", value: discoveryContent },
+                { param: "existing_threads", heading: "Threads déjà ouverts par d'autres agents", value: existingThreads },
+              ]);
 
               const reviewProfile = phaseEffortProfile(phase);
               const reviewTools = toolsForMode(phase.toolsMode, config.allowedTools);
@@ -1057,7 +1150,7 @@ export async function runAgentLoop(
               // (swoofer/mcp-coordinator#258). Un commentaire qui affirmait le
               // contraire de son propre module a déjà envoyé un triage sur une
               // fausse piste (#107).
-              let taskPrompt = phase.prompt.replace(/\{\{params\.current_task\}\}/g, task.description);
+              let taskPrompt = injectRuntimeParam(phase.prompt, "current_task", "Détails de la tâche", task.description);
               if (task.relatedDone?.length) {
                 taskPrompt += `\n\n## Déjà livré sur ce fichier (par un autre agent, ce run)\n`
                   + task.relatedDone.map((s) => `- ${s}`).join("\n")
@@ -1209,6 +1302,7 @@ export async function runAgentLoop(
         // ── ONE-SHOT MODE (backward compat) ──
         // ③ WORK LOOP — send initial prompt, then iterate
         logger.info(`Phase 3: work loop (protocol.phase=${protocol.phase})`);
+        currentPhase = "main";
         const initialResp = await send(config.prompt);
         if (hasDoneMarker(initialResp.content)) {
           summary = extractDoneSummary(initialResp.content, "Complete");
