@@ -27,8 +27,22 @@ jobs:
           fi
           echo "OK — aucune trace mekova."
 
+  # Windows est à la fois la plateforme de développement de ce dépôt et une
+  # cible livrée (release-binaries.yml publie essaim-<version>-win32-x64.tar.gz),
+  # et pourtant rien ne l'exerçait ici : les deux jobs étaient sur ubuntu-latest.
+  # C'est ce trou qui a laissé passer le résolveur de plateforme de
+  # cli/self-update.ts, qui servait l'artefact Linux aux utilisateurs Windows.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # Même raison que dans release-binaries.yml : sans ceci, l'échec d'UNE
+      # jambe annule l'autre, et on perd l'information qui compte — la
+      # régression est-elle globale ou spécifique à Windows ?
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

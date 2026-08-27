@@ -232,7 +232,7 @@ essaim ships a CLI binary. All commands:
 | `essaim scan <path>` | Auto-detect project language, structure, test framework |
 | `essaim init [path] [--url url] [--name name] [--modules list]` | Install hooks + MCP config on a project |
 | `essaim list` | List the templates the CLI ships with |
-| `essaim self-update` | Update to the latest release |
+| `essaim self-update` | Update the native binary to the latest release (macOS/Linux). On Windows it refuses and prints the manual route — `npm install -g essaim@latest`, or the `win32-x64` tarball — because Windows locks the running executable. |
 
 ### Examples
 

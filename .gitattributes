@@ -1,0 +1,6 @@
+# Les tests shell (tests/*.test.sh) et les hooks de scripts/ sont exécutés par
+# bash — y compris sur Windows (Git Bash) et sur le runner windows-latest, où
+# core.autocrlf=true est le défaut. Sans cette règle ils sortent du checkout en
+# CRLF et bash meurt sur « $'\r': command not found », ce qui noierait les vrais
+# échecs Windows sous du bruit d'encodage.
+*.sh text eol=lf
