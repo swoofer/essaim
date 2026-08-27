@@ -326,6 +326,29 @@ function formatCoordinationContext(context: string, responses: string): string {
   return `[CONTEXTE COORDINATION] ${context} Réponses des autres agents: ${responses} Que fais-tu? Réponds par CONTINUE, YIELD, ou ADJUST suivi de ton nouveau plan.`;
 }
 
+// promptweave APLATIT les params runtime à l'assemblage. `current_task`,
+// `my_discoveries` et `existing_threads` sont déclarés `default: ""` dans
+// behaviors/phase-execute.yaml, behaviors/security-fix.yaml et
+// behaviors/phase-review.yaml : au rendu du prompt ils valent "", donc le
+// marqueur DISPARAÎT — le bloc `{{#if params.current_task}}` est supprimé en
+// entier, `{{params.my_discoveries}}` est interpolé à vide. Les `.replace()`
+// d'ici ne trouvaient alors plus rien : l'agent d'execute ne savait jamais
+// quelle tâche il avait réclamée, et la phase review dédoublonnait sur deux
+// listes vides.
+//
+// On garde la substitution quand le marqueur a survécu (un prompt qui le
+// contient encore doit être substitué en place, pas se voir accoler un second
+// bloc), et on ne concatène qu'à défaut. Le marqueur survivant est substitué
+// MÊME par une valeur vide : c'est ce que faisait le .replace() d'origine, et
+// laisser un {{params.…}} littéral partir au LLM serait pire que rien.
+function injectRuntimeParam(prompt: string, param: string, heading: string, value: string): string {
+  const marker = `{{params.${param}}}`;
+  // split/join et pas replace : value est du texte produit par un LLM, et
+  // String.replace interprète les motifs $&, $' et $backtick dans le remplacement.
+  if (prompt.includes(marker)) return prompt.split(marker).join(value);
+  return value ? `${prompt}\n\n## ${heading}\n${value}` : prompt;
+}
+
 // ── Coordinator REST helpers ───────────────────────────────────────────
 
 async function coordinatorPost(
@@ -1057,7 +1080,7 @@ export async function runAgentLoop(
               // (swoofer/mcp-coordinator#258). Un commentaire qui affirmait le
               // contraire de son propre module a déjà envoyé un triage sur une
               // fausse piste (#107).
-              let taskPrompt = phase.prompt.replace(/\{\{params\.current_task\}\}/g, task.description);
+              let taskPrompt = injectRuntimeParam(phase.prompt, "current_task", "Détails de la tâche", task.description);
               if (task.relatedDone?.length) {
                 taskPrompt += `\n\n## Déjà livré sur ce fichier (par un autre agent, ce run)\n`
                   + task.relatedDone.map((s) => `- ${s}`).join("\n")

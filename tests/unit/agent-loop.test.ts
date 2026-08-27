@@ -1608,6 +1608,57 @@ describe("runAgentLoop — phased mode", () => {
     const discoverOpts = mockSend.mock.calls[0][1];
     expect(discoverOpts.allowedTools).toEqual(["Read", "Edit", "mcp__coordinator__list_threads"]);
   });
+
+  // promptweave aplatit `current_task` à l'assemblage : déclaré `default: ""`
+  // dans behaviors/phase-execute.yaml, le bloc `{{#if params.current_task}}`
+  // qui l'entoure est supprimé en entier et le marqueur n'existe plus dans le
+  // prompt rendu. Le prompt ci-dessous est donc celui que l'agent reçoit
+  // VRAIMENT. Mesuré : trois agents ont patché le même fichier faute de savoir
+  // quelle tâche ils avaient réclamée.
+  it("injecte la tâche réclamée quand le marqueur a disparu du prompt assemblé", async () => {
+    vi.useFakeTimers();
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Scan", toolsMode: "read_only", loop: false },
+        {
+          name: "execute",
+          // Prompt assemblé réel : plus aucun {{params.current_task}} dedans.
+          prompt: "## Tâche assignée\n\nCorrige la vulnérabilité du fichier de ta tâche.",
+          toolsMode: "full",
+          loop: true,
+        },
+      ],
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "No bugs.",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([]);
+
+    let claimCall = 0;
+    mockClaimNextTask.mockImplementation(async () => {
+      claimCall++;
+      if (claimCall === 1) {
+        return { id: "t-1", description: "src/render.ts:42 — XSS dans renderName()", file: undefined, severity: undefined };
+      }
+      return null;
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "DONE: échappement ajouté",
+      toolCalls: [], costUsd: 0.02, durationMs: 300, sessionId: "s1",
+    });
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    await loopPromise;
+
+    // call 0 = discover, call 1 = execute
+    const executePrompt = mockSend.mock.calls[1][0] as string;
+    expect(executePrompt).toContain("src/render.ts:42 — XSS dans renderName()");
+  });
 });
 
 
