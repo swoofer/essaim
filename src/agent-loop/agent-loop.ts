@@ -575,7 +575,16 @@ export async function runAgentLoop(
 
   async function send(content: string, opts?: SendOptions): Promise<AssistantResponse> {
     logger.info(`Sending to claude (${content.length} chars): ${content.slice(0, 80)}...`);
-    const resp = await claude.send(content, opts);
+    // AskUserQuestion attend une réponse humaine ; un run headless n'en a pas.
+    // Le binaire renvoie "ask" sur requiresUserInteraction() AVANT d'évaluer
+    // bypassPermissions : --dangerously-skip-permissions ne le débloque donc
+    // jamais, mais ne le bloque pas non plus — seule une règle de deny mord.
+    // Le merge se fait ici, pas dans disallowedForMode(), parce que la moitié
+    // des envois de cette session ne passent aucune option : coordination
+    // (ask_llm_decide / ask_llm_respond / propose_resolution) et mode one-shot.
+    const blocked = new Set(opts?.disallowedTools ?? []);
+    blocked.add("AskUserQuestion");
+    const resp = await claude.send(content, { ...opts, disallowedTools: [...blocked] });
 
     totalCost += resp.costUsd;
     turnsCount++;
@@ -704,7 +713,7 @@ export async function runAgentLoop(
     // Fix 5: send to separate session to avoid polluting main context
     logger.info("Processing important MQTT interrupts", { count: important.length, skipped: interrupts.length - important.length });
     const formatted = formatInterrupts(important);
-    await interruptClaude.send(formatted, { maxTurns: 1 });
+    await interruptClaude.send(formatted, { maxTurns: 1, disallowedTools: ["AskUserQuestion"] });
     return true;
   }
 

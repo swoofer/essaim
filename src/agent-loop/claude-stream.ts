@@ -74,9 +74,11 @@ export interface SendOptions {
   thinking?: ThinkingLevel;
   allowedTools?: string[];
   // Explicit block list — bypasses the pre-approval loophole where
-  // --dangerously-skip-permissions effectively grants every tool regardless
-  // of what --allowedTools contains. Use this to strictly forbid tool names
-  // for restricted phases (e.g. review phase = no Read/Bash/Edit).
+  // --dangerously-skip-permissions effectively grants every permission-gated
+  // tool regardless of what --allowedTools contains, and is the only lever
+  // against tools that require a human (AskUserQuestion), which the bypass
+  // never grants either. Use this to strictly forbid tool names for
+  // restricted phases (e.g. review phase = no Read/Bash/Edit).
   disallowedTools?: string[];
   // Start a fresh session for this send — don't resume the previous turn's
   // context. Useful when switching models (Haiku can't reuse Sonnet's cache)
@@ -174,8 +176,10 @@ export function buildArgs(opts: ClaudeStreamOptions, prompt: string, resume: boo
   const effectiveAllowedTools = sendOpts?.allowedTools ?? opts.allowedTools;
   if (effectiveAllowedTools?.length) args.push("--allowedTools", effectiveAllowedTools.join(","));
   // Per-send disallowedTools is the only reliable way to block tools when
-  // --dangerously-skip-permissions is set (that flag auto-approves every
-  // tool, making --allowedTools effectively advisory).
+  // --dangerously-skip-permissions is set: that flag auto-approves every tool
+  // that merely needs a permission, making --allowedTools advisory. It does
+  // NOT cover tools requiring a human (AskUserQuestion) — those are checked
+  // before the bypass branch, so only a deny rule stops them.
   if (sendOpts?.disallowedTools?.length) args.push("--disallowedTools", sendOpts.disallowedTools.join(","));
   if (!resume && opts.sessionId) args.push("--session-id", opts.sessionId);
   const effectiveModel = sendOpts?.model ?? opts.model;

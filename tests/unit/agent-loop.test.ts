@@ -728,6 +728,12 @@ describe("runAgentLoop — phased mode", () => {
     expect(mockClaimNextTask).not.toHaveBeenCalled();
     expect(mockCompleteTask).not.toHaveBeenCalled();
     expect(mockParseDiscoveries).not.toHaveBeenCalled();
+
+    // One-shot mode calls send(config.prompt) with NO opts at the call site —
+    // disallowedForMode() is never consulted on this path. AskUserQuestion
+    // must still be blocked, which only holds if the guard lives in the
+    // shared `send` wrapper rather than in per-phase option construction.
+    expect(mockSend.mock.calls[0][1]?.disallowedTools).toContain("AskUserQuestion");
   });
 
   it("substitutes task description into execute prompt", async () => {
@@ -1373,6 +1379,10 @@ describe("runAgentLoop — phased mode", () => {
     expect(discoverBlocked).toContain("NotebookEdit");
     expect(discoverBlocked).not.toContain("Read");
     expect(discoverBlocked).not.toContain("Bash");
+    // AskUserQuestion attend une réponse humaine qu'un run headless n'a pas,
+    // et --dangerously-skip-permissions ne l'auto-approuve pas : seule une
+    // règle de deny empêche l'agent de rester suspendu, tâche réclamée.
+    expect(discoverBlocked).toContain("AskUserQuestion");
 
     // review (none): block ALL user-facing tools
     const reviewBlocked = mockSend.mock.calls[1][1].disallowedTools;
@@ -1382,9 +1392,10 @@ describe("runAgentLoop — phased mode", () => {
     expect(reviewBlocked).toContain("Edit");
     expect(reviewBlocked).toContain("Write");
     expect(reviewBlocked).toContain("Skill");  // meta tool also blocked
+    expect(reviewBlocked).toContain("AskUserQuestion");
   });
 
-  it("disallowedTools only blocks nested-agent tools in full mode", async () => {
+  it("disallowedTools blocks nested-agent and human-interaction tools in full mode", async () => {
     vi.useFakeTimers();
 
     mockSend.mockResolvedValueOnce({
@@ -1406,10 +1417,12 @@ describe("runAgentLoop — phased mode", () => {
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
     await loopPromise;
 
-    // Nested-agent tools (Task / Agent) stay blocked even in full mode — they
-    // spawn sub-sessions whose tool calls escape the outer turn budget.
+    // Task / Agent spawn sub-sessions whose tool calls escape the outer turn
+    // budget; AskUserQuestion hangs the turn on a human who isn't there.
+    // Both stay blocked even in full mode — the permission bypass grants
+    // neither, and only the deny list actually stops AskUserQuestion.
     const blocked = mockSend.mock.calls[0][1].disallowedTools;
-    expect(blocked).toEqual(expect.arrayContaining(["Task", "Agent"]));
+    expect(blocked).toEqual(expect.arrayContaining(["Task", "Agent", "AskUserQuestion"]));
     expect(blocked).not.toContain("Read");
     expect(blocked).not.toContain("Edit");
   });
