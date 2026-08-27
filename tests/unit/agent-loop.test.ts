@@ -183,6 +183,44 @@ describe("runAgentLoop", () => {
     expect(mockMqttClose).toHaveBeenCalled();
   });
 
+  it("reporte les compactions du tour dans turnDetails", async () => {
+    mockSend.mockResolvedValue({
+      content: "DONE: patch posé",
+      toolCalls: [],
+      costUsd: 0.05,
+      durationMs: 1000,
+      sessionId: "s1",
+      tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      compaction: { count: 1, preTokens: 150000, postTokens: 42000 },
+    });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.turnDetails).toHaveLength(1);
+    expect(result.turnDetails[0]).toMatchObject({
+      compactions: 1,
+      compactionPreTokens: 150000,
+      compactionPostTokens: 42000,
+    });
+  });
+
+  it("un envoi sans champ compaction ne fait pas tomber la boucle", async () => {
+    // Les ~20 mockSend existants de ce fichier montent des réponses partielles
+    // sans `tokens` ni `compaction` : la lecture doit rester défensive.
+    mockSend.mockResolvedValue({
+      content: "DONE: ok",
+      toolCalls: [],
+      costUsd: 0.01,
+      durationMs: 100,
+      sessionId: "s1",
+    });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.exitReason).toBe("done");
+    expect(result.turnDetails[0].compactions).toBe(0);
+  });
+
   it("iterates multiple turns until DONE", async () => {
     let turnNum = 0;
     mockSend.mockImplementation(async () => {

@@ -493,11 +493,13 @@ describe("runProject — turn details et exit reason dans le rapport", () => {
         turn: 1, phase: "discover", model: "claude-haiku-4-5",
         inputTokens: 120, outputTokens: 40, cacheReadTokens: 900, cacheCreationTokens: 300,
         costUsd: 0, durationMs: 1500, toolCallCount: 3, contentLength: 512,
+        compactions: 0, compactionPreTokens: 0, compactionPostTokens: 0,
       },
       {
         turn: 2, phase: "execute", model: "claude-opus-4-6",
         inputTokens: 80, outputTokens: 220, cacheReadTokens: 1800, cacheCreationTokens: 0,
         costUsd: 0, durationMs: 4200, toolCallCount: 7, contentLength: 2048,
+        compactions: 0, compactionPreTokens: 0, compactionPostTokens: 0,
       },
     ];
 

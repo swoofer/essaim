@@ -1,4 +1,4 @@
-import { createClaudeStream, type ClaudeStreamClient, type AssistantResponse, type SendOptions, type TokenUsage, BudgetExceededError, AbortError } from "./claude-stream.js";
+import { createClaudeStream, type ClaudeStreamClient, type AssistantResponse, type SendOptions, type TokenUsage, type CompactionInfo, BudgetExceededError, AbortError } from "./claude-stream.js";
 import { createMqttListener, type MqttListener, type MqttInterrupt, type InterruptType } from "./mqtt-listener.js";
 import {
   createCoordinationProtocol,
@@ -91,6 +91,12 @@ export interface TurnDetail {
   durationMs: number;
   toolCallCount: number;
   contentLength: number;
+  // Compactions de contexte subies pendant ce tour. `compactions > 0` sur un
+  // tour qui finit en error_max_turns veut dire « fenêtre de contexte pleine »,
+  // pas « plafond de tours trop bas » — deux diagnostics aux remèdes opposés.
+  compactions: number;
+  compactionPreTokens: number;
+  compactionPostTokens: number;
 }
 
 export interface AgentLoopResult {
@@ -591,6 +597,9 @@ export async function runAgentLoop(
 
     // Accumulate tokens
     const t: TokenUsage = resp.tokens ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    // Même prudence que pour `tokens` juste au-dessus, et pour la même raison :
+    // les tests de ce module montent des AssistantResponse partielles.
+    const c: CompactionInfo = resp.compaction ?? { count: 0, preTokens: 0, postTokens: 0 };
     totalTokens.input += t.inputTokens;
     totalTokens.output += t.outputTokens;
     totalTokens.cacheRead += t.cacheReadTokens;
@@ -619,16 +628,25 @@ export async function runAgentLoop(
       durationMs: resp.durationMs,
       toolCallCount: resp.toolCalls.length,
       contentLength: resp.content.length,
+      compactions: c.count,
+      compactionPreTokens: c.preTokens,
+      compactionPostTokens: c.postTokens,
     };
     lastSendMs = resp.durationMs;
     turnDetails.push(detail);
+
+    // Suffixe conditionnel : n'apparaît que si le contexte a été compacté, pour
+    // ne pas noyer la ligne de tour normale sous des zéros.
+    const compactSuffix = c.count > 0
+      ? ` compact=${c.count} (${formatTokens(c.preTokens)}→${formatTokens(c.postTokens)})`
+      : "";
 
     logger.info(
       `Turn ${turnsCount} [${currentPhase}] ${model.split("-")[1] ?? model}: ` +
       `in=${formatTokens(t.inputTokens)} out=${formatTokens(t.outputTokens)} ` +
       `cache-r=${formatTokens(t.cacheReadTokens)} cache-w=${formatTokens(t.cacheCreationTokens)} ` +
       `hit=${cacheHitPct}% cost=$${resp.costUsd.toFixed(4)} ` +
-      `(${resp.durationMs}ms, ${resp.toolCalls.length} tools)`,
+      `(${resp.durationMs}ms, ${resp.toolCalls.length} tools)` + compactSuffix,
     );
 
     return resp;
