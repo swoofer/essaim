@@ -93,8 +93,14 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Durée | ${(r.duration_ms / 1000).toFixed(1)}s |\n`;
     md += `| Agents | ${r.coordinator_metrics.agents_count} |\n`;
     md += `| Threads ouverts | ${r.coordinator_metrics.threads_opened} |\n`;
-    md += `| Consensus | ${r.coordinator_metrics.threads_resolved_consensus} |\n`;
-    md += `| Auto-resolved | ${r.coordinator_metrics.threads_auto_resolved} |\n`;
+    // `threads_resolved_consensus` counts `resolution_proposed` events, not
+    // agreements: on the coordinator side a proposal moves a thread to
+    // `resolving`, never to `resolved`. `threads_auto_resolved` is
+    // `threads_opened - proposals`, clamped to 0. Until the calculation itself
+    // changes (second half of this fix), the labels say what is actually
+    // measured.
+    md += `| Résolutions proposées | ${r.coordinator_metrics.threads_resolved_consensus} |\n`;
+    md += `| Threads sans résolution proposée | ${r.coordinator_metrics.threads_auto_resolved} |\n`;
     md += `| Messages | ${r.coordinator_metrics.messages_exchanged} |\n`;
     md += `| Introspections | ${r.coordinator_metrics.introspections_triggered} |\n`;
     md += `| Hot files | ${r.coordinator_metrics.hot_files.length} |\n`;
