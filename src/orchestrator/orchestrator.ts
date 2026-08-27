@@ -611,6 +611,8 @@ async function _runProjectBody(
       agentResults[i].tokens = loopResult.tokens;
       agentResults[i].cost_by_phase = loopResult.costByPhase;
       agentResults[i].cost_by_model = loopResult.costByModel;
+      agentResults[i].turn_details = loopResult.turnDetails;
+      agentResults[i].exit_reason = loopResult.exitReason;
     }
   }
 

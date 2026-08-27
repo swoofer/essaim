@@ -1,6 +1,7 @@
 // src/types.ts
 import type { ChildProcess } from "child_process";
 import type { MiniProjectSecurity, SecurityRunLedger } from "../security/types.js";
+import type { TurnDetail, ExitReason } from "../agent-loop/agent-loop.js";
 
 export interface AgentConfig {
   id: string;
@@ -120,6 +121,13 @@ export interface AgentResult {
   };
   cost_by_phase?: Record<string, number>;
   cost_by_model?: Record<string, number>;
+  // Per-turn detail: the only place tokens are attributable to a PHASE.
+  // cost_by_phase holds dollars only, and those are all 0 under an OAuth
+  // subscription — the phase breakdown it feeds is structurally empty.
+  turn_details?: TurnDetail[];
+  // Why the loop stopped. exit_code alone cannot tell "died before spending
+  // anything" from "spent, then died".
+  exit_reason?: ExitReason;
 }
 
 export interface ProjectContext {

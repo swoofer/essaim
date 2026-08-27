@@ -4,8 +4,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
-import type { AgentConfig, MiniProject } from "../../src/orchestrator/types.js";
-import type { AgentLoopResult } from "../../src/agent-loop/agent-loop.js";
+import type { AgentConfig, MiniProject, RunResult } from "../../src/orchestrator/types.js";
+import type { AgentLoopResult, TurnDetail } from "../../src/agent-loop/agent-loop.js";
+import { writeReport } from "../../src/orchestrator/reporter.js";
 
 // ── Module mocks ──────────────────────────────────────────────────────────
 // Everything the orchestrator talks to over the network or as a subprocess is
@@ -475,5 +476,60 @@ describe("runProject — resetBase authorization", () => {
     await expect(
       runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" })
     ).resolves.toBeDefined();
+  });
+});
+
+// ── turnDetails / exitReason survivent jusqu'au JSON du rapport ─────────────
+
+describe("runProject — turn details et exit reason dans le rapport", () => {
+  it("recopie turnDetails et exitReason de l'agent-loop jusque dans le JSON écrit", async () => {
+    // Sans le patch, le bloc `if (loopResult)` de l'orchestrateur ne reprend que
+    // turnsCount / totalCostUsd / tokens / costBy* : la ventilation des TOKENS par
+    // phase et la cause de sortie sont calculées puis jetées. Un agent mort
+    // n'apparaît alors qu'en `exit 1`, sans rien pour distinguer « mort avant
+    // d'avoir dépensé » de « a dépensé puis est mort ».
+    const turnDetails: TurnDetail[] = [
+      {
+        turn: 1, phase: "discover", model: "claude-haiku-4-5",
+        inputTokens: 120, outputTokens: 40, cacheReadTokens: 900, cacheCreationTokens: 300,
+        costUsd: 0, durationMs: 1500, toolCallCount: 3, contentLength: 512,
+      },
+      {
+        turn: 2, phase: "execute", model: "claude-opus-4-6",
+        inputTokens: 80, outputTokens: 220, cacheReadTokens: 1800, cacheCreationTokens: 0,
+        costUsd: 0, durationMs: 4200, toolCallCount: 7, contentLength: 2048,
+      },
+    ];
+
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => ({
+      ...makeLoopResult(agent.id, "process_died"),
+      turnDetails,
+    }));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "none", base: TMP_DIR },
+    });
+
+    const result = await runProject(project, "with_coordinator", false, {
+      coordinatorUrl: "http://coordinator.test",
+    });
+
+    // Le rapport s'écrit dans un dossier jetable : `reports/` est gitignoré et
+    // n'a pas à recevoir les écritures d'un test. writeReport retourne le chemin
+    // du .md ; le .json partage le même basename (reporter.ts:82-87).
+    const outDir = path.join(TMP_DIR, "report-out");
+    const mdPath = writeReport([result], outDir);
+    const jsonPath = mdPath.replace(/\.md$/, ".json");
+    const written = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as RunResult[];
+
+    const agent = written[0].agent_results.find((a) => a.agent_id === "a1")!;
+    expect(agent.exit_reason).toBe("process_died");
+    expect(agent.turn_details).toHaveLength(2);
+    // La ventilation par phase — le point de tout l'exercice — arrive intacte.
+    expect(agent.turn_details!.map((d) => d.phase)).toEqual(["discover", "execute"]);
+    expect(agent.turn_details![0].cacheReadTokens).toBe(900);
+    expect(agent.turn_details![1].outputTokens).toBe(220);
   });
 });
