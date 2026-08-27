@@ -1659,6 +1659,51 @@ describe("runAgentLoop — phased mode", () => {
     const executePrompt = mockSend.mock.calls[1][0] as string;
     expect(executePrompt).toContain("src/render.ts:42 — XSS dans renderName()");
   });
+
+  // Même aplatissement côté review : `{{params.my_discoveries}}` et
+  // `{{params.existing_threads}}` sont déclarés `default: ""` dans
+  // behaviors/phase-review.yaml et interpolés à VIDE à l'assemblage. Les deux
+  // .replace() ne trouvaient rien : la phase censée dédoublonner NEW/DUPLICATE/
+  // ENRICHES recevait deux listes vides.
+  it("injecte discoveries et threads quand les marqueurs ont disparu du prompt de review", async () => {
+    vi.useFakeTimers();
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Find bugs", toolsMode: "read_only", loop: false },
+        // Prompt assemblé réel : les deux marqueurs ont été aplatis.
+        { name: "review", prompt: "## DATA À ANALYSER\n\nDédoublonne et réponds par REVIEW:.", toolsMode: "none", loop: false },
+        { name: "execute", prompt: "Corrige.", toolsMode: "full", loop: true },
+      ],
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/auth.ts | 42 | Missing null check | critical",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Missing null check", file: "src/auth.ts", line: 42, severity: "critical" },
+    ]);
+    mockFetchExistingThreads.mockResolvedValue("- [t-existing] Vieux bug dans auth.ts");
+
+    mockSend.mockResolvedValueOnce({
+      content: "REVIEW:\n(aucune action)",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "Missing null check" }]);
+
+    // Pool vide : la phase execute ne déclenche aucun send supplémentaire.
+    mockClaimNextTask.mockResolvedValue(null);
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    await loopPromise;
+
+    // call 0 = discover, call 1 = review
+    const reviewPrompt = mockSend.mock.calls[1][0] as string;
+    expect(reviewPrompt).toContain("DISCOVERY:\nsrc/auth.ts | 42 | Missing null check | critical");
+    expect(reviewPrompt).toContain("- [t-existing] Vieux bug dans auth.ts");
+  });
 });
 
 

@@ -925,10 +925,16 @@ export async function runAgentLoop(
               logger.debug(`Review: existing threads:\n${existingThreads}`);
               logger.debug(`Review: my discovery content (${discoveryContent.length} chars)`);
 
-              // Inject both lists into the review prompt
-              const reviewPrompt = phase.prompt
-                .replace(/\{\{params\.my_discoveries\}\}/g, discoveryContent)
-                .replace(/\{\{params\.existing_threads\}\}/g, existingThreads);
+              // Inject both lists into the review prompt — substitution quand le
+              // marqueur a survécu à l'assemblage, concaténation sinon.
+              let reviewPrompt = injectRuntimeParam(
+                phase.prompt, "my_discoveries",
+                "Tes trouvailles (de la phase discovery)", discoveryContent,
+              );
+              reviewPrompt = injectRuntimeParam(
+                reviewPrompt, "existing_threads",
+                "Threads déjà ouverts par d'autres agents", existingThreads,
+              );
 
               const reviewProfile = phaseEffortProfile(phase);
               const reviewTools = toolsForMode(phase.toolsMode, config.allowedTools);
