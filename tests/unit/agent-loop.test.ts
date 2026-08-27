@@ -221,6 +221,22 @@ describe("runAgentLoop", () => {
     expect(result.turnDetails[0].compactions).toBe(0);
   });
 
+  it("étiquette les tours du mode one-shot phase=main, pas coordination", async () => {
+    // Sans phases, la ventilation par phase du rapport de run rangeait 100 % des
+    // tours sous "coordination" — l'instrument mentait sur un run entier.
+    mockSend.mockResolvedValue({
+      content: "DONE: ok",
+      toolCalls: [],
+      costUsd: 0.01,
+      durationMs: 100,
+      sessionId: "s1",
+    });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.turnDetails[0].phase).toBe("main");
+  });
+
   it("iterates multiple turns until DONE", async () => {
     let turnNum = 0;
     mockSend.mockImplementation(async () => {
