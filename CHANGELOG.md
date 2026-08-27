@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/swoofer/essaim/compare/v0.12.1...v0.13.0) (2026-08-27)
+
+
+### Features
+
+* **agent-loop:** les agents savent enfin sur quoi ils travaillent, et le run devient ventilable ([#131](https://github.com/swoofer/essaim/issues/131)) ([97011ad](https://github.com/swoofer/essaim/commit/97011add38c77aeb50328ea062a8d168e9041141))
+
 ## [0.12.1](https://github.com/swoofer/essaim/compare/v0.12.0...v0.12.1) (2026-08-26)
 
 
