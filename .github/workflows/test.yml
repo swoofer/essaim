@@ -71,7 +71,19 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      - run: pnpm install --frozen-lockfile
+      # Meme drapeau que release-binaries.yml : la jambe qui VERIFIE s'installe
+      # comme la jambe qui LIVRE, sinon un vert ici ne dit plus rien de la
+      # release. `pnpm.onlyBuiltDependencies` (package.json) est une
+      # autorisation permanente de compiler `better-sqlite3` — transitif via
+      # mcp-coordinator — et c'est cette compilation qui a fait tomber la 0.12.0
+      # sur Windows, faute de Visual Studio. Elle est inoffensive AUJOURD'HUI
+      # (13.0.3 n'a aucun script install/postinstall et embarque
+      # prebuilds/win32-x64.node), donc le drapeau ne coute rien ; il ferme la
+      # porte le jour ou une montee de version rouvre ce chemin. Sans risque
+      # verifie : aucun test ne charge la liaison native — importer
+      # mcp-coordinator ne la touche pas, orchestrator-run.test.ts la mocke via
+      # vi.mock et types.test.ts est en `import type`.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - run: pnpm test
 

@@ -90,6 +90,37 @@ describe("computeMetrics", () => {
     expect(metrics.threads_without_consensus).toBe(0);
   });
 
+  // Le clamp `Math.max(0, opened - consensus - autoResolved)` ne protegeait pas
+  // seulement du negatif : il EFFAÇAIT. Une fenetre mixte — des threads ouverts
+  // et jamais resolus, PLUS des thread_resolved appartenant a des threads
+  // ouverts avant le curseur SSE — faisait imprimer « Threads ouverts 4 |
+  // Consensus 5 | Sans consensus 0 », soit un libelle plus optimiste que sa
+  // donnee. Le residu se derive des IDENTIFIANTS, plus des compteurs.
+  it("une fenetre mixte n'efface pas les threads ouverts non resolus", () => {
+    const events = [
+      // Ouverts dans la fenetre, aucun resolu.
+      { id: 1, type: "thread_opened", data: { thread_id: "t1" } },
+      { id: 2, type: "thread_opened", data: { thread_id: "t2" } },
+      { id: 3, type: "thread_opened", data: { thread_id: "t3" } },
+      { id: 4, type: "thread_opened", data: { thread_id: "t4" } },
+      // Resolus dans la fenetre, mais OUVERTS avant le curseur : leur
+      // thread_opened n'est pas la.
+      { id: 5, type: "thread_resolved", data: { thread_id: "old1", resolution_type: "consensus" } },
+      { id: 6, type: "thread_resolved", data: { thread_id: "old2", resolution_type: "consensus" } },
+      { id: 7, type: "thread_resolved", data: { thread_id: "old3", resolution_type: "consensus" } },
+      { id: 8, type: "thread_resolved", data: { thread_id: "old4", resolution_type: "consensus" } },
+      { id: 9, type: "thread_resolved", data: { thread_id: "old5", resolution_type: "auto_resolved" } },
+    ];
+
+    const metrics = computeMetrics(events);
+    expect(metrics.threads_opened).toBe(4);
+    expect(metrics.threads_resolved_consensus).toBe(4);
+    expect(metrics.threads_auto_resolved).toBe(1);
+    // Ancien calcul : Math.max(0, 4 - 4 - 1) = 0 — les quatre threads ouverts
+    // et non resolus disparaissaient du rapport.
+    expect(metrics.threads_without_consensus).toBe(4);
+  });
+
   it("a real run: 4 threads opened, 9 distinct thread_ids proposed, zero real agreement", () => {
     // A real run printed "Threads ouverts 4 | Consensus 9 | Auto-resolved 0".
     // The thread_id dedup (#117) was already in place at that point — the

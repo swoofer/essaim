@@ -112,3 +112,62 @@ describe("#58 — /api/events ne se ferme jamais", () => {
     expect(Date.now() - started).toBeLessThan(BUDGET_MS);
   }, 20000);
 });
+
+// La fenetre d'inactivite (SSE_REPLAY_IDLE_MS = 250 ms) dit « un court silence
+// APRES la rafale ». La boucle de lecture l'honorait des la PREMIERE iteration,
+// avant d'avoir lu le moindre octet : sur une machine chargee — un runner CI a
+// 2 coeurs, par exemple — un premier chunk qui tarde rendait un corps VIDE, et
+// le fichier ci-dessus tombait par intermittence (3 echecs sur un `pnpm test`
+// complet, vert au suivant). Le budget global reste le filet dur.
+describe("le silence d'inactivite ne compte qu'APRES le premier octet", () => {
+  /** Nettement au-dela des 250 ms d'inactivite, nettement en deca des 3 s de budget. */
+  const REPLAY_DELAY_MS = 700;
+
+  let slowServer: Server;
+  let slowUrl: string;
+  const slowSockets: import("node:net").Socket[] = [];
+  const pendingWrites: NodeJS.Timeout[] = [];
+
+  beforeAll(async () => {
+    slowServer = createServer((req, res) => {
+      if (!req.url?.startsWith("/api/events")) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      // Les en-tetes partent tout de suite — c'est ce que fait handleSse — mais
+      // le replay, lui, se fait attendre. Et on ne ferme JAMAIS.
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+      res.flushHeaders();
+      pendingWrites.push(setTimeout(() => res.write(REPLAY), REPLAY_DELAY_MS));
+    });
+    slowServer.on("connection", (s) => slowSockets.push(s));
+    await new Promise<void>((r) => slowServer.listen(0, "127.0.0.1", r));
+    slowUrl = `http://127.0.0.1:${(slowServer.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    for (const t of pendingWrites) clearTimeout(t);
+    for (const s of slowSockets) s.destroy();
+    await new Promise<void>((r) => slowServer.close(() => r()));
+  });
+
+  it("attend le replay au lieu de rendre un corps vide", async () => {
+    // Avant le correctif : la course idle gagne des la premiere iteration, le
+    // corps est "", parseSseEvents ne trouve rien et l'appel renvoie 0.
+    const result = await within(fetchLatestEventId(slowUrl), VERDICT_MS);
+
+    expect(result, "un replay tardif ne doit pas etre lu comme un flux vide").toBe(43);
+  }, 20000);
+
+  it("rend quand meme la main sous le budget documente", async () => {
+    // Le correctif ne doit pas transformer l'attente en « on sort le budget » :
+    // une fois la rafale arrivee, le silence qui suit conclut toujours.
+    const started = Date.now();
+    const result = await within(fetchCoordinatorMetrics(slowUrl, 1), VERDICT_MS);
+
+    const metrics = result as Awaited<ReturnType<typeof fetchCoordinatorMetrics>>;
+    expect(metrics.threads_opened).toBe(2);
+    expect(Date.now() - started).toBeLessThan(BUDGET_MS);
+  }, 20000);
+});

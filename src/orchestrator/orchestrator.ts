@@ -640,6 +640,15 @@ async function _runProjectBody(
     for (const [agentId, wsPath] of workspace.paths) {
       log.info(`  ${agentId}: ${wsPath}  (branch: ${workspace.branches.get(agentId) ?? ""})`);
     }
+    // Preserving costs one branch + one worktree PER AGENT PER RUN, forever.
+    // The recipe belongs here rather than in the README because this is the
+    // moment the pile grows, in front of the person who just grew it, right
+    // under the list of what was kept — no doc lookup between the cost and the
+    // cure. Safe by construction: git refuses `branch -D` on a branch still
+    // checked out in a live worktree, so only orphans go.
+    log.info(
+      "  Cleanup when done: git worktree prune && git branch --list 'mini-project-*' --format='%(refname:short)' | xargs -r git branch -D",
+    );
   }
 
   // 8. Teardown
