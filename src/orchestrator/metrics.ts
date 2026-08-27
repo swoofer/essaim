@@ -47,26 +47,45 @@ export function computeMetrics(events: SseEvent[]): CoordinatorMetrics {
   const messagesPosted = events.filter((e) => e.type === "message_posted");
   const introspectionRequested = events.filter((e) => e.type === "introspection_requested");
   const introspectionCompleted = events.filter((e) => e.type === "introspection_completed");
-  const resolutionProposed = events.filter((e) => e.type === "resolution_proposed");
-  // A thread that cycles contest → re-propose emits MULTIPLE resolution_proposed
-  // events for the same thread_id. Counting them flat both inflates
-  // threads_resolved_consensus and can push threads_auto_resolved negative
-  // (#117) — dedup by thread_id first.
-  const resolvedThreadIds = new Set(
-    resolutionProposed
-      .map((e) => e.data.thread_id)
-      .filter((id): id is string => typeof id === "string"),
-  );
+  // A thread's FINAL state only ever arrives in `thread_resolved`: the
+  // coordinator emits it exactly once, when the table actually flips, carrying
+  // a `resolution_type` of consensus | auto_resolved | timeout | max_rounds |
+  // closed | agent_departure (mcp-coordinator, server-setup.ts, the
+  // consultation.onResolve callback).
+  //
+  // `resolution_proposed`, which this used to read, only ever says "someone
+  // PROPOSED": on the coordinator side it moves a thread to `resolving`, never
+  // to `resolved` (consultation.proposeResolution), and a contested thread
+  // emits one per round.
+  //
+  // A `poisoned` thread — too many unclaims — emits NO event at all: it's a
+  // table UPDATE. It can't show up here, and falls into
+  // threads_without_consensus.
+  const outcomeByThread = new Map<string, string>();
+  for (const e of events) {
+    if (e.type !== "thread_resolved") continue;
+    const id = e.data.thread_id;
+    const type = e.data.resolution_type;
+    if (typeof id === "string" && typeof type === "string") outcomeByThread.set(id, type);
+  }
+  const countOutcome = (want: string): number => {
+    let n = 0;
+    for (const type of outcomeByThread.values()) if (type === want) n++;
+    return n;
+  };
+  const consensus = countOutcome("consensus");
+  const autoResolved = countOutcome("auto_resolved");
 
   return {
     agents_count: 0,
     duration_total_ms: 0,
     threads_opened: threadOpened.length,
-    threads_resolved_consensus: resolvedThreadIds.size,
-    // Guarded: even after dedup this can go negative when the observed event
-    // window doesn't include a thread's own thread_opened event (e.g. it opened
-    // just before an SSE replay cursor) but does include its resolution.
-    threads_auto_resolved: Math.max(0, threadOpened.length - resolvedThreadIds.size),
+    threads_resolved_consensus: consensus,
+    threads_auto_resolved: autoResolved,
+    // Residual, clamped: the event window can contain the resolution of a
+    // thread whose thread_opened precedes the SSE cursor, which would
+    // otherwise push this negative.
+    threads_without_consensus: Math.max(0, threadOpened.length - consensus - autoResolved),
     messages_exchanged: messagesPosted.length,
     conflicts_by_layer,
     introspections_triggered: introspectionRequested.length,

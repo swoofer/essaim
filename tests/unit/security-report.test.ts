@@ -10,7 +10,7 @@ function baseResult(over: Partial<RunResult> = {}): RunResult {
     project_id: "p", project_name: "proj", mode: "with_coordinator", duration_ms: 1000,
     coordinator_metrics: {
       agents_count: 1, duration_total_ms: 1000, threads_opened: 0, threads_resolved_consensus: 0,
-      threads_auto_resolved: 0, messages_exchanged: 0, conflicts_by_layer: {}, introspections_triggered: 0,
+      threads_auto_resolved: 0, threads_without_consensus: 0, messages_exchanged: 0, conflicts_by_layer: {}, introspections_triggered: 0,
       introspections_concerned: 0, avg_resolution_time_ms: 0, hot_files: [],
     },
     agent_results: [], custom_metrics: {}, ...over,

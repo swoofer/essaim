@@ -26,6 +26,7 @@ function runReel(): RunResult {
       threads_opened: 4,
       threads_resolved_consensus: 9,
       threads_auto_resolved: 0,
+      threads_without_consensus: 4,
       messages_exchanged: 2,
       conflicts_by_layer: {},
       introspections_triggered: 0,

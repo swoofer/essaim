@@ -588,7 +588,7 @@ async function _runProjectBody(
         agents_count: project.agents.length,
         duration_total_ms: duration,
         threads_opened: 0, threads_resolved_consensus: 0,
-        threads_auto_resolved: 0, messages_exchanged: 0,
+        threads_auto_resolved: 0, threads_without_consensus: 0, messages_exchanged: 0,
         conflicts_by_layer: {}, introspections_triggered: 0,
         introspections_concerned: 0, avg_resolution_time_ms: 0,
         hot_files: [],

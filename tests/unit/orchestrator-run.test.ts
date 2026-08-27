@@ -35,6 +35,7 @@ vi.mock("../../src/orchestrator/metrics.js", () => ({
     threads_opened: 0,
     threads_resolved_consensus: 0,
     threads_auto_resolved: 0,
+    threads_without_consensus: 0,
     messages_exchanged: 0,
     conflicts_by_layer: {},
     introspections_triggered: 0,

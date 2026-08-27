@@ -80,6 +80,12 @@ export interface CoordinatorMetrics {
   threads_opened: number;
   threads_resolved_consensus: number;
   threads_auto_resolved: number;
+  // Threads opened for which the coordinator never emitted a thread_resolved of
+  // type consensus or auto_resolved: poisoned (repeated unclaims — a table
+  // UPDATE with no SSE event), resolved by timeout, max_rounds, or simply
+  // abandoned. This is the only place in the report where these threads still
+  // show up.
+  threads_without_consensus: number;
   messages_exchanged: number;
   conflicts_by_layer: Record<string, number>;
   introspections_triggered: number;
