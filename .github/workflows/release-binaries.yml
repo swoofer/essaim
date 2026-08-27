@@ -84,8 +84,9 @@ jobs:
       # n'a de prebuild que pour darwin, donc les autres plateformes le
       # compilent depuis les sources — ce qui échoue sur Windows faute de
       # Visual Studio. Le code d'essaim ne le référence jamais et le binaire
-      # bun n'en a pas besoin : l'étape Verify ci-dessous le prouve sur les
-      # quatre plateformes.
+      # bun n'en a pas besoin : l'étape « Verify packaged binary », plus bas,
+      # le prouve sur les quatre plateformes — et désormais sur l'archive
+      # réellement publiée, pas sur le checkout.
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
       # `shell: bash` sur toutes les plateformes : le shell par défaut du runner
@@ -120,13 +121,6 @@ jobs:
           </plist>
           EOF
 
-      - name: Verify binary
-        shell: bash
-        run: |
-          ./bin/essaim${{ matrix.ext }} --version
-          ./bin/essaim${{ matrix.ext }} --help
-          ./bin/essaim${{ matrix.ext }} list
-
       - name: Package tarball
         shell: bash
         run: |
@@ -137,7 +131,15 @@ jobs:
           TAG="${{ inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           DIST_NAME="essaim-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
-          mkdir -p "dist/${DIST_NAME}/behaviors" "dist/${DIST_NAME}/presets" "dist/${DIST_NAME}/compositions" "dist/${DIST_NAME}/scripts"
+          # Repris tel quel par « Verify packaged binary ». Une seule source pour
+          # le nom, sinon les deux étapes divergent à la première retouche.
+          echo "DIST_NAME=${DIST_NAME}" >> "$GITHUB_ENV"
+
+          # templates/ est le catalogue des swarms : sans lui `essaim list` rend
+          # une liste vide et tout `essaim run` meurt en « Unknown template ».
+          # Il est bien dans package.json "files", donc le paquet npm est sain —
+          # c'est exactement ce qui a caché son absence du tarball jusqu'en 0.13.0.
+          mkdir -p "dist/${DIST_NAME}/behaviors" "dist/${DIST_NAME}/presets" "dist/${DIST_NAME}/compositions" "dist/${DIST_NAME}/scripts" "dist/${DIST_NAME}/templates"
 
           cp "bin/essaim${{ matrix.ext }}" "dist/${DIST_NAME}/"
           cp package.json "dist/${DIST_NAME}/"
@@ -145,9 +147,38 @@ jobs:
           cp -r presets/* "dist/${DIST_NAME}/presets/"
           cp -r compositions/* "dist/${DIST_NAME}/compositions/"
           cp -r scripts/* "dist/${DIST_NAME}/scripts/"
+          cp -r templates/* "dist/${DIST_NAME}/templates/"
 
           cd dist
           tar czf "${DIST_NAME}.tar.gz" "${DIST_NAME}"
+
+      # APRÈS l'empaquetage, et sur l'arbre DÉSARCHIVÉ. Tant que cette étape
+      # tournait avant, depuis le checkout, elle validait un arbre où templates/
+      # existe toujours : elle ne pouvait structurellement pas voir ce qui manque
+      # à l'archive. L'extraction se fait hors du checkout (../) pour que le
+      # walk-up de getBundledRoot() ne puisse pas retomber sur le catalogue du
+      # dépôt et verdir sur un catalogue qui n'est pas celui qu'on livre.
+      - name: Verify packaged binary
+        shell: bash
+        run: |
+          rm -rf ../essaim-verify
+          mkdir -p ../essaim-verify
+          tar xzf "dist/${DIST_NAME}.tar.gz" -C ../essaim-verify
+          cd "../essaim-verify/${DIST_NAME}"
+
+          "./essaim${{ matrix.ext }}" --version
+          "./essaim${{ matrix.ext }}" --help
+
+          # `essaim list` sort 0 sur une liste VIDE : cli/list.ts imprime
+          # l'en-tête puis itère sur un tableau vide. Sans ce grep, l'étape
+          # resterait verte sur une archive amputée de son catalogue — le
+          # déplacement seul ne suffit donc pas.
+          LIST="$("./essaim${{ matrix.ext }}" list)"
+          echo "$LIST"
+          echo "$LIST" | grep -q "^  raid " || {
+            echo "::error::le template 'raid' n'apparait pas dans la sortie de essaim list depuis l'archive extraite — catalogue incomplet"
+            exit 1
+          }
 
       - name: Publish tarball to GH Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2

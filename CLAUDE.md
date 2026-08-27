@@ -13,7 +13,7 @@ pnpm build                               # tsc → dist/src + dist/cli (rootDir 
 pnpm dev -- run raid -p ~/proj --dry-run # CLI via tsx, no build step
 ```
 
-CI (`.github/workflows/test.yml`) runs exactly `pnpm install && pnpm test && pnpm build` on Node 24. There is no lint or format script — don't invent one.
+CI (`.github/workflows/test.yml`) runs exactly `pnpm install && pnpm test && pnpm build` on Node 24, on a `ubuntu-latest` + `windows-latest` matrix with `fail-fast: false`. There is no lint or format script — don't invent one.
 
 **CI guard:** the `no-domain-artifacts` job fails any PR that reintroduces client-specific catalog content — it greps every tracked file for the client name and rejects `templates|presets|behaviors|compositions/<client>-*`. The term is spelled out only in `.github/workflows/test.yml`; never repeat it in another tracked file or the guard trips on its own repo. Domain-specific catalog content lives in the private repo, not here.
 
@@ -67,7 +67,7 @@ To change what an agent says, edit the YAML. `--dry-run` previews the assembled 
 
 `vitest.config.ts` only picks up `tests/**/*.test.ts`. Shell tests (`tests/*.test.sh`) are bridged into vitest by `tests/unit/shell-scripts.test.ts`, which enumerates the directory — a new `.test.sh` is picked up automatically, no registration needed.
 
-One chmod test is Windows-only and skips on macOS/Linux.
+One chmod test is POSIX-only and skips on Windows — `it.skipIf(process.platform === "win32")` in `tests/unit/orchestrator-write.test.ts`, because Windows has no POSIX permission bits (`fs.chmod` there only drives the read-only attribute). That's the pattern to follow if the Windows CI leg turns up a test asserting a POSIX-only reality: a documented `skipIf`, never a `continue-on-error`.
 
 ## `ESSAIM_RESET_BASE` is destructive
 

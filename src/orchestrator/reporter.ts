@@ -93,8 +93,9 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Durée | ${(r.duration_ms / 1000).toFixed(1)}s |\n`;
     md += `| Agents | ${r.coordinator_metrics.agents_count} |\n`;
     md += `| Threads ouverts | ${r.coordinator_metrics.threads_opened} |\n`;
-    md += `| Consensus | ${r.coordinator_metrics.threads_resolved_consensus} |\n`;
-    md += `| Auto-resolved | ${r.coordinator_metrics.threads_auto_resolved} |\n`;
+    md += `| Consensus (approuvé par tous) | ${r.coordinator_metrics.threads_resolved_consensus} |\n`;
+    md += `| Auto-résolus (aucun agent concerné) | ${r.coordinator_metrics.threads_auto_resolved} |\n`;
+    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${r.coordinator_metrics.threads_without_consensus} |\n`;
     md += `| Messages | ${r.coordinator_metrics.messages_exchanged} |\n`;
     md += `| Introspections | ${r.coordinator_metrics.introspections_triggered} |\n`;
     md += `| Hot files | ${r.coordinator_metrics.hot_files.length} |\n`;
@@ -114,10 +115,13 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     }
 
     md += `\n### Agents\n\n`;
-    md += `| Agent | Exit | Compilation | Diff (lignes) |\n|-------|------|-------------|---------------|\n`;
+    md += `| Agent | Exit | Raison | Compilation | Diff (lignes) |\n|-------|------|--------|-------------|---------------|\n`;
     for (const a of r.agent_results) {
       const diffCell = a.diff_measured === false ? "N/A" : countDiffLines(a.diff);
-      md += `| ${a.agent_name} | ${a.exit_code} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffCell} |\n`;
+      // exit_reason est absent quand l'agent n'a JAMAIS démarré : orchestrator.ts:574-575
+      // pose exit_code 1 sans AgentLoopResult. "N/A" est donc une information
+      // (« jamais lancé »), pas un trou de données.
+      md += `| ${a.agent_name} | ${a.exit_code} | ${a.exit_reason ?? "N/A"} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffCell} |\n`;
     }
 
     // Token + cost breakdown (populated from agent-loop runs)

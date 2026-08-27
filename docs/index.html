@@ -1231,14 +1231,14 @@
     <p class="hero-subtitle" data-i18n="hero.subtitle">Spawn N coordinated Claude Code agents on your repo. Pick a preset — the orchestrator does the rest.</p>
 
     <div class="hero-stats">
-      <div class="stat-pill"><strong data-count="12">0</strong> <span data-i18n="hero.stat.tools">templates</span></div>
-      <div class="stat-pill"><strong data-count="32">0</strong> <span data-i18n="hero.stat.behaviors">BCE behaviors</span></div>
-      <div class="stat-pill"><strong data-count="21">0</strong> <span data-i18n="hero.stat.topics">presets</span></div>
+      <div class="stat-pill"><strong data-count="15">0</strong> <span data-i18n="hero.stat.tools">templates</span></div>
+      <div class="stat-pill"><strong data-count="46">0</strong> <span data-i18n="hero.stat.behaviors">BCE behaviors</span></div>
+      <div class="stat-pill"><strong data-count="29">0</strong> <span data-i18n="hero.stat.topics">presets</span></div>
       <div class="stat-pill"><strong data-count="4">0</strong><span data-i18n="hero.stat.coverage">effort levels</span></div>
     </div>
 
     <div class="terminal" id="hero-terminal">
-      <div class="hero-term-line"><span class="t-dim">$</span> <span class="t-green">essaim run raid</span> -p . --agents <span class="t-yellow">4</span> --preset <span class="t-blue">bug-hunt</span></div>
+      <div class="hero-term-line"><span class="t-dim">$</span> <span class="t-green">essaim run raid</span> -p . --agents <span class="t-yellow">4</span> --max-quota-pct <span class="t-blue">90</span></div>
       <div class="hero-term-line"><span class="t-dim">&#x2B21; spawning 4 agent-loops in parallel worktrees</span> <span class="t-green">&#9889;</span></div>
       <div class="hero-term-line"><span class="t-blue">Alpha</span> discover &rarr; <span class="t-yellow">12 findings</span> &nbsp; <span class="t-blue">Beta</span> discover &rarr; <span class="t-yellow">9 findings</span> &nbsp; <span class="t-dim">dedup via review&hellip;</span></div>
       <div class="hero-term-line"><span class="t-green">&#9989; 7 tasks claimed &amp; merged</span> <span class="t-dim">&mdash; zero conflicts, zero duplicate work</span></div>
@@ -1538,8 +1538,8 @@
     </div>
 
     <div class="hero-stats" style="margin-bottom: 3rem;">
-      <div class="stat-pill"><strong>32</strong> <span data-i18n="bce.stat.behaviors">behaviors</span></div>
-      <div class="stat-pill"><strong>20</strong> <span data-i18n="bce.stat.presets">presets</span></div>
+      <div class="stat-pill"><strong>46</strong> <span data-i18n="bce.stat.behaviors">behaviors</span></div>
+      <div class="stat-pill"><strong>29</strong> <span data-i18n="bce.stat.presets">presets</span></div>
       <div class="stat-pill"><strong>3</strong> <span data-i18n="bce.stat.rules">composition rules</span></div>
       <div class="stat-pill"><strong>3</strong> <span data-i18n="bce.stat.phases">workflow phases</span></div>
       <div class="stat-pill"><strong>4</strong> <span data-i18n="bce.stat.layers">behavioral layers</span></div>
@@ -1712,17 +1712,16 @@
     </div>
 
     <div class="terminal fade-in" style="max-width: 760px;">
-      <div><span class="t-green">$</span> essaim bce list behaviors</div>
-      <div><span class="t-dim">46 behaviors &mdash; foundation / patterns / mission / transversal</span></div>
+      <div><span class="t-green">$</span> essaim list</div>
+      <div><span class="t-dim">15 templates &mdash; raid, melee, swarm, chaine, revue, maitre, &hellip;</span></div>
       <div>&nbsp;</div>
-      <div><span class="t-green">$</span> essaim bce list presets</div>
-      <div><span class="t-dim">29 presets &mdash; raid, melee, essaim, chaine, revue, maitre, &hellip;</span></div>
+      <div><span class="t-green">$</span> essaim run raid <span class="t-yellow">--dry-run</span></div>
+      <div><span class="t-dim"># Preview the assembled prompts + agent plan without launching</span></div>
       <div>&nbsp;</div>
-      <div><span class="t-green">$</span> essaim bce build raid <span class="t-yellow">--dry-run</span></div>
-      <div><span class="t-dim"># Preview prompt.md + hooks + .mcp.json without writing to disk</span></div>
+      <div><span class="t-green">$</span> essaim solo gardien -p . \</div>
+      <div>&nbsp;&nbsp;<span class="t-yellow">--set</span> audit-output.paths=<span class="t-green">'["AUDIT.md"]'</span></div>
       <div>&nbsp;</div>
-      <div><span class="t-green">$</span> essaim bce build raid \</div>
-      <div>&nbsp;&nbsp;<span class="t-yellow">--set</span> coordinator-rules.solo_mode=true \</div>
+      <div><span class="t-green">$</span> essaim run raid -p . \</div>
       <div>&nbsp;&nbsp;<span class="t-yellow">--set</span> bug-hunting.modules=<span class="t-green">'["src/auth"]'</span></div>
     </div>
   </div>
@@ -1925,13 +1924,13 @@
         <div class="install-step" data-i18n="install.step2.label">Step 2</div>
         <h3 data-i18n="install.step2.title">Initialize your project</h3>
         <p style="color:var(--muted); font-size:0.88rem;" data-i18n="install.step2.desc">Writes BCE-assembled hooks + <code style="color:var(--accent);font-size:0.85em;\">.mcp.json</code> into your project. Picks up the coordinator URL + your identity.</p>
-        <div class="code-block">essaim init ~/project \<br/>  --url http://localhost:3100 \<br/>  --name "Alice" \<br/>  --preset bug-hunt</div>
+        <div class="code-block">essaim init ~/project \<br/>  --url http://127.0.0.1:3100 \<br/>  --name "Alice" \<br/>  --modules src/auth,src/users</div>
       </div>
       <div class="install-card">
         <div class="install-step" data-i18n="install.step3.label">Step 3</div>
         <h3 data-i18n="install.step3.title">Run your first swarm</h3>
         <p style="color:var(--muted); font-size:0.88rem;" data-i18n="install.step3.desc">Launch Claude normally &mdash; the agent-loop is transparent. Or dispatch a template with N coordinated agents.</p>
-        <div class="code-block">cd ~/project && claude<br/><span style="color:var(--muted)"># or</span><br/>mcp-coordinator run raid -p . --agents 3</div>
+        <div class="code-block">cd ~/project && claude<br/><span style="color:var(--muted)"># or</span><br/>essaim run raid -p . --agents 3</div>
       </div>
     </div>
   </div>
@@ -1989,8 +1988,8 @@
 <section id="templates">
   <div class="container">
     <div class="text-center">
-      <h2 class="section-title">12 Behavioral Templates</h2>
-      <p class="section-sub">Pre-composed behavioral presets. Each template assembles agents from reusable YAML behaviors — coordination, workspace, mission, safety.</p>
+      <h2 class="section-title">Behavioral Templates</h2>
+      <p class="section-sub">Pre-composed behavioral presets. Each template assembles agents from reusable YAML behaviors — coordination, workspace, mission, safety. essaim ships 15; the 12 diagrammed below are the ones with a flow chart — <code style="color:var(--accent);font-size:0.85em;">essaim list</code> prints them all.</p>
     </div>
 
     <div class="bce-legend fade-in">

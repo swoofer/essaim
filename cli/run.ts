@@ -3,6 +3,38 @@ import { listTemplates } from "../src/orchestrator/template-engine.js";
 import { resolve } from "path";
 import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
 import { executeRun } from "./run-core.js";
+import type { RunResult } from "../src/orchestrator/types.js";
+
+/**
+ * Code de sortie de `essaim run` : 1 seulement si TOUS les agents ont échoué.
+ *
+ * Une défaillance partielle est le régime normal d'un essaim — un rapport réel
+ * a montré 2 agents sur 4 en exit 1 pendant que les deux autres livraient leur
+ * diff. Sortir non nul là-dessus rendrait la commande inutilisable en CI.
+ *
+ * Deux garde-fous :
+ * - `undefined` = dry-run (executeRun ne retourne rien), donc 0 ;
+ * - zéro agent = 0, parce que `[].every()` vaut `true` et signalerait à tort
+ *   un échec pour un run qui n'a jamais eu l'intention de lancer un agent.
+ *
+ * Le prédicat lit `exit_code` et non `exit_reason` : un agent jamais démarré
+ * (orchestrator.ts:574-575) a bien exit_code 1 mais aucun exit_reason.
+ * Attention au sens exact de « échec » : exit_code vaut 1 dès que
+ * exitReason !== "done" (orchestrator.ts:532), ce qui inclut "max_turns"
+ * (budget de tours épuisé, agent-loop.ts:1337) et "yielded" (retrait
+ * délibéré pendant la coordination, agent-loop.ts:910) — des issues où du
+ * travail a pu être livré. On sort quand même 1 : le contrat est « aucun
+ * agent n'a terminé proprement », pas « tout a planté ». C'est exactement
+ * ce que la colonne Raison sert à désambiguïser.
+ *
+ * Cette fonction ne concerne QUE `essaim run`. `essaim security` garde son
+ * propre contrat (securityExitCode, cli/security.ts:90) et `essaim pipeline`
+ * le sien (pipeline.ts:108) — voir l'étape de vérification.
+ */
+export function runExitCode(result: RunResult | undefined): 0 | 1 {
+  if (!result || result.agent_results.length === 0) return 0;
+  return result.agent_results.every((a) => a.exit_code !== 0) ? 1 : 0;
+}
 
 export function createRunCommand(): Command {
   return new Command("run")
@@ -70,8 +102,9 @@ export function createRunCommand(): Command {
           console.warn("⚠️  --url is deprecated; use --coordinator-url instead");
         }
 
+        let result: RunResult | undefined;
         try {
-          await executeRun({
+          result = await executeRun({
             template,
             project: opts.project,
             agentCount: opts.agents ? parseInt(opts.agents, 10) : undefined,
@@ -95,9 +128,15 @@ export function createRunCommand(): Command {
         if (opts.dryRun) {
           return;
         }
+        const code = runExitCode(result);
+        if (code !== 0) {
+          console.error(
+            `Aucun agent n'a terminé proprement : les ${result?.agent_results.length ?? 0} agents ont un exit_code non nul — voir la colonne Raison du rapport (error, process_died, mais aussi max_turns ou yielded).`,
+          );
+        }
         // Force exit to release the in-process coordinator's HTTP server
         // (startServer does not expose a .close() handle).
-        process.exit(0);
+        process.exit(code);
       },
     );
 }

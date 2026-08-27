@@ -72,6 +72,11 @@ export interface WorkspaceResult {
   basePath: string;
   paths: Map<string, string>; // agent_id → workspace path
   baseSha?: string; // commit the worktrees branch off — diff baseline (#29)
+  // agent_id → nom de branche. Source UNIQUE du nom : il était reconstruit à
+  // l'identique sur 4 sites (workspace.ts × 2, orchestrator.ts × 2), ce qui
+  // laissait le nettoyage libre de diverger de la création. Vide sauf pour
+  // type === "worktree".
+  branches: Map<string, string>;
 }
 
 export interface CoordinatorMetrics {
@@ -80,6 +85,12 @@ export interface CoordinatorMetrics {
   threads_opened: number;
   threads_resolved_consensus: number;
   threads_auto_resolved: number;
+  // Threads opened for which the coordinator never emitted a thread_resolved of
+  // type consensus or auto_resolved: poisoned (repeated unclaims — a table
+  // UPDATE with no SSE event), resolved by timeout, max_rounds, or simply
+  // abandoned. This is the only place in the report where these threads still
+  // show up.
+  threads_without_consensus: number;
   messages_exchanged: number;
   conflicts_by_layer: Record<string, number>;
   introspections_triggered: number;

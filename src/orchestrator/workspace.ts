@@ -1,6 +1,27 @@
 import { execSync } from "child_process";
 import path from "path";
+import { currentRunId } from "../run-id.js";
 import type { AgentConfig, WorkspaceResult } from "./types.js";
+
+/**
+ * Nom de la branche d'un agent, unique PAR RUN.
+ *
+ * Le livrable d'essaim EST le worktree : sans `--cleanup` l'orchestrateur
+ * journalise « Worktrees preserved » et publie les branches dans le rapport.
+ * Le nom ne contenait pourtant que l'id d'agent, stable par template — le run
+ * suivant du même template retrouvait donc ces branches dans
+ * `git worktree list --porcelain` et faisait dessus `git worktree remove
+ * --force` puis `git branch -D`, sans condition. Le runId (frappé par
+ * `ensureRunId` et publié dans ESSAIM_RUN_ID bien avant createWorkspaces) rend
+ * le nom unique et rend deux runs comparables.
+ *
+ * runId absent (appel bibliothèque hors orchestrateur) : on retombe sur
+ * l'ancien nom, donc sur l'ancien comportement — explicitement, plutôt que par
+ * un nom bancal.
+ */
+export function agentBranchName(agentId: string, runId = currentRunId()): string {
+  return runId ? `mini-project-${runId}-${agentId}` : `mini-project-${agentId}`;
+}
 
 export function createWorkspaces(
   workspace: { type: "worktree" | "shared" | "none"; base?: string; baseRef?: string },
@@ -8,6 +29,7 @@ export function createWorkspaces(
   outputDir: string
 ): WorkspaceResult {
   const paths = new Map<string, string>();
+  const branches = new Map<string, string>();
   const basePath = workspace.base || process.cwd();
   const ref = workspace.baseRef || "HEAD";
 
@@ -26,11 +48,12 @@ export function createWorkspaces(
 
     for (const agent of agents) {
       const worktreePath = path.join(outputDir, `worktree-${agent.id}`);
-      const branchName = `mini-project-${agent.id}`;
+      const branchName = agentBranchName(agent.id);
       const branchRef = `refs/heads/${branchName}`;
 
-      // Force-remove any previous worktree that still holds this branch
-      // (handles leftover from a previous run at a different path)
+      // Force-remove any previous worktree that still holds this branch.
+      // Le nom portant le runId, cela ne peut plus viser que des restes de CE
+      // run (reprise après un crash), jamais le livrable d'un run précédent.
       try {
         const porcelain = execSync(`git worktree list --porcelain`, { cwd: basePath, encoding: "utf-8" });
         let currentPath = "";
@@ -45,6 +68,7 @@ export function createWorkspaces(
       try { execSync(`git branch -D "${branchName}"`, { cwd: basePath, stdio: "pipe" }); } catch {}
       execSync(`git worktree add "${worktreePath}" -b "${branchName}" ${ref}`, { cwd: basePath, stdio: "pipe" });
       paths.set(agent.id, worktreePath);
+      branches.set(agent.id, branchName);
     }
   } else if (workspace.type === "shared") {
     for (const agent of agents) {
@@ -56,15 +80,19 @@ export function createWorkspaces(
     }
   }
 
-  return { type: workspace.type, basePath, paths, baseSha };
+  return { type: workspace.type, basePath, paths, baseSha, branches };
 }
 
 export function cleanupWorkspaces(workspace: WorkspaceResult): void {
   if (workspace.type !== "worktree") return;
   for (const [agentId, worktreePath] of workspace.paths) {
-    const branchName = `mini-project-${agentId}`;
+    // Le nom vient de la création, il n'est plus recalculé ici : un nettoyage
+    // qui recalcule est un nettoyage libre de viser la mauvaise branche.
+    const branchName = workspace.branches.get(agentId);
     try { execSync(`git worktree remove "${worktreePath}" --force`, { cwd: workspace.basePath, stdio: "pipe" }); } catch {}
-    try { execSync(`git branch -D "${branchName}"`, { cwd: workspace.basePath, stdio: "pipe" }); } catch {}
+    if (branchName) {
+      try { execSync(`git branch -D "${branchName}"`, { cwd: workspace.basePath, stdio: "pipe" }); } catch {}
+    }
   }
 }
 

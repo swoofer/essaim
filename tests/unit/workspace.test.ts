@@ -154,3 +154,69 @@ describe("resetBase — ESSAIM_RESET_BASE (#56)", () => {
   });
 });
 
+// ── Le run N+1 ne détruit plus le livrable du run N ─────────────────────────
+//
+// Sans `--cleanup`, le worktree EST le livrable : l'orchestrateur journalise
+// « Worktrees preserved » et publie les branches dans le rapport. Tant que le
+// nom de branche ne contenait que l'id d'agent — stable par template — le run
+// suivant du même template retrouvait ces branches dans
+// `git worktree list --porcelain`, exécutait `git worktree remove --force` sur
+// le répertoire du run précédent, puis `git branch -D` sur sa branche.
+// Comparer un run N à un run N+1 était impossible par construction.
+describe("createWorkspaces — isolation entre deux runs successifs", () => {
+  const ORIGINAL_RUN_ID = process.env.ESSAIM_RUN_ID;
+
+  afterEach(() => {
+    if (ORIGINAL_RUN_ID === undefined) delete process.env.ESSAIM_RUN_ID;
+    else process.env.ESSAIM_RUN_ID = ORIGINAL_RUN_ID;
+  });
+
+  /** Branches locales du bac à sable, sans le marqueur `*` / `+` de git. */
+  function localBranches(): string[] {
+    return execSync("git branch --list", { cwd: SANDBOX_DIR, encoding: "utf-8" })
+      .split("\n")
+      .map((line) => line.replace(/^[*+\s]+/, "").trim())
+      .filter(Boolean);
+  }
+
+  it("deux runs du même template gardent chacun leur branche et leur worktree", () => {
+    const agents = [testAgent({ id: "agent-chasseur-1", name: "Chasseur 1", profile: "codeur" })];
+
+    process.env.ESSAIM_RUN_ID = "raid-aaaaaaaa";
+    const ws1 = createWorkspaces(
+      { type: "worktree", base: SANDBOX_DIR },
+      agents,
+      path.join(TMP_DIR, "run-1"),
+    );
+    const worktree1 = ws1.paths.get("agent-chasseur-1")!;
+    expect(fs.existsSync(path.join(worktree1, "file.txt"))).toBe(true);
+
+    process.env.ESSAIM_RUN_ID = "raid-bbbbbbbb";
+    const ws2 = createWorkspaces(
+      { type: "worktree", base: SANDBOX_DIR },
+      agents,
+      path.join(TMP_DIR, "run-2"),
+    );
+    lastWorkspace = ws2;
+
+    // 1. le livrable du run 1 a survécu au run 2
+    expect(fs.existsSync(path.join(worktree1, "file.txt"))).toBe(true);
+
+    // 2. les deux branches coexistent, chacune portant son runId
+    const noms = localBranches();
+    expect(noms.filter((b) => b.includes("raid-aaaaaaaa"))).toHaveLength(1);
+    expect(noms.filter((b) => b.includes("raid-bbbbbbbb"))).toHaveLength(1);
+
+    // 3. et ce sont bien deux noms différents pour le MÊME agent
+    expect(ws2.branches.get("agent-chasseur-1")).not.toBe(ws1.branches.get("agent-chasseur-1"));
+
+    cleanupWorkspaces(ws1);
+
+    // 4. le nettoyage LIT la map au lieu de recalculer le nom. Sans l'étape 4,
+    //    `git branch -D` viserait `mini-project-agent-chasseur-1` — inexistante
+    //    depuis que le runId entre dans le nom — échouerait dans le `try {}
+    //    catch {}` vide, et la branche du run 1 survivrait au nettoyage.
+    expect(localBranches()).not.toContain(ws1.branches.get("agent-chasseur-1"));
+  });
+});
+

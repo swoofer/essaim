@@ -70,14 +70,6 @@ essaim ships the orchestrator (agent-loop, preset runner, phase scheduler) and t
 npm install -g essaim
 ```
 
-### Start the coordinator
-
-essaim delegates all coordination state to `mcp-coordinator`. Start it once:
-
-```bash
-mcp-coordinator server start --daemon
-```
-
 ### Run your first swarm
 
 ```bash
@@ -90,6 +82,14 @@ essaim run swarm -p ~/my-project --agents 3
 # Or run a single agent without orchestration
 essaim solo gardien -p ~/my-project
 ```
+
+> **No coordinator to start by hand.** `essaim run` — and `essaim pipeline` / `essaim security`, which go through the same path — boots `mcp-coordinator` **in-process on port `3100`** (override with the `PORT` env var) and shuts it down when the run ends. If something is already listening on `3100`, point essaim at it instead; otherwise the run dies on `EADDRINUSE` before the first agent starts:
+>
+> ```bash
+> essaim run swarm -p ~/my-project --agents 3 --coordinator-url http://127.0.0.1:3100
+> ```
+>
+> `essaim solo` is different: it runs the agent in `solo_mode` and starts no coordinator at all.
 
 > The `swarm` preset runs discover → execute phases. Agents discover issues in read-only mode, share findings via the coordinator, then work-steal tasks from the shared pool until the pool is drained.
 
@@ -230,9 +230,10 @@ essaim ships a CLI binary. All commands:
 | `essaim pipeline -f <file> [--coordinator-url url] [--max-quota-pct pct] [--dry-run]` | Run a sequence of template runs across per-step repos, strictly sequential, stop on first failure. See [Pipelines](#pipelines). |
 | `essaim solo <template> [-p path] [--timeout min] [--set k=v] [--set-file k=path]` | Launch a single agent without orchestration |
 | `essaim scan <path>` | Auto-detect project language, structure, test framework |
-| `essaim init [path] [--url url] [--name name] [--modules list]` | Install hooks + MCP config on a project |
+| `essaim security [-p path] [--engine list] [--scan-mode mode] [--scope-mode mode] [--diff-base ref] [--authorize] [--secrets-file path] [--scan-timeout min] [--no-require-findings] [--triage-only] [--agents N] [--timeout min] [--cleanup] [--dry-run] [--coordinator-url url]` | Scan for security findings, seed the coordinator, and let the swarm fix them (auto-fix on branches). Runs the `sentinelle` template; engines are out-of-process adapters (v1: Strix). |
+| `essaim init [path] [--url url] [--name name] [--modules list] [--security]` | Install hooks + MCP config on a project. `--security` also scaffolds the security config + `.gitignore`. |
 | `essaim list` | List the templates the CLI ships with |
-| `essaim self-update` | Update to the latest release |
+| `essaim self-update` | Update the native binary to the latest release (macOS/Linux). On Windows it refuses and prints the manual route — `npm install -g essaim@latest`, or the `win32-x64` tarball — because Windows locks the running executable. |
 
 ### Examples
 
@@ -312,7 +313,7 @@ Language-agnostic templates. `essaim scan` auto-detects the stack; the template 
 | `sentinelle` | Fixes security findings ingested in the coordinator | dynamic | one-shot |
 | `migrate-phase2` | Scaffolder, then one migrator per slice | 1 + per-module | one-shot, staggered |
 
-For per-template descriptions and the preset roles each one wires together, run `essaim list presets` or read [`compositions/`](./compositions/) in this repo.
+For per-template descriptions, run `essaim list`. The preset roles each template wires together are declared in [`templates/`](./templates/) and defined in [`presets/`](./presets/) in this repo.
 
 ---
 

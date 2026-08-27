@@ -5,6 +5,42 @@ import { getVersion } from "./version.js";
 
 const REPO = "swoofer/essaim";
 
+/**
+ * Windows n'a pas de chemin de mise à jour en place, pour deux raisons cumulées :
+ *
+ *  - ce fichier pilote `command -v`, `mktemp -d`, `mv` et `rm -rf` via execSync,
+ *    qui sous Windows lance cmd.exe : `mktemp` y est absent d'une installation
+ *    standard, donc la commande meurt en cours de route ; et si des coreutils
+ *    sont sur le PATH, le résolveur de plateforme plus bas ne connaît que darwin
+ *    et linux, si bien que win32 retombe sur l'artefact `linux-x64` et le détare
+ *    par-dessus le essaim.exe en cours d'exécution ;
+ *  - même avec le bon artefact (win32-x64 EST publié par release-binaries.yml),
+ *    le chargeur d'image Windows garde essaim.exe verrouillé tant que le
+ *    processus vit : tar échouerait en « Access is denied », potentiellement à
+ *    mi-extraction.
+ *
+ * Plutôt qu'une réussite mensongère, on s'arrête en disant quoi faire.
+ *
+ * Retourne `null` quand la plateforme sait se mettre à jour, sinon le message à
+ * afficher. La plateforme est un PARAMÈTRE (et non `process.platform` lu à
+ * l'intérieur) pour rester testable sans falsifier le global.
+ */
+export function unsupportedPlatformNotice(platform: NodeJS.Platform): string | null {
+  if (platform !== "win32") return null;
+  return [
+    "Error: `essaim self-update` ne fonctionne pas sur Windows.",
+    "Windows verrouille l'exécutable en cours : essaim.exe ne peut pas se remplacer",
+    "lui-même, et cette commande n'a jamais eu de chemin de mise à jour en place ici.",
+    "",
+    "Mettre à jour à la main :",
+    "  - installé via npm : npm install -g essaim@latest",
+    "  - binaire natif    : télécharger essaim-<version>-win32-x64.tar.gz sur",
+    `                       https://github.com/${REPO}/releases/latest,`,
+    "                       fermer toute instance d'essaim, puis remplacer essaim.exe",
+    "                       et les dossiers behaviors/, presets/, compositions/, scripts/.",
+  ].join("\n");
+}
+
 type Source = "curl" | "gh";
 
 function hasGh(): boolean {
@@ -82,6 +118,15 @@ export function createSelfUpdateCommand(): Command {
   return new Command("self-update")
     .description("Update essaim to the latest version")
     .action(() => {
+      // Avant tout : ne pas payer un aller-retour réseau pour finir par écrire
+      // un binaire de la mauvaise plateforme par-dessus celui qui tourne.
+      const notice = unsupportedPlatformNotice(process.platform);
+      if (notice) {
+        console.error(notice);
+        process.exit(1);
+        return;
+      }
+
       const currentVersion = getVersion();
 
       console.log("Checking for updates...");
@@ -107,6 +152,7 @@ export function createSelfUpdateCommand(): Command {
 
       console.log(`Update available: v${currentVersion} → v${latest}`);
 
+      // win32 est déjà sorti en tête d'action : il ne reste que darwin et linux.
       const platform = process.platform === "darwin" ? "darwin" : "linux";
       const arch = process.arch === "arm64" ? "arm64" : "x64";
       const assetName = `essaim-${latest}-${platform}-${arch}`;

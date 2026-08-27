@@ -47,26 +47,60 @@ export function computeMetrics(events: SseEvent[]): CoordinatorMetrics {
   const messagesPosted = events.filter((e) => e.type === "message_posted");
   const introspectionRequested = events.filter((e) => e.type === "introspection_requested");
   const introspectionCompleted = events.filter((e) => e.type === "introspection_completed");
-  const resolutionProposed = events.filter((e) => e.type === "resolution_proposed");
-  // A thread that cycles contest → re-propose emits MULTIPLE resolution_proposed
-  // events for the same thread_id. Counting them flat both inflates
-  // threads_resolved_consensus and can push threads_auto_resolved negative
-  // (#117) — dedup by thread_id first.
-  const resolvedThreadIds = new Set(
-    resolutionProposed
-      .map((e) => e.data.thread_id)
-      .filter((id): id is string => typeof id === "string"),
-  );
+  // A thread's FINAL state only ever arrives in `thread_resolved`: the
+  // coordinator emits it exactly once, when the table actually flips, carrying
+  // a `resolution_type` of consensus | auto_resolved | timeout | max_rounds |
+  // closed | agent_departure (mcp-coordinator, server-setup.ts, the
+  // consultation.onResolve callback).
+  //
+  // `resolution_proposed`, which this used to read, only ever says "someone
+  // PROPOSED": on the coordinator side it moves a thread to `resolving`, never
+  // to `resolved` (consultation.proposeResolution), and a contested thread
+  // emits one per round.
+  //
+  // A `poisoned` thread — too many unclaims — emits NO event at all: it's a
+  // table UPDATE. It can't show up here, and falls into
+  // threads_without_consensus.
+  const outcomeByThread = new Map<string, string>();
+  for (const e of events) {
+    if (e.type !== "thread_resolved") continue;
+    const id = e.data.thread_id;
+    const type = e.data.resolution_type;
+    if (typeof id === "string" && typeof type === "string") outcomeByThread.set(id, type);
+  }
+  const countOutcome = (want: string): number => {
+    let n = 0;
+    for (const type of outcomeByThread.values()) if (type === want) n++;
+    return n;
+  };
+  const consensus = countOutcome("consensus");
+  const autoResolved = countOutcome("auto_resolved");
+
+  // The residual is derived from thread IDENTIFIERS, never from a subtraction
+  // of counters. `Math.max(0, opened - consensus - autoResolved)` didn't only
+  // guard against a negative — it ERASED: on a mixed window (threads opened
+  // here and never resolved, PLUS resolutions of threads opened BEFORE the SSE
+  // cursor) it printed "Threads opened 4 | Consensus 5 | Without consensus 0",
+  // a label more optimistic than its own data. Counting the opened ids whose
+  // outcome is neither consensus nor auto_resolved can't go negative, so the
+  // clamp is gone with it.
+  const openedIds = new Set<string>();
+  for (const e of threadOpened) {
+    if (typeof e.data.thread_id === "string") openedIds.add(e.data.thread_id);
+  }
+  let withoutConsensus = 0;
+  for (const id of openedIds) {
+    const outcome = outcomeByThread.get(id);
+    if (outcome !== "consensus" && outcome !== "auto_resolved") withoutConsensus++;
+  }
 
   return {
     agents_count: 0,
     duration_total_ms: 0,
     threads_opened: threadOpened.length,
-    threads_resolved_consensus: resolvedThreadIds.size,
-    // Guarded: even after dedup this can go negative when the observed event
-    // window doesn't include a thread's own thread_opened event (e.g. it opened
-    // just before an SSE replay cursor) but does include its resolution.
-    threads_auto_resolved: Math.max(0, threadOpened.length - resolvedThreadIds.size),
+    threads_resolved_consensus: consensus,
+    threads_auto_resolved: autoResolved,
+    threads_without_consensus: withoutConsensus,
     messages_exchanged: messagesPosted.length,
     conflicts_by_layer,
     introspections_triggered: introspectionRequested.length,
@@ -141,12 +175,18 @@ async function readBody(stream: ReadableStream<Uint8Array>, idleMs?: number): Pr
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let out = "";
+  // Carried ACROSS iterations on purpose. When the idle race wins we go round
+  // again and re-race the SAME read: issuing a second reader.read() would queue
+  // behind the first, which is still in flight and would swallow the very chunk
+  // we are waiting for.
+  let pending: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
   try {
     for (;;) {
       // Swallow the read's rejection here rather than letting it dangle: when
       // the idle race wins, this promise is still in flight and the cancel()
       // below settles it — an unhandled rejection would crash the process.
-      const read = reader.read().catch(() => ({ done: true, value: undefined }) as ReadableStreamReadResult<Uint8Array>);
+      pending ??= reader.read().catch(() => ({ done: true, value: undefined }) as ReadableStreamReadResult<Uint8Array>);
+      const read = pending;
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const chunk =
         idleMs === undefined
@@ -158,7 +198,17 @@ async function readBody(stream: ReadableStream<Uint8Array>, idleMs?: number): Pr
               }),
             ]).finally(() => clearTimeout(idleTimer));
 
-      if (chunk === "idle" || chunk.done) break;
+      if (chunk === "idle") {
+        // "A short silence AFTER the burst" — the doc above says APRÈS, and
+        // this is where that word is enforced. Honouring idle before a single
+        // byte has landed turns a slow first chunk (a loaded 2-core CI runner)
+        // into an empty body and zeroed metrics. Nothing read yet means the
+        // burst hasn't started, so keep waiting; budgetMs stays the hard net.
+        if (out) break;
+        continue;
+      }
+      pending = undefined;
+      if (chunk.done) break;
       out += decoder.decode(chunk.value, { stream: true });
     }
     out += decoder.decode();

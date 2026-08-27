@@ -27,8 +27,40 @@ jobs:
           fi
           echo "OK — aucune trace mekova."
 
+      # Même patron que l'étape précédente : un git grep sur des jetons morts et
+      # vérifiables, avec exclusion des fichiers qui ont une raison légitime de les
+      # contenir. `essaim bce`, `--preset` et `mcp-coordinator run` n'existent dans
+      # aucune des huit commandes enregistrées par cli/index.ts. Les laisser dans la
+      # doc publique, c'est offrir au premier visiteur une commande qui échoue
+      # immédiatement (commander 14 refuse une option inconnue et un argument en trop).
+      # CHANGELOG.md est exclu : il documente légitimement la suppression passée de
+      # `essaim bce`. docs/superpowers/plans/2026-08-27-stabilite-essaim.md est exclu
+      # pour la même raison : c'est le plan de CETTE tâche, versionné, qui cite ces
+      # jetons morts comme des défauts à corriger. Ce workflow s'exclut lui-même,
+      # comme l'étape précédente.
+      - name: Refuser les commandes CLI inexistantes dans la doc
+        run: |
+          if git grep -In -e 'essaim bce' -e '--preset' -e 'mcp-coordinator run' -- . ':!CHANGELOG.md' ':!docs/superpowers/plans/2026-08-27-stabilite-essaim.md' ':!.github/workflows/test.yml' > /tmp/dead-cli 2>/dev/null; then
+            echo "::error::Commandes CLI inexistantes dans la doc :"; cat /tmp/dead-cli; exit 1
+          fi
+          echo "OK — aucune commande CLI morte."
+
+  # Windows est à la fois la plateforme de développement de ce dépôt et une
+  # cible livrée (release-binaries.yml publie essaim-<version>-win32-x64.tar.gz),
+  # et pourtant rien ne l'exerçait ici : les deux jobs étaient sur ubuntu-latest.
+  # C'est ce trou qui a laissé passer le résolveur de plateforme de
+  # cli/self-update.ts, qui servait l'artefact Linux aux utilisateurs Windows.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # Même raison que dans release-binaries.yml : sans ceci, l'échec d'UNE
+      # jambe annule l'autre, et on perd l'information qui compte — la
+      # régression est-elle globale ou spécifique à Windows ?
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -39,7 +71,19 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      - run: pnpm install --frozen-lockfile
+      # Meme drapeau que release-binaries.yml : la jambe qui VERIFIE s'installe
+      # comme la jambe qui LIVRE, sinon un vert ici ne dit plus rien de la
+      # release. `pnpm.onlyBuiltDependencies` (package.json) est une
+      # autorisation permanente de compiler `better-sqlite3` — transitif via
+      # mcp-coordinator — et c'est cette compilation qui a fait tomber la 0.12.0
+      # sur Windows, faute de Visual Studio. Elle est inoffensive AUJOURD'HUI
+      # (13.0.3 n'a aucun script install/postinstall et embarque
+      # prebuilds/win32-x64.node), donc le drapeau ne coute rien ; il ferme la
+      # porte le jour ou une montee de version rouvre ce chemin. Sans risque
+      # verifie : aucun test ne charge la liaison native — importer
+      # mcp-coordinator ne la touche pas, orchestrator-run.test.ts la mocke via
+      # vi.mock et types.test.ts est en `import type`.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - run: pnpm test
 
