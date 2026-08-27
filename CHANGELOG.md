@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/swoofer/essaim/compare/v0.13.0...v0.13.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* essaim savait produire, il ne savait pas s'observer — six boucles refermées ([#133](https://github.com/swoofer/essaim/issues/133)) ([be51970](https://github.com/swoofer/essaim/commit/be519706342ed38f594b415d51c8ddf1ba375971))
+
 ## [0.13.0](https://github.com/swoofer/essaim/compare/v0.12.1...v0.13.0) (2026-08-27)
 
 
