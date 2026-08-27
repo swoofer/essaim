@@ -115,10 +115,13 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     }
 
     md += `\n### Agents\n\n`;
-    md += `| Agent | Exit | Compilation | Diff (lignes) |\n|-------|------|-------------|---------------|\n`;
+    md += `| Agent | Exit | Raison | Compilation | Diff (lignes) |\n|-------|------|--------|-------------|---------------|\n`;
     for (const a of r.agent_results) {
       const diffCell = a.diff_measured === false ? "N/A" : countDiffLines(a.diff);
-      md += `| ${a.agent_name} | ${a.exit_code} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffCell} |\n`;
+      // exit_reason est absent quand l'agent n'a JAMAIS démarré : orchestrator.ts:574-575
+      // pose exit_code 1 sans AgentLoopResult. "N/A" est donc une information
+      // (« jamais lancé »), pas un trou de données.
+      md += `| ${a.agent_name} | ${a.exit_code} | ${a.exit_reason ?? "N/A"} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffCell} |\n`;
     }
 
     // Token + cost breakdown (populated from agent-loop runs)
