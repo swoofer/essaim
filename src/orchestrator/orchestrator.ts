@@ -638,8 +638,7 @@ async function _runProjectBody(
   } else if (workspace.type === "worktree") {
     log.info("Worktrees preserved (use --cleanup to auto-remove)");
     for (const [agentId, wsPath] of workspace.paths) {
-      const branchName = `mini-project-${agentId}`;
-      log.info(`  ${agentId}: ${wsPath}  (branch: ${branchName})`);
+      log.info(`  ${agentId}: ${wsPath}  (branch: ${workspace.branches.get(agentId) ?? ""})`);
     }
   }
 
@@ -653,7 +652,7 @@ async function _runProjectBody(
     ? [...workspace.paths.entries()].map(([agentId, wsPath]) => ({
         agent_id: agentId,
         path: wsPath,
-        branch: `mini-project-${agentId}`,
+        branch: workspace.branches.get(agentId) ?? "",
       }))
     : undefined;
 

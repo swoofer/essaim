@@ -72,6 +72,11 @@ export interface WorkspaceResult {
   basePath: string;
   paths: Map<string, string>; // agent_id → workspace path
   baseSha?: string; // commit the worktrees branch off — diff baseline (#29)
+  // agent_id → nom de branche. Source UNIQUE du nom : il était reconstruit à
+  // l'identique sur 4 sites (workspace.ts × 2, orchestrator.ts × 2), ce qui
+  // laissait le nettoyage libre de diverger de la création. Vide sauf pour
+  // type === "worktree".
+  branches: Map<string, string>;
 }
 
 export interface CoordinatorMetrics {
