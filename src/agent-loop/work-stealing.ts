@@ -17,9 +17,28 @@ export interface Task {
   relatedDone?: string[];
 }
 
+// target_files est stocké côté coordinator via JSON.stringify dans une colonne
+// TEXT (database.js), et consultation.js#listThreads renvoie les lignes SQLite
+// brutes sans désérialisation : /api/threads-active le livre donc en CHAÎNE
+// JSON, jamais en tableau. Un Array.isArray dessus était toujours faux, ce qui
+// rendait threadFiles() constamment vide et computeBusyFiles() — le garde-fou
+// « un seul agent par fichier » (#30) — inopérant depuis son introduction.
+// Même remède que parseTargetModules dans mqtt-listener.ts (#98) : le tableau
+// reste accepté au cas où un appelant le fournirait déjà décodé, une chaîne
+// illisible dégrade vers "aucun fichier connu" plutôt que de jeter.
 function threadFiles(thread: Record<string, unknown>): string[] {
   const files = thread.target_files;
-  return Array.isArray(files) ? (files as string[]).filter((f) => typeof f === "string" && f) : [];
+  const arr = Array.isArray(files) ? files : typeof files === "string" ? safeParseArray(files) : [];
+  return arr.filter((f): f is string => typeof f === "string" && f.length > 0);
+}
+
+function safeParseArray(raw: string): unknown[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 const DISCOVERY_MARKER = "DISCOVERY:";
