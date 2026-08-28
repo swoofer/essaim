@@ -94,35 +94,28 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Agents | ${r.coordinator_metrics.agents_count} |\n`;
     const cm = r.coordinator_metrics;
     const finalState = cm.threads_final;
-    // finalState, when present, is the coordinator DB's own tally for this
-    // run (mcp-coordinator ≥2.3.0), scoped by run_id server-side. Every
-    // number below it (threads_opened aside) comes from the SSE replay,
-    // which is windowed by event id but NOT scoped by run — see the
-    // docstring on fetchCoordinatorMetrics. "Threads ouverts" is a pure
-    // substitution — finalState.total answers the exact same question as
-    // threads_opened, just from a better source — so it's safe to replace.
-    // "Sans consensus" is NOT: subtracting the SSE-derived
-    // consensus/auto-résolus counts from a run-scoped finalState.resolved
-    // mixes an unscoped source into a scoped one. On a coordinator shared
-    // with a concurrent run, thread_resolved events belonging to THAT run
-    // can inflate the SSE counts past finalState.resolved, and clamping the
-    // result to 0 doesn't fix that — it erases real unresolved threads from
-    // the report, exactly the bug removed from metrics.ts (see the comment
-    // above computeMetrics). So this stays the SSE estimate unconditionally;
-    // the footnote below is what makes 'poisoned'/'cancelled' visible.
-    const threadsOpened = finalState ? finalState.total : cm.threads_opened;
-    const withoutConsensus = cm.threads_without_consensus;
-
-    md += `| Threads ouverts | ${threadsOpened} |\n`;
+    // The table stays entirely SSE-derived — one source, one window, rows
+    // that add up against each other. finalState (mcp-coordinator ≥2.3.0,
+    // scoped by run_id server-side) answers a DIFFERENT question than the
+    // SSE replay (windowed by event id, NOT scoped by run — see the
+    // docstring on fetchCoordinatorMetrics) and the two must never share a
+    // row: mixing "Threads ouverts" from finalState with "Consensus" from
+    // SSE let a coordinator shared with a concurrent run print a total
+    // smaller than the consensus count it's supposed to contain — the same
+    // class of silent contradiction already ruled out for "Sans consensus".
+    // finalState surfaces only in the footnote below, clearly labeled as a
+    // separate, authoritative source — that's what makes 'poisoned' and
+    // 'cancelled' visible, and it needs nothing from the table to do it.
+    md += `| Threads ouverts | ${cm.threads_opened} |\n`;
     md += `| Consensus (approuvé par tous) | ${cm.threads_resolved_consensus} |\n`;
     md += `| Auto-résolus (aucun agent concerné) | ${cm.threads_auto_resolved} |\n`;
-    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${withoutConsensus} |\n`;
+    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${cm.threads_without_consensus} |\n`;
     md += `| Messages | ${cm.messages_exchanged} |\n`;
     md += `| Introspections | ${cm.introspections_triggered} |\n`;
     md += `| Hot files | ${cm.hot_files.length} |\n`;
 
     if (finalState) {
-      md += `\n> État final (coordinator, faisant autorité) : ${finalState.open} ouvert(s), ${finalState.resolving} en résolution, ${finalState.poisoned} empoisonné(s), ${finalState.cancelled} annulé(s), ${finalState.resolved} résolu(s) au total.\n`;
+      md += `\n> État final (coordinator, faisant autorité) : ${finalState.total} thread(s) au total — ${finalState.open} ouvert(s), ${finalState.resolving} en résolution, ${finalState.poisoned} empoisonné(s), ${finalState.cancelled} annulé(s), ${finalState.resolved} résolu(s).\n`;
     }
 
     if (Object.keys(r.coordinator_metrics.conflicts_by_layer).length > 0) {
