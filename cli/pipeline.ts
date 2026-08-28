@@ -12,6 +12,7 @@ import {
 import { executeRun } from "./run-core.js";
 import { uniqueReportBase } from "../src/orchestrator/reporter.js";
 import { parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
+import { currentRunId } from "../src/run-id.js";
 
 export function createPipelineCommand(): Command {
   return new Command("pipeline")
@@ -32,6 +33,18 @@ export function createPipelineCommand(): Command {
       }) => {
         const filePath = resolve(opts.file);
         const pipelineDir = dirname(filePath);
+
+        // ensureRunId (src/run-id.ts) is idempotent: once ESSAIM_RUN_ID is set
+        // in this process's env it wins for every later call, for the rest of
+        // the process's life. A pipeline runs all its steps in this SAME
+        // process, so without this, step 2 of the same template on the same
+        // repo would inherit step 1's run id — and workspace.ts's
+        // agentBranchName() derives the worktree branch name from it, so two
+        // steps would collide on the exact branch name the recent workspace.ts
+        // fix made unique per run. Captured once, before any step runs: if the
+        // caller (a runner, CI, or a parent essaim) already set ESSAIM_RUN_ID,
+        // that external id must still win for the WHOLE pipeline, unchanged.
+        const externalRunId = currentRunId();
 
         let def: PipelineDef;
         try {
@@ -60,6 +73,10 @@ export function createPipelineCommand(): Command {
 
         const deps: PipelineDeps = {
           runStep: async (step, sh) => {
+            // Force a fresh mint for this step, unless an external id must
+            // persist across the whole pipeline (see the comment above).
+            if (!externalRunId) delete process.env.ESSAIM_RUN_ID;
+
             // Merge set + set_file (set_file wins). set_file paths are relative
             // to the pipeline file's dir.
             const setParams = parseSetParams(
