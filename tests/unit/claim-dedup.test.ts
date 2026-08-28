@@ -167,3 +167,92 @@ describe('claimNextTask — refetch après course perdue (fenêtre TOCTOU rédui
     expect(claimed).toHaveLength(1); // t2 correctement écarté après le refetch
   });
 });
+
+// #140 — la fenêtre restante : au démarrage parallèle, les N instantanés
+// précèdent structurellement les N claims, donc computeBusyFiles() ne peut
+// rien voir au premier tour. Deux agents peuvent chacun réussir un claim
+// atomique (claim-task est atomique PAR THREAD, pas par fichier) sur deux
+// threads distincts qui ciblent le même fichier. Le départage doit être
+// déterministe et symétrique : les deux agents l'évaluent indépendamment,
+// sans se parler, et doivent converger vers EXACTEMENT un cédant.
+describe('claimNextTask — départage déterministe après double claim réussi sur un même fichier (#140)', () => {
+  it('cède le thread si un pair détient déjà un claim ouvert sur le même fichier avec un id de thread plus petit, puis enchaîne sur le candidat suivant', async () => {
+    let threadsActiveCalls = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/threads-active')) {
+        threadsActiveCalls++;
+        if (threadsActiveCalls === 1) {
+          // Snapshot initial : les deux fichiers semblent libres — c'est
+          // structurellement le cas au démarrage parallèle, computeBusyFiles()
+          // ne peut rien voir ici.
+          return new Response(JSON.stringify([
+            { id: 't5', status: 'open', claimed_by: null, target_files: ['shared.ts'] },
+            { id: 't9', status: 'open', claimed_by: null, target_files: ['other.ts'] },
+          ]), { status: 200 });
+        }
+        if (threadsActiveCalls === 2) {
+          // Re-fetch juste après notre claim RÉUSSI sur t5 : un pair a claim
+          // t1 sur le même fichier entre notre snapshot et notre claim. 't1'
+          // < 't5' : le pair garde, nous cédons.
+          return new Response(JSON.stringify([
+            { id: 't1', status: 'open', claimed_by: 'autre-agent', target_files: ['shared.ts'] },
+            { id: 't5', status: 'open', claimed_by: 'hunter-2', target_files: ['shared.ts'] },
+            { id: 't9', status: 'open', claimed_by: null, target_files: ['other.ts'] },
+          ]), { status: 200 });
+        }
+        // Re-fetch après le claim du candidat suivant (t9) : aucun rival sur other.ts.
+        return new Response(JSON.stringify([
+          { id: 't1', status: 'open', claimed_by: 'autre-agent', target_files: ['shared.ts'] },
+          { id: 't9', status: 'open', claimed_by: 'hunter-2', target_files: ['other.ts'] },
+        ]), { status: 200 });
+      }
+      if (url.endsWith('/api/claim-task')) {
+        return new Response(JSON.stringify({ success: true, claimed_by: null }), { status: 200 });
+      }
+      if (url.endsWith('/api/unclaim-task')) {
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task?.id).toBe('t9'); // a cédé t5 (t1 < t5), a enchaîné sur le candidat suivant
+    const unclaimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/unclaim-task'));
+    expect(unclaimed).toHaveLength(1);
+    expect(JSON.parse((unclaimed[0][1] as RequestInit).body as string).thread_id).toBe('t5');
+  });
+
+  it('cas symétrique : mêmes fichiers, identités inversées (notre id est maintenant le plus petit) — c\'est nous qui gardons, la conclusion suit l\'id et pas l\'ordre des appels', async () => {
+    let threadsActiveCalls = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/threads-active')) {
+        threadsActiveCalls++;
+        if (threadsActiveCalls === 1) {
+          return new Response(JSON.stringify([
+            { id: 't5', status: 'open', claimed_by: null, target_files: ['shared.ts'] },
+          ]), { status: 200 });
+        }
+        // Re-fetch après notre claim réussi sur t5 : le pair détient t99 sur
+        // le même fichier. 't5' < 't99' cette fois : nous gardons, le pair
+        // cède (de son côté, avec le même calcul).
+        return new Response(JSON.stringify([
+          { id: 't5', status: 'open', claimed_by: 'hunter-2', target_files: ['shared.ts'] },
+          { id: 't99', status: 'open', claimed_by: 'autre-agent', target_files: ['shared.ts'] },
+        ]), { status: 200 });
+      }
+      if (url.endsWith('/api/claim-task')) {
+        return new Response(JSON.stringify({ success: true, claimed_by: null }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task?.id).toBe('t5'); // id plus petit : nous gardons, pas de cession
+    const unclaimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/unclaim-task'));
+    expect(unclaimed).toHaveLength(0);
+  });
+});
