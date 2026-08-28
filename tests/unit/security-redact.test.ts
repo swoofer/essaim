@@ -58,4 +58,11 @@ describe("renderUntrustedBlock", () => {
     expect(out).toContain("BEGIN UNTRUSTED");
     expect(out).toContain("END UNTRUSTED");
   });
+
+  it("a control character must not bypass secret redaction", () => {
+    const NUL = String.fromCharCode(0);
+    const out = renderUntrustedBlock("run this: sk-a" + NUL + "bcDEF0123456789ghijklmnop now");
+    expect(out).not.toContain("sk-abcDEF0123456789ghijklmnop");
+    expect(out).toContain("«REDACTED»");
+  });
 });
