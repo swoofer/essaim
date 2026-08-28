@@ -94,22 +94,24 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Agents | ${r.coordinator_metrics.agents_count} |\n`;
     const cm = r.coordinator_metrics;
     const finalState = cm.threads_final;
-    // finalState, when present, is the coordinator DB's own tally for this run
-    // (mcp-coordinator ≥2.3.0) — it replaces the SSE-windowed estimate for
-    // "Threads ouverts" and "Sans consensus" below. "Consensus" / "Auto-résolus"
-    // stay SSE-derived either way: resolution_type only exists on the
-    // thread_resolved event, not in this tally, which lumps every resolved
-    // thread together regardless of how it got there.
+    // finalState, when present, is the coordinator DB's own tally for this
+    // run (mcp-coordinator ≥2.3.0), scoped by run_id server-side. Every
+    // number below it (threads_opened aside) comes from the SSE replay,
+    // which is windowed by event id but NOT scoped by run — see the
+    // docstring on fetchCoordinatorMetrics. "Threads ouverts" is a pure
+    // substitution — finalState.total answers the exact same question as
+    // threads_opened, just from a better source — so it's safe to replace.
+    // "Sans consensus" is NOT: subtracting the SSE-derived
+    // consensus/auto-résolus counts from a run-scoped finalState.resolved
+    // mixes an unscoped source into a scoped one. On a coordinator shared
+    // with a concurrent run, thread_resolved events belonging to THAT run
+    // can inflate the SSE counts past finalState.resolved, and clamping the
+    // result to 0 doesn't fix that — it erases real unresolved threads from
+    // the report, exactly the bug removed from metrics.ts (see the comment
+    // above computeMetrics). So this stays the SSE estimate unconditionally;
+    // the footnote below is what makes 'poisoned'/'cancelled' visible.
     const threadsOpened = finalState ? finalState.total : cm.threads_opened;
-    const withoutConsensus = finalState
-      ? finalState.open + finalState.resolving + finalState.poisoned + finalState.cancelled +
-        // Whatever the DB calls "resolved" minus the two outcomes counted
-        // above is every other way a thread closed (timeout, max_rounds,
-        // closed, agent_departure). Clamped: consensus/auto-résolus aren't
-        // run-scoped the way finalState is, so a coordinator shared with a
-        // concurrent run could in principle make this subtraction negative.
-        Math.max(0, finalState.resolved - cm.threads_resolved_consensus - cm.threads_auto_resolved)
-      : cm.threads_without_consensus;
+    const withoutConsensus = cm.threads_without_consensus;
 
     md += `| Threads ouverts | ${threadsOpened} |\n`;
     md += `| Consensus (approuvé par tous) | ${cm.threads_resolved_consensus} |\n`;

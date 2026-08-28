@@ -66,11 +66,15 @@ describe("writeReport — le tableau ne promet plus un accord qu'il n'a pas mesu
 });
 
 // mcp-coordinator 2.3.0 — POST /api/threads-summary renvoie l'état FINAL des
-// threads, faisant autorité (là où tout ce qui précède est dérivé d'une
-// fenêtre d'événements SSE). Quand il est disponible, il remplace l'estimation
-// pour "Threads ouverts" et "Sans consensus" — sans jamais contredire
-// "Consensus", qui reste sa seule vraie source (resolution_type n'existe que
-// sur thread_resolved, pas dans ce tally).
+// threads, faisant autorité et scopé par run_id côté serveur (là où tout ce
+// qui précède est dérivé d'une fenêtre d'événements SSE non scopée par run —
+// voir le docstring de fetchCoordinatorMetrics). Quand il est disponible, il
+// remplace l'estimation pour "Threads ouverts" — une substitution pure,
+// finalState.total répondant à la même question que threads_opened depuis
+// une meilleure source. "Sans consensus" reste l'estimation SSE : la mélanger
+// avec finalState.resolved reviendrait à soustraire un compteur non scopé
+// (consensus/auto-résolus) d'un total scopé, ce qui peut s'effacer
+// silencieusement sur un coordinateur partagé (round 1, finding critique).
 describe("writeReport — état final du coordinator (threads-summary) remplace l'estimation quand disponible", () => {
   function runAvecEtatFinal(): RunResult {
     const base = runReel();
@@ -81,15 +85,16 @@ describe("writeReport — état final du coordinator (threads-summary) remplace 
     return base;
   }
 
-  it("remplace « Threads ouverts » et « Sans consensus » par le compte réel, sans contredire Consensus", () => {
+  it("remplace « Threads ouverts » par le total réel, sans toucher « Sans consensus » ni contredire Consensus", () => {
     dir = mkdtempSync(join(tmpdir(), "rep-outcomes-final-"));
     const md = readFileSync(writeReport([runAvecEtatFinal()], dir), "utf8");
 
     // 9 (le total réel du coordinator), pas 4 (le compte SSE fenêtré de runReel()).
     expect(md).toContain("| Threads ouverts | 9 |");
     expect(md).toContain("| Consensus (approuvé par tous) | 2 |");
-    // open(0) + resolving(0) + poisoned(6) + cancelled(1) + (resolved(2) - consensus(2) - auto(0)) = 7
-    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 7 |");
+    // threads_without_consensus reste celui de runReel() (4) — l'estimation
+    // SSE, inchangée par la présence de threads_final.
+    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
   });
 
   it("rend le statut 'poisoned' visible — jusqu'ici structurellement invisible au rapport", () => {
@@ -98,5 +103,29 @@ describe("writeReport — état final du coordinator (threads-summary) remplace 
 
     expect(md).toMatch(/empoisonné/i);
     expect(md).toMatch(/6/);
+  });
+
+  // Finding critique (round 1) : un calcul antérieur faisait
+  // `Math.max(0, finalState.resolved - consensus - autoResolved)`, mélangeant
+  // le tally run-scopé de threads_final avec des compteurs SSE NON scopés par
+  // run. Sur un coordinateur partagé, un thread_resolved d'un run CONCURRENT
+  // peut gonfler consensus/auto-résolus bien au-delà de finalState.resolved —
+  // reproduit ici en donnant à la base un total de seulement 3 threads pour
+  // CE run, contre un compteur SSE de consensus à 9. L'ancien calcul aurait
+  // donné 1 + 0 + 0 + 0 + max(0, 2 - 9 - 0) = 1 : un nombre plus petit et
+  // faux qui efface silencieusement les vrais threads sans consensus — le
+  // même bug que celui déjà corrigé dans metrics.ts (voir computeMetrics).
+  it("des compteurs SSE dépassant le total de la base n'effacent pas « Sans consensus »", () => {
+    const base = runReel();
+    base.coordinator_metrics.threads_resolved_consensus = 9;
+    base.coordinator_metrics.threads_auto_resolved = 0;
+    base.coordinator_metrics.threads_without_consensus = 4; // estimation SSE réelle
+    base.coordinator_metrics.threads_final = { total: 3, open: 1, resolving: 0, resolved: 2, cancelled: 0, poisoned: 0 };
+
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-contam-"));
+    const md = readFileSync(writeReport([base], dir), "utf8");
+
+    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
+    expect(md).not.toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 1 |");
   });
 });
