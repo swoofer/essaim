@@ -252,6 +252,12 @@ describe('claimNextTask — départage déterministe après double claim réussi
     const task = await claimNextTask('https://c', 'hunter-2');
 
     expect(task?.id).toBe('t5'); // id plus petit : nous gardons, pas de cession
+    // Discriminant : sur 058ee3f, claimNextTask retourne dès success===true
+    // sans jamais rappeler threads-active — task?.id==='t5' et 0 unclaim
+    // seraient déjà vrais SANS le patch (aucun refetch post-claim n'existe).
+    // Le seul signal qui ne peut être vrai qu'AVEC resolveFileConflict() en
+    // jeu est ce second appel : le pré-patch en fait 1, le patché en fait 2.
+    expect(threadsActiveCalls).toBe(2);
     const unclaimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/unclaim-task'));
     expect(unclaimed).toHaveLength(0);
   });

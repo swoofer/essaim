@@ -184,14 +184,25 @@ function computeBusyFiles(openThreads: Array<Record<string, unknown>>, agentId: 
 // premier". Le thread_id n'a ni défaut : claim-task le distribue déjà unique
 // (clé primaire côté coordinator) et strictement identique quel que soit qui
 // le lit — l'ordonner (comparaison lexicographique de chaîne) donne donc aux
-// deux agents la même réponse sans le moindre message échangé. Celui qui NE
-// détient PAS le plus petit id parmi les threads en conflit cède : cette
-// règle ne peut jamais désigner les deux camps gagnants (elle est stricte),
-// ni les deux perdants (l'un des deux id est forcément strictement plus
-// petit) — donc jamais de double-cession, jamais de double-rétention, pour
-// peu que les deux refetch post-claim voient bien les deux claims (résiduel
-// documenté en bas de fichier : un refetch qui course en avance de la course
-// adverse peut encore rater le conflit — fenêtre rétrécie, pas fermée).
+// deux agents la même réponse sans le moindre message échangé.
+//
+// Ce que la comparaison garantit vraiment — et ce qu'elle ne garantit PAS :
+// SI un agent voit au moins un rival au refetch, la règle est stricte
+// (thread_id le plus petit gagne) donc JAMAIS DOUBLE-CESSION : deux agents
+// en conflit direct calculent le même couple d'id, obtiennent des booléens
+// strictement complémentaires, il ne peut pas y avoir égalité (id unique).
+// Mais `rivals.length === 0` gagne EN DESSOUS, sans comparer aucun id — et
+// c'est exactement le trou : si le refetch de l'agent A court en avance de
+// la propagation du claim de l'agent B (A ne voit encore aucun rival), A
+// gagne trivialement sans savoir qu'il y a conflit. Si le refetch de B,
+// juste après, voit bien le claim de A, B compare pour de vrai — et PEUT
+// gagner aussi si son id est le plus petit des deux. Résultat possible :
+// DOUBLE-RÉTENTION (les deux gardent), jamais fermée par cette fonction
+// seule. La garantie est donc best-effort, pas structurelle : elle réduit
+// la fenêtre du correctif précédent, elle ne l'annule pas. Fermer ça pour
+// de vrai demande l'atomicité sur le FICHIER côté coordinator, pas le
+// thread — hors périmètre client (documenté aussi en bas de fichier, sur le
+// refetch après course perdue).
 async function resolveFileConflict(
   coordinatorUrl: string,
   agentId: string,
@@ -351,7 +362,13 @@ export async function unclaimTask(
     thread_id: threadId,
     agent_id: agentId,
   }).catch((err) => {
-    log.warn("unclaimTask failed", { error: (err as Error).message });
+    // Swallowed on purpose (every caller fires this fire-and-forget), but the
+    // thread id has to be IN the warning: without it, a failed unclaim is a
+    // thread stuck claimed_by us forever — nobody, including us, ever picks
+    // it up again — and a bare "unclaimTask failed" gives no way to find
+    // which one. Cheapest fix that covers every call site, including the
+    // new cede-on-conflict path in claimNextTask (#140).
+    log.warn(`unclaimTask failed: thread=${threadId}`, { error: (err as Error).message });
   });
 }
 
