@@ -97,6 +97,21 @@ export interface CoordinatorMetrics {
   introspections_concerned: number;
   avg_resolution_time_ms: number;
   hot_files: string[];
+  // Final, authoritative thread-status tally for this run, straight off the
+  // coordinator's DB (mcp-coordinator ≥2.3.0, POST /api/threads-summary).
+  // Unlike every field above — all derived from a windowed SSE replay — this
+  // sees 'poisoned' (unclaimed too many times) and 'cancelled' threads,
+  // neither of which ever emits an event. Absent on an older coordinator
+  // (404), an unreachable one, or when run scoping is disabled (no run_id):
+  // the reporter then falls back to the SSE-derived estimate above.
+  threads_final?: {
+    total: number;
+    open: number;
+    resolving: number;
+    resolved: number;
+    cancelled: number;
+    poisoned: number;
+  };
 }
 
 export interface RunResult {

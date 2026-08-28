@@ -64,3 +64,87 @@ describe("writeReport — le tableau ne promet plus un accord qu'il n'a pas mesu
     expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
   });
 });
+
+// mcp-coordinator 2.3.0 — POST /api/threads-summary renvoie l'état FINAL des
+// threads, faisant autorité et scopé par run_id côté serveur (là où tout le
+// tableau reste dérivé d'une fenêtre d'événements SSE non scopée par run —
+// voir le docstring de fetchCoordinatorMetrics). Les deux sources répondent
+// à des questions différentes et ne doivent JAMAIS partager une ligne du
+// tableau : mélanger même un seul champ (round 2, finding critique) suffit
+// à faire imprimer un "Threads ouverts" inférieur à son propre "Consensus".
+// Le tableau reste donc entièrement SSE ; threads_final ne sert que dans la
+// ligne de note distincte, qui suffit à elle seule à rendre 'poisoned' et
+// 'cancelled' visibles.
+describe("writeReport — état final du coordinator (threads-summary) reste hors du tableau", () => {
+  function runAvecEtatFinal(): RunResult {
+    const base = runReel();
+    // total(9) = open(0) + resolving(0) + resolved(2) + cancelled(1) + poisoned(6).
+    base.coordinator_metrics.threads_final = { total: 9, open: 0, resolving: 0, resolved: 2, cancelled: 1, poisoned: 6 };
+    base.coordinator_metrics.threads_resolved_consensus = 2;
+    base.coordinator_metrics.threads_auto_resolved = 0;
+    return base;
+  }
+
+  it("le tableau reste celui du SSE (threads_opened, pas finalState.total) même quand l'état final est disponible", () => {
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-final-"));
+    const md = readFileSync(writeReport([runAvecEtatFinal()], dir), "utf8");
+
+    // 4 (threads_opened, la source SSE de runReel()), pas 9 (finalState.total).
+    expect(md).toContain("| Threads ouverts | 4 |");
+    expect(md).toContain("| Consensus (approuvé par tous) | 2 |");
+    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
+  });
+
+  it("rend le statut 'poisoned' visible dans la ligne de note — jusqu'ici structurellement invisible au rapport", () => {
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-final-"));
+    const md = readFileSync(writeReport([runAvecEtatFinal()], dir), "utf8");
+
+    expect(md).toMatch(/empoisonné/i);
+    expect(md).toMatch(/6/);
+  });
+
+  // Finding critique (round 1) : un calcul antérieur faisait
+  // `Math.max(0, finalState.resolved - consensus - autoResolved)`, mélangeant
+  // le tally run-scopé de threads_final avec des compteurs SSE NON scopés par
+  // run. Sur un coordinateur partagé, un thread_resolved d'un run CONCURRENT
+  // peut gonfler consensus/auto-résolus bien au-delà de finalState.resolved —
+  // reproduit ici en donnant à la base un total de seulement 3 threads pour
+  // CE run, contre un compteur SSE de consensus à 9. L'ancien calcul aurait
+  // donné 1 + 0 + 0 + 0 + max(0, 2 - 9 - 0) = 1 : un nombre plus petit et
+  // faux qui efface silencieusement les vrais threads sans consensus — le
+  // même bug que celui déjà corrigé dans metrics.ts (voir computeMetrics).
+  it("des compteurs SSE dépassant le total de la base n'effacent pas « Sans consensus »", () => {
+    const base = runReel();
+    base.coordinator_metrics.threads_resolved_consensus = 9;
+    base.coordinator_metrics.threads_auto_resolved = 0;
+    base.coordinator_metrics.threads_without_consensus = 4; // estimation SSE réelle
+    base.coordinator_metrics.threads_final = { total: 3, open: 1, resolving: 0, resolved: 2, cancelled: 0, poisoned: 0 };
+
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-contam-"));
+    const md = readFileSync(writeReport([base], dir), "utf8");
+
+    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
+    expect(md).not.toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 1 |");
+  });
+
+  // Finding critique (round 2) : "Threads ouverts" était substitué par
+  // finalState.total alors que "Consensus" restait SSE — deux sources dans
+  // la même ligne de présentation. Réutilise le scénario de contamination :
+  // finalState.total(3) tombe sous le Consensus SSE de CE run (9). L'ancien
+  // calcul aurait imprimé "Threads ouverts 3" à côté de "Consensus 9" — un
+  // total plus petit que le compteur qu'il est censé contenir. threads_opened
+  // (10) est ici cohérent avec son propre Consensus (9) : même source, donc
+  // pas de contradiction — ce que finalState.total(3) aurait cassé.
+  it("« Threads ouverts » vient du SSE, jamais de threads_final : le tableau ne contredit jamais son propre Consensus", () => {
+    const base = runReel();
+    base.coordinator_metrics.threads_opened = 10;
+    base.coordinator_metrics.threads_resolved_consensus = 9;
+    base.coordinator_metrics.threads_final = { total: 3, open: 1, resolving: 0, resolved: 2, cancelled: 0, poisoned: 0 };
+
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-nomix-"));
+    const md = readFileSync(writeReport([base], dir), "utf8");
+
+    expect(md).toContain("| Threads ouverts | 10 |");
+    expect(md).not.toContain("| Threads ouverts | 3 |");
+  });
+});

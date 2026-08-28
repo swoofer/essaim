@@ -152,6 +152,74 @@ describe('fetchCoordinatorMetrics — scoping the SSE cursor to this run (#108)'
   });
 });
 
+// threads-summary (mcp-coordinator 2.3.0) — l'état final réel des threads,
+// que la fenêtre SSE ne peut pas voir : un thread 'poisoned' (trop de
+// unclaims) ou 'cancelled' est une UPDATE de table, jamais un événement.
+describe('fetchCoordinatorMetrics — état final des threads (threads-summary, mcp-coordinator 2.3.0)', () => {
+  afterEach(() => { delete process.env.ESSAIM_RUN_ID; });
+
+  it('interroge /api/threads-summary avec le run_id courant et peuple threads_final', async () => {
+    process.env.ESSAIM_RUN_ID = 'run-99';
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.includes('/api/threads-summary')) {
+        return new Response(JSON.stringify({
+          run_id: 'run-99', total: 6,
+          counts: { open: 1, resolving: 0, resolved: 3, cancelled: 0, poisoned: 2 },
+        }), { status: 200 });
+      }
+      return new Response('', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const metrics = await fetchCoordinatorMetrics('https://coordinator.test');
+
+    expect(metrics.threads_final).toEqual({ total: 6, open: 1, resolving: 0, resolved: 3, cancelled: 0, poisoned: 2 });
+    const call = fetchMock.mock.calls.find(([url]) => (url as string).includes('/api/threads-summary'));
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.run_id).toBe('run-99');
+  });
+
+  it("sans run_id, ne tente même pas la requête (le coordinateur la refuserait de toute façon: run_id requis)", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const metrics = await fetchCoordinatorMetrics('https://coordinator.test');
+
+    expect(metrics.threads_final).toBeUndefined();
+    expect(fetchMock.mock.calls.some(([url]) => (url as string).includes('/api/threads-summary'))).toBe(false);
+  });
+
+  // Le cas de robustesse qui compte le plus : un coordinateur plus ancien que
+  // 2.3.0 n'a pas cette route et répond 404 — le run ne doit ni échouer ni
+  // voir son rapport pollué, juste se replier sur les compteurs SSE connus.
+  it('se replie proprement quand le coordinateur ne connaît pas la route (404, coordinateur < 2.3.0)', async () => {
+    process.env.ESSAIM_RUN_ID = 'run-42';
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.includes('/api/threads-summary')) return new Response('not found', { status: 404 });
+      return new Response('', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const metrics = await fetchCoordinatorMetrics('https://coordinator.test');
+
+    expect(metrics.threads_final).toBeUndefined();
+    expect(metrics.threads_opened).toBe(0);
+  });
+
+  it('se replie proprement quand le coordinateur est injoignable', async () => {
+    process.env.ESSAIM_RUN_ID = 'run-42';
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.includes('/api/threads-summary')) throw new Error('ECONNREFUSED');
+      return new Response('', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const metrics = await fetchCoordinatorMetrics('https://coordinator.test');
+    expect(metrics.threads_final).toBeUndefined();
+  });
+});
+
 describe('fetchLatestEventId (#108)', () => {
   it('captures the max event id currently buffered by the coordinator', async () => {
     const sse = [

@@ -1,5 +1,6 @@
 import type { CoordinatorMetrics } from "./types.js";
 import { authHeaders } from "../coordinator-auth.js";
+import { currentRunId } from "../run-id.js";
 
 export interface SseEvent {
   id: number;
@@ -305,7 +306,69 @@ export async function fetchCoordinatorMetrics(coordinatorUrl: string, sinceEvent
     }
   } catch {}
 
+  const runId = currentRunId();
+  if (runId) {
+    metrics.threads_final = await fetchThreadsSummary(coordinatorUrl, runId);
+  }
+
   return metrics;
+}
+
+/**
+ * Final, authoritative thread-status tally for this run, straight off the
+ * coordinator's DB (mcp-coordinator ≥2.3.0, POST /api/threads-summary).
+ *
+ * Everything else in this file is derived from a windowed SSE replay. This
+ * reads the DB directly instead, so it is the only source here that can see
+ * a 'poisoned' thread (handleUnclaimTask, unclaimed too many times) or a
+ * 'cancelled' one — both are a table UPDATE with no matching SSE event, and
+ * were structurally invisible to the rest of computeMetrics.
+ *
+ * `run_id` is required server-side (strict equality) so a run's summary
+ * can't be inflated by a concurrent session sharing the same coordinator —
+ * matches the scoping already used by work-stealing.ts and mqtt-listener.ts.
+ *
+ * Returns undefined — never throws — on anything short of a clean 200: an
+ * older coordinator that 404s (the route doesn't exist below 2.3.0), an
+ * unreachable one, or a malformed response. Callers fall back to the
+ * SSE-derived estimate, same fail-open posture as the rest of this file.
+ */
+export async function fetchThreadsSummary(
+  coordinatorUrl: string,
+  runId: string,
+): Promise<CoordinatorMetrics["threads_final"]> {
+  try {
+    const resp = await getWithBudget(
+      `${coordinatorUrl}/api/threads-summary`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ run_id: runId }),
+      },
+      2000,
+    );
+    if (!resp.ok) {
+      // 404 is the expected shape of "coordinator predates this route" — not
+      // worth warning about. Anything else (401, 500, ...) is unexpected
+      // enough to surface, same as the /api/events warning above.
+      if (resp.status !== 404) {
+        console.warn(`[metrics] /api/threads-summary → ${resp.status} — final thread state unavailable`);
+      }
+      return undefined;
+    }
+    const data = JSON.parse(resp.body) as { total?: number; counts?: Record<string, number> };
+    const c = data.counts ?? {};
+    return {
+      total: data.total ?? 0,
+      open: c.open ?? 0,
+      resolving: c.resolving ?? 0,
+      resolved: c.resolved ?? 0,
+      cancelled: c.cancelled ?? 0,
+      poisoned: c.poisoned ?? 0,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 

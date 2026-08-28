@@ -92,13 +92,31 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Métrique | Valeur |\n|----------|--------|\n`;
     md += `| Durée | ${(r.duration_ms / 1000).toFixed(1)}s |\n`;
     md += `| Agents | ${r.coordinator_metrics.agents_count} |\n`;
-    md += `| Threads ouverts | ${r.coordinator_metrics.threads_opened} |\n`;
-    md += `| Consensus (approuvé par tous) | ${r.coordinator_metrics.threads_resolved_consensus} |\n`;
-    md += `| Auto-résolus (aucun agent concerné) | ${r.coordinator_metrics.threads_auto_resolved} |\n`;
-    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${r.coordinator_metrics.threads_without_consensus} |\n`;
-    md += `| Messages | ${r.coordinator_metrics.messages_exchanged} |\n`;
-    md += `| Introspections | ${r.coordinator_metrics.introspections_triggered} |\n`;
-    md += `| Hot files | ${r.coordinator_metrics.hot_files.length} |\n`;
+    const cm = r.coordinator_metrics;
+    const finalState = cm.threads_final;
+    // The table stays entirely SSE-derived — one source, one window, rows
+    // that add up against each other. finalState (mcp-coordinator ≥2.3.0,
+    // scoped by run_id server-side) answers a DIFFERENT question than the
+    // SSE replay (windowed by event id, NOT scoped by run — see the
+    // docstring on fetchCoordinatorMetrics) and the two must never share a
+    // row: mixing "Threads ouverts" from finalState with "Consensus" from
+    // SSE let a coordinator shared with a concurrent run print a total
+    // smaller than the consensus count it's supposed to contain — the same
+    // class of silent contradiction already ruled out for "Sans consensus".
+    // finalState surfaces only in the footnote below, clearly labeled as a
+    // separate, authoritative source — that's what makes 'poisoned' and
+    // 'cancelled' visible, and it needs nothing from the table to do it.
+    md += `| Threads ouverts | ${cm.threads_opened} |\n`;
+    md += `| Consensus (approuvé par tous) | ${cm.threads_resolved_consensus} |\n`;
+    md += `| Auto-résolus (aucun agent concerné) | ${cm.threads_auto_resolved} |\n`;
+    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${cm.threads_without_consensus} |\n`;
+    md += `| Messages | ${cm.messages_exchanged} |\n`;
+    md += `| Introspections | ${cm.introspections_triggered} |\n`;
+    md += `| Hot files | ${cm.hot_files.length} |\n`;
+
+    if (finalState) {
+      md += `\n> État final (coordinator, faisant autorité) : ${finalState.total} thread(s) au total — ${finalState.open} ouvert(s), ${finalState.resolving} en résolution, ${finalState.poisoned} empoisonné(s), ${finalState.cancelled} annulé(s), ${finalState.resolved} résolu(s).\n`;
+    }
 
     if (Object.keys(r.coordinator_metrics.conflicts_by_layer).length > 0) {
       md += `\n### Conflits par layer\n\n`;
