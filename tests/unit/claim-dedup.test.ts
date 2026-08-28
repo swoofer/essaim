@@ -77,6 +77,36 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
     expect(task?.id).toBe('t2');
   });
 
+  it('le coordinator renvoie target_files en JSON stringifié (pas un tableau) — le garde-fou doit quand même bloquer', async () => {
+    // Preuve de bout en bout du défaut : database.js stocke target_files en
+    // colonne TEXT via JSON.stringify, et consultation.js#listThreads renvoie
+    // les lignes SQLite brutes sans désérialisation. /api/threads-active livre
+    // donc une CHAÎNE JSON, jamais un tableau — exactement ce que ce fixture
+    // reproduit, à la différence des autres cas de ce fichier.
+    const fetchMock = mockCoordinator([
+      { id: 't1', status: 'open', claimed_by: 'hunter-1', target_files: '["src/report.ts"]' },
+      { id: 't2', status: 'open', claimed_by: null, target_files: '["src/report.ts"]' },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task).toBeNull();
+    const claimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/claim-task'));
+    expect(claimed).toHaveLength(0); // on n'a même pas tenté
+  });
+
+  it('une chaîne target_files malformée dégrade vers "aucun fichier connu" sans jeter', async () => {
+    vi.stubGlobal('fetch', mockCoordinator([
+      { id: 't1', status: 'open', claimed_by: 'hunter-1', target_files: '{not json' },
+      { id: 't2', status: 'open', claimed_by: null, target_files: '["src/csv.ts"]' },
+    ]));
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task?.id).toBe('t2'); // t1 illisible n'exclut aucun fichier, ne bloque pas t2
+  });
+
   it('remonte le travail DÉJÀ résolu sur le même fichier — de quoi marquer DUP au lieu de recommiter', async () => {
     vi.stubGlobal('fetch', mockCoordinator([
       {
