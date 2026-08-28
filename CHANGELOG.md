@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/swoofer/essaim/compare/v0.13.1...v0.14.0) (2026-08-28)
+
+
+### Features
+
+* **orchestrator:** le rapport peut enfin nommer les threads empoisonnés ([#137](https://github.com/swoofer/essaim/issues/137)) ([dfed489](https://github.com/swoofer/essaim/commit/dfed489b2166bb5029ebf84e85c6152f22981441))
+
+
+### Bug Fixes
+
+* **pipeline:** un run id par étape, et trois garde-fous qui ne gardaient rien ([#135](https://github.com/swoofer/essaim/issues/135)) ([f6f2549](https://github.com/swoofer/essaim/commit/f6f2549aa4471477bf1222e05de9827a58a47793))
+
 ## [0.13.1](https://github.com/swoofer/essaim/compare/v0.13.0...v0.13.1) (2026-08-27)
 
 
