@@ -47,4 +47,20 @@ describe("writeReport — le tableau ne promet plus un accord qu'il n'a pas mesu
     expect(md).not.toContain("| Consensus |");
     expect(md).not.toContain("| Auto-resolved |");
   });
+
+  // Les deux libellés anglais ci-dessus ont déjà été renommés une première fois
+  // (en français) avant même ce test : `not.toContain` sur "| Consensus |" /
+  // "| Auto-resolved |" est donc vrai que les trois lignes de compteurs soient
+  // présentes ou que quelqu'un les supprime purement et simplement — le test ne
+  // discriminait que dans un sens. Ceci vérifie l'autre : les trois lignes du
+  // tableau existent réellement, avec les valeurs mesurées.
+  it("écrit les trois compteurs de threads avec leurs valeurs mesurées", () => {
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-"));
+    const md = readFileSync(writeReport([runReel()], dir), "utf8");
+
+    expect(md).toContain("| Threads ouverts | 4 |");
+    expect(md).toContain("| Consensus (approuvé par tous) | 9 |");
+    expect(md).toContain("| Auto-résolus (aucun agent concerné) | 0 |");
+    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
+  });
 });
