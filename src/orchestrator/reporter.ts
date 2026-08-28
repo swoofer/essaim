@@ -92,13 +92,36 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Métrique | Valeur |\n|----------|--------|\n`;
     md += `| Durée | ${(r.duration_ms / 1000).toFixed(1)}s |\n`;
     md += `| Agents | ${r.coordinator_metrics.agents_count} |\n`;
-    md += `| Threads ouverts | ${r.coordinator_metrics.threads_opened} |\n`;
-    md += `| Consensus (approuvé par tous) | ${r.coordinator_metrics.threads_resolved_consensus} |\n`;
-    md += `| Auto-résolus (aucun agent concerné) | ${r.coordinator_metrics.threads_auto_resolved} |\n`;
-    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${r.coordinator_metrics.threads_without_consensus} |\n`;
-    md += `| Messages | ${r.coordinator_metrics.messages_exchanged} |\n`;
-    md += `| Introspections | ${r.coordinator_metrics.introspections_triggered} |\n`;
-    md += `| Hot files | ${r.coordinator_metrics.hot_files.length} |\n`;
+    const cm = r.coordinator_metrics;
+    const finalState = cm.threads_final;
+    // finalState, when present, is the coordinator DB's own tally for this run
+    // (mcp-coordinator ≥2.3.0) — it replaces the SSE-windowed estimate for
+    // "Threads ouverts" and "Sans consensus" below. "Consensus" / "Auto-résolus"
+    // stay SSE-derived either way: resolution_type only exists on the
+    // thread_resolved event, not in this tally, which lumps every resolved
+    // thread together regardless of how it got there.
+    const threadsOpened = finalState ? finalState.total : cm.threads_opened;
+    const withoutConsensus = finalState
+      ? finalState.open + finalState.resolving + finalState.poisoned + finalState.cancelled +
+        // Whatever the DB calls "resolved" minus the two outcomes counted
+        // above is every other way a thread closed (timeout, max_rounds,
+        // closed, agent_departure). Clamped: consensus/auto-résolus aren't
+        // run-scoped the way finalState is, so a coordinator shared with a
+        // concurrent run could in principle make this subtraction negative.
+        Math.max(0, finalState.resolved - cm.threads_resolved_consensus - cm.threads_auto_resolved)
+      : cm.threads_without_consensus;
+
+    md += `| Threads ouverts | ${threadsOpened} |\n`;
+    md += `| Consensus (approuvé par tous) | ${cm.threads_resolved_consensus} |\n`;
+    md += `| Auto-résolus (aucun agent concerné) | ${cm.threads_auto_resolved} |\n`;
+    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${withoutConsensus} |\n`;
+    md += `| Messages | ${cm.messages_exchanged} |\n`;
+    md += `| Introspections | ${cm.introspections_triggered} |\n`;
+    md += `| Hot files | ${cm.hot_files.length} |\n`;
+
+    if (finalState) {
+      md += `\n> État final (coordinator, faisant autorité) : ${finalState.open} ouvert(s), ${finalState.resolving} en résolution, ${finalState.poisoned} empoisonné(s), ${finalState.cancelled} annulé(s), ${finalState.resolved} résolu(s) au total.\n`;
+    }
 
     if (Object.keys(r.coordinator_metrics.conflicts_by_layer).length > 0) {
       md += `\n### Conflits par layer\n\n`;

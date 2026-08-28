@@ -64,3 +64,39 @@ describe("writeReport — le tableau ne promet plus un accord qu'il n'a pas mesu
     expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
   });
 });
+
+// mcp-coordinator 2.3.0 — POST /api/threads-summary renvoie l'état FINAL des
+// threads, faisant autorité (là où tout ce qui précède est dérivé d'une
+// fenêtre d'événements SSE). Quand il est disponible, il remplace l'estimation
+// pour "Threads ouverts" et "Sans consensus" — sans jamais contredire
+// "Consensus", qui reste sa seule vraie source (resolution_type n'existe que
+// sur thread_resolved, pas dans ce tally).
+describe("writeReport — état final du coordinator (threads-summary) remplace l'estimation quand disponible", () => {
+  function runAvecEtatFinal(): RunResult {
+    const base = runReel();
+    // total(9) = open(0) + resolving(0) + resolved(2) + cancelled(1) + poisoned(6).
+    base.coordinator_metrics.threads_final = { total: 9, open: 0, resolving: 0, resolved: 2, cancelled: 1, poisoned: 6 };
+    base.coordinator_metrics.threads_resolved_consensus = 2;
+    base.coordinator_metrics.threads_auto_resolved = 0;
+    return base;
+  }
+
+  it("remplace « Threads ouverts » et « Sans consensus » par le compte réel, sans contredire Consensus", () => {
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-final-"));
+    const md = readFileSync(writeReport([runAvecEtatFinal()], dir), "utf8");
+
+    // 9 (le total réel du coordinator), pas 4 (le compte SSE fenêtré de runReel()).
+    expect(md).toContain("| Threads ouverts | 9 |");
+    expect(md).toContain("| Consensus (approuvé par tous) | 2 |");
+    // open(0) + resolving(0) + poisoned(6) + cancelled(1) + (resolved(2) - consensus(2) - auto(0)) = 7
+    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 7 |");
+  });
+
+  it("rend le statut 'poisoned' visible — jusqu'ici structurellement invisible au rapport", () => {
+    dir = mkdtempSync(join(tmpdir(), "rep-outcomes-final-"));
+    const md = readFileSync(writeReport([runAvecEtatFinal()], dir), "utf8");
+
+    expect(md).toMatch(/empoisonné/i);
+    expect(md).toMatch(/6/);
+  });
+});
