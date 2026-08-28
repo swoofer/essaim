@@ -462,7 +462,14 @@ describe("runProject — resetBase authorization", () => {
 
     expect(launchAgentLoop).toHaveBeenCalledTimes(1);
     expect(result.agent_results).toHaveLength(1);
-  });
+    // Timeout explicite : ce cas est le seul à exercer le chemin destructif
+    // (`git checkout -- . && git clean -fd`) EN PLUS de créer un worktree, donc
+    // le plus gourmand en sous-processus git du fichier. Mesuré à 4,4 s en
+    // local, il a dépassé les 30 s du timeout global sur un runner
+    // windows-latest chargé — le premier run de la matrice Windows sur `main`,
+    // pendant que quatre compilations de binaires tournaient en parallèle.
+    // Mocker git rendrait le test rapide en supprimant ce qu'il vérifie.
+  }, 120_000);
 
   it("does not throw when ESSAIM_RESET_BASE is unset, even with workspace.base omitted (no regression)", async () => {
     delete process.env.ESSAIM_RESET_BASE;
