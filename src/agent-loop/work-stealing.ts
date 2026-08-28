@@ -169,6 +169,67 @@ function computeBusyFiles(openThreads: Array<Record<string, unknown>>, agentId: 
   return busyFiles;
 }
 
+// Résiduel de la fenêtre TOCTOU (#140) : au démarrage parallèle, les N
+// instantanés précèdent structurellement les N claims, donc computeBusyFiles()
+// ci-dessus ne peut rien voir au premier tour — deux agents peuvent chacun
+// réussir un claim atomique (claim-task est atomique PAR THREAD, jamais par
+// fichier) sur deux threads distincts qui ciblent le même fichier. Après un
+// claim RÉUSSI, on re-vérifie une fois : si un pair détient déjà un claim
+// ouvert sur un de nos fichiers, l'un des deux doit céder.
+//
+// Les deux agents évaluent ça indépendamment, sans se parler — le critère
+// doit donc être une fonction pure des données que les deux côtés voient
+// déjà identiques. L'horodatage a été écarté : les horloges dérivent et les
+// requêtes courent, donc les deux agents peuvent chacun se croire "arrivé
+// premier". Le thread_id n'a ni défaut : claim-task le distribue déjà unique
+// (clé primaire côté coordinator) et strictement identique quel que soit qui
+// le lit — l'ordonner (comparaison lexicographique de chaîne) donne donc aux
+// deux agents la même réponse sans le moindre message échangé.
+//
+// Ce que la comparaison garantit vraiment — et ce qu'elle ne garantit PAS :
+// SI un agent voit au moins un rival au refetch, la règle est stricte
+// (thread_id le plus petit gagne) donc JAMAIS DOUBLE-CESSION : deux agents
+// en conflit direct calculent le même couple d'id, obtiennent des booléens
+// strictement complémentaires, il ne peut pas y avoir égalité (id unique).
+// Mais `rivals.length === 0` gagne EN DESSOUS, sans comparer aucun id — et
+// c'est exactement le trou : si le refetch de l'agent A court en avance de
+// la propagation du claim de l'agent B (A ne voit encore aucun rival), A
+// gagne trivialement sans savoir qu'il y a conflit. Si le refetch de B,
+// juste après, voit bien le claim de A, B compare pour de vrai — et PEUT
+// gagner aussi si son id est le plus petit des deux. Résultat possible :
+// DOUBLE-RÉTENTION (les deux gardent), jamais fermée par cette fonction
+// seule. La garantie est donc best-effort, pas structurelle : elle réduit
+// la fenêtre du correctif précédent, elle ne l'annule pas. Fermer ça pour
+// de vrai demande l'atomicité sur le FICHIER côté coordinator, pas le
+// thread — hors périmètre client (documenté aussi en bas de fichier, sur le
+// refetch après course perdue).
+async function resolveFileConflict(
+  coordinatorUrl: string,
+  agentId: string,
+  threadId: string,
+  files: string[],
+): Promise<{ won: boolean; openThreads: Array<Record<string, unknown>> | null }> {
+  if (files.length === 0) return { won: true, openThreads: null };
+
+  const refreshed = await fetchActiveThreads(coordinatorUrl);
+  if (refreshed === null) {
+    // Coordinator injoignable juste après notre propre claim : dégrade vers
+    // le comportement actuel (on garde) plutôt que de perdre un travail déjà
+    // confirmé sur la seule base d'un aller-retour qui a échoué.
+    return { won: true, openThreads: null };
+  }
+
+  const open = refreshed.filter((t) => t.status === "open");
+  const rivals = open.filter((t) => {
+    const owner = t.claimed_by as string | null | undefined;
+    return owner && owner !== agentId && t.id !== threadId && threadFiles(t).some((f) => files.includes(f));
+  });
+  if (rivals.length === 0) return { won: true, openThreads: open };
+
+  const smallestRivalId = rivals.map((t) => t.id as string).sort()[0];
+  return { won: threadId < smallestRivalId, openThreads: open };
+}
+
 /**
  * Atomically claim the next available task from the coordinator.
  * Uses POST /api/claim-task which does UPDATE WHERE claimed_by IS NULL.
@@ -226,6 +287,13 @@ export async function claimNextTask(
         agent_id: agentId,
       });
       if ((result as Record<string, unknown>).success === true) {
+        const { won, openThreads } = await resolveFileConflict(coordinatorUrl, agentId, threadId, files);
+        if (!won) {
+          log.info(`ceding thread=${threadId} — pair holds a lexicographically prior claim on ${files.join(", ")}`);
+          await unclaimTask(coordinatorUrl, threadId, agentId);
+          if (openThreads !== null) busyFiles = computeBusyFiles(openThreads, agentId);
+          continue;
+        }
         log.info(`claimed thread=${threadId}: ${subject.slice(0, 80)}`);
         const relatedDone = files.flatMap((f) => doneByFile.get(f) ?? []);
         if (relatedDone.length > 0) {
@@ -294,7 +362,13 @@ export async function unclaimTask(
     thread_id: threadId,
     agent_id: agentId,
   }).catch((err) => {
-    log.warn("unclaimTask failed", { error: (err as Error).message });
+    // Swallowed on purpose (every caller fires this fire-and-forget), but the
+    // thread id has to be IN the warning: without it, a failed unclaim is a
+    // thread stuck claimed_by us forever — nobody, including us, ever picks
+    // it up again — and a bare "unclaimTask failed" gives no way to find
+    // which one. Cheapest fix that covers every call site, including the
+    // new cede-on-conflict path in claimNextTask (#140).
+    log.warn(`unclaimTask failed: thread=${threadId}`, { error: (err as Error).message });
   });
 }
 
