@@ -99,6 +99,19 @@ vi.mock("../../src/agent-loop/work-stealing.js", () => ({
   processReviewActions: (url: string, agentId: string, agentName: string, actions: unknown[]) => mockProcessReviewActions(url, agentId, agentName, actions),
 }));
 
+// Mock falsifiability — le garde-fou est testé contre un vrai dépôt git dans
+// tests/unit/falsifiability.test.ts. Ici on vérifie uniquement que le loop
+// l'appelle sur TOUS les chemins où l'agent dit DONE:, et qu'il lui obéit.
+const mockVerifyFailingTest = vi.fn(async () => ({
+  falsifiable: true,
+  reason: "ok",
+  testFiles: [] as string[],
+  sourceFiles: [] as string[],
+}));
+vi.mock("../../src/agent-loop/falsifiability.js", () => ({
+  verifyFailingTest: (...args: unknown[]) => mockVerifyFailingTest(...(args as [])),
+}));
+
 // Mock fetch for coordinator REST
 const mockFetch = vi.fn(async () => ({
   ok: true,
@@ -1612,6 +1625,54 @@ describe("runAgentLoop — phased mode", () => {
     expect(mockCompleteTask).not.toHaveBeenCalled();
     // A run that never got past a rate limit must not be stamped as a success.
     expect(result.exitReason).not.toBe("done");
+  });
+
+  it("passe par le garde-fou de falsifiabilité AUSSI après une reprise de rate limit", async () => {
+    // Le chemin de reprise appelait completeTask directement : un DONE: arraché
+    // après la pause était accepté sans preuve, `requireFailingTest` ou non.
+    // Même cécité que celle qui a produit les 54 refus, dans l'autre sens —
+    // là le garde-fou refusait à tort, ici il ne regardait pas du tout.
+    vi.useFakeTimers();
+
+    let claimCall = 0;
+    mockClaimNextTask.mockImplementation(async () => {
+      claimCall++;
+      if (claimCall === 1) return { id: "t-retry", description: "tâche reprise après rate limit", file: undefined, severity: undefined };
+      return null;
+    });
+
+    mockSend.mockResolvedValueOnce({ content: "DISCOVERY:\nitem", toolCalls: [], costUsd: 0.01, durationMs: 100, sessionId: "s1" });
+    mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
+
+    // Execute: rate limited, puis DONE: à la reprise.
+    mockSend.mockResolvedValueOnce({ content: "", toolCalls: [], costUsd: 0, durationMs: 100, sessionId: "s1", rateLimited: true, rateLimitResetsAt: undefined });
+    mockSend.mockResolvedValueOnce({ content: "DONE: patch livré", toolCalls: [], costUsd: 0.02, durationMs: 300, sessionId: "s1" });
+
+    mockVerifyFailingTest.mockResolvedValue({
+      falsifiable: false,
+      reason: "aucun fichier de test modifié — rien ne prouve le défaut",
+      testFiles: [],
+      sourceFiles: [],
+    });
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Scan", toolsMode: "read_only", loop: false, effort: "low" },
+        { name: "execute",  prompt: "Fix",  toolsMode: "full",      loop: true,  effort: "high", requireFailingTest: true },
+      ],
+    });
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(10_000);
+    await loopPromise;
+
+    expect(mockVerifyFailingTest).toHaveBeenCalled();
+    expect(mockCompleteTask).not.toHaveBeenCalled();
+    expect(mockUnclaimTask).toHaveBeenCalledWith(
+      "http://localhost:3100",
+      "t-retry",
+      "test-agent",
+    );
   });
 
   it("does NOT cycle when maxDiscoverCycles is absent (default)", async () => {
