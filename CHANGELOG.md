@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.1](https://github.com/swoofer/essaim/compare/v0.14.0...v0.14.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* **falsifiability:** la ligne de base appartient au thread, pas a la tentative ([#144](https://github.com/swoofer/essaim/issues/144)) ([4d53eeb](https://github.com/swoofer/essaim/commit/4d53eeb7b3f458d6e2006ab59cefa5d3c27251e7))
+* **falsifiability:** le garde-fou inspectait l'arbre, le prompt ordonne de commiter ([#142](https://github.com/swoofer/essaim/issues/142)) ([aa8237c](https://github.com/swoofer/essaim/commit/aa8237ca4b6fbef49c3ebdd2a59a469819bdd4e3))
+* **work-stealing:** rétrécir la fenêtre de course sur les fichiers, après un claim réussi ([#141](https://github.com/swoofer/essaim/issues/141)) ([6f00a22](https://github.com/swoofer/essaim/commit/6f00a223ad6d6e94cfbe95d2df1e069a1efcffb0))
+* **work-stealing:** threadFiles parse target_files JSON string from coordinator ([#139](https://github.com/swoofer/essaim/issues/139)) ([058ee3f](https://github.com/swoofer/essaim/commit/058ee3faa97ae3b08267684440d67ab0f01f48cc))
+* **work-stealing:** une annonce de coordination n'est pas un item de travail ([#143](https://github.com/swoofer/essaim/issues/143)) ([fb6622d](https://github.com/swoofer/essaim/commit/fb6622dba87edf43ce7e99a835783dddcf05653c))
+
 ## [0.14.0](https://github.com/swoofer/essaim/compare/v0.13.1...v0.14.0) (2026-08-28)
 
 
