@@ -641,6 +641,30 @@ export async function runAgentLoop(
   // Track which threads this agent has claimed (for MQTT filtering)
   const claimedThreadIds = new Set<string>();
 
+  /**
+   * Ligne de base du garde-fou de falsifiabilité, UNE PAR THREAD.
+   *
+   * Clé = le thread, jamais l'agent. Une base unique par agent, relevée au
+   * démarrage de la boucle, serait plus courte et complaisante : le même
+   * worktree sert à toutes les tâches d'affilée, donc le test écrit pour la
+   * tâche 1 créditerait la tâche 2 qui n'en a produit aucun. Voir le cas
+   * « ne crédite PAS un thread du test écrit pour le thread précédent ».
+   *
+   * PURGÉE À LA COMPLÉTION (voir settleDone). Le cas « thread complété, puis
+   * un AUTRE thread sur le même fichier » se règle tout seul — l'autre thread
+   * a sa propre clé, donc sa propre base, qui inventorie le travail du premier
+   * comme préexistant, commité ou non. Ce qui reste à trancher est le thread
+   * ROUVERT par le coordinator : sans purge il rejouerait éternellement la
+   * base de sa toute première réclamation et se ferait créditer d'un test déjà
+   * livré. On purge donc — une reprise après complétion repart d'une base
+   * fraîche et doit prouver son propre travail. Le sens conservateur : le
+   * garde-fou peut trop demander, jamais trop peu.
+   *
+   * Portée du run, comme claimedThreadIds : un thread abandonné au cycle N
+   * peut être re-réclamé au cycle N+1, dans le même worktree.
+   */
+  const threadBaselines = new Map<string, { sha?: string; untracked: string[] }>();
+
   const mqtt: MqttListener = createMqttListener({
     url: config.mqttUrl,
     agentId: config.agentId,
@@ -1239,10 +1263,25 @@ export async function runAgentLoop(
               // compare contre ce SHA. Sans lui il n'inspecte que l'arbre de
               // travail, que le commit par tâche vide — 54 refus « aucun
               // fichier de test modifié » sur un banc de 6 runs.
+              //
+              // RELEVÉ UNE FOIS PAR THREAD, PAS PAR TENTATIVE. Une tâche peut
+              // être re-réclamée par le MÊME agent après un abandon sans DONE:
+              // (`error_max_turns`), et le travail de l'essai précédent est
+              // alors DÉJÀ dans l'arbre. Mesuré au run G3 : un refus sur douze,
+              // thread 2a2548b3 réclamé deux fois — l'essai 1 écrit source et
+              // test sans commiter, l'essai 2 n'a plus rien à écrire, lance les
+              // tests et dit DONE:. Une base relevée à la seconde réclamation
+              // inventorie le test de l'essai 1 comme non-suivi PRÉEXISTANT, le
+              // soustrait, et refuse « aucun fichier de test modifié » sur un
+              // travail réellement fait — qui part ensuite à la poubelle. La
+              // soustraction de #142 retournée contre le correctif qu'elle
+              // protège. L'unité de jugement est le THREAD.
               const falsifiabilityDeps = gitExec(config.workspacePath);
-              const taskBase = phase.requireFailingTest
-                ? await taskBaseline(falsifiabilityDeps)
-                : undefined;
+              let taskBase = threadBaselines.get(task.id);
+              if (phase.requireFailingTest && !taskBase) {
+                taskBase = await taskBaseline(falsifiabilityDeps);
+                threadBaselines.set(task.id, taskBase);
+              }
 
               /**
                * Un seul chemin « l'agent a dit DONE: », pour les DEUX envois.
@@ -1279,6 +1318,10 @@ export async function runAgentLoop(
                 }
                 logger.info(`Work-stealing: completed${after} — "${taskSummary.slice(0, 80)}"`);
                 await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
+                // La base ne survit PAS à la complétion : elle n'existe que
+                // pour recoller les tentatives d'un thread INACHEVÉ. Sur refus,
+                // au contraire, on la garde — c'est tout l'objet du correctif.
+                threadBaselines.delete(task.id);
                 tasksDone++;
               };
 
