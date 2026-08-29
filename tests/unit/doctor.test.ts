@@ -69,6 +69,25 @@ describe("runDoctor", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("claude est sondé SANS shell, jq/curl AVEC shell (fidèle au vrai lanceur)", () => {
+    // Verrou anti-régression pour #148 : le vrai lanceur spawn claude sans
+    // shell (claude-stream.ts) ; le sonder avec shell ferait passer un .cmd
+    // shim npm (faux OK) et casserait sur un chemin à espace (faux échec).
+    // jq/curl passent par des hooks shell → shell attendu.
+    const calls: Array<{ bin: string; useShell: boolean }> = [];
+    runDoctor(
+      healthyDeps({
+        probe: (bin, _v, useShell) => {
+          calls.push({ bin, useShell });
+          return true;
+        },
+      }),
+    );
+    expect(calls.find((c) => c.bin === "claude")!.useShell).toBe(false);
+    expect(calls.find((c) => c.bin === "jq")!.useShell).toBe(true);
+    expect(calls.find((c) => c.bin === "curl")!.useShell).toBe(true);
+  });
+
   it("formatDoctorReport imprime le hint sous une ligne en echec, et le verdict", () => {
     const r = runDoctor(healthyDeps({ probe: (b) => b !== "claude" }));
     const txt = formatDoctorReport(r);

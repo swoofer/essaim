@@ -1,8 +1,10 @@
 import { Command } from "commander";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { runDoctor, formatDoctorReport, type DoctorDeps } from "../src/orchestrator/doctor.js";
 import { resolveClaudeBin } from "../src/agent-loop/claude-stream.js";
-import { getCatalogRoots } from "./bce-resolver.js";
+import { getCatalogRoots, getBundledRoot } from "./bce-resolver.js";
 
 /** Test de port bloquant et synchrone : un mini-serveur via un sous-processus
  *  node (`node -e`). Synchrone parce que runDoctor l'est ; le bind local resout
@@ -17,16 +19,19 @@ function probePortSync(port: number): boolean {
  *  logique de diagnostic reste testable sans toucher au systeme. */
 export function realDoctorDeps(projectPath?: string): DoctorDeps {
   return {
-    // shell:true seulement sous win32 (claude/jq/curl peuvent etre des .cmd) ;
-    // ailleurs on evite le shell. On SONDE vraiment le binaire (--version), on
-    // ne se contente pas de le trouver : un binaire present mais casse est un
-    // faux OK — exactement ce que doctor doit attraper.
-    probe(bin, versionArg) {
+    // `useShell` DOIT refléter comment le binaire tourne au run, sinon la sonde
+    // ment : claude est spawné SANS shell (claude-stream.ts) — le sonder avec
+    // shell ferait passer un `.cmd` shim npm qui casse au run, et échouerait sur
+    // un chemin CLAUDE_BIN à espace (le shell scinde à l'espace) que le run
+    // lancerait sans souci. jq/curl passent par des hooks shell → shell:true.
+    // On SONDE vraiment (--version) : un binaire présent mais cassé est un faux
+    // OK, exactement ce que doctor doit attraper.
+    probe(bin, versionArg, useShell) {
       try {
         const r = spawnSync(bin, [versionArg], {
           stdio: "ignore",
           timeout: 10_000,
-          shell: process.platform === "win32",
+          shell: useShell,
         });
         return r.status === 0;
       } catch {
@@ -38,7 +43,10 @@ export function realDoctorDeps(projectPath?: string): DoctorDeps {
     catalogOk() {
       try {
         getCatalogRoots({ projectPath });
-        return true;
+        // getBundledRoot ne vérifie que behaviors/presets/compositions ; on
+        // confirme aussi templates/ — sans lui, un run échoue plus loin sur un
+        // « Unknown template » opaque, pas ici. (Le message annonce templates/.)
+        return existsSync(resolve(getBundledRoot(), "templates"));
       } catch {
         return false;
       }

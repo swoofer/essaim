@@ -30,8 +30,15 @@ export interface DoctorReport {
 }
 
 export interface DoctorDeps {
-  /** Sonde un binaire : lance `<bin> <versionArg>` et rend true si code 0. */
-  probe(bin: string, versionArg: string): boolean;
+  /**
+   * Sonde un binaire : lance `<bin> <versionArg>` et rend true si code 0.
+   * `useShell` DOIT refléter comment le binaire est réellement lancé : claude
+   * est spawné SANS shell (claude-stream.ts), donc sa sonde aussi — sinon un
+   * `.cmd` shim npm passe la sonde (shell) mais casse au run (no-shell), et un
+   * chemin a espace echoue a la sonde (shell ne cite pas) mais marche au run.
+   * jq/curl sont invoques par des hooks shell : leur sonde utilise un shell.
+   */
+  probe(bin: string, versionArg: string, useShell: boolean): boolean;
   /** Résout le binaire Claude Code (respecte CLAUDE_BIN / PATH / .cmd Windows). */
   resolveClaudeBin(): string;
   /** true si le port est LIBRE (bindable), false s'il est occupé. */
@@ -64,11 +71,15 @@ export function runDoctor(deps: DoctorDeps): DoctorReport {
   // 1. Claude Code — CRITIQUE. Sans lui, aucun agent ne peut se lancer. On SONDE
   //    (lance --version), on ne se contente pas de trouver le chemin : un binaire
   //    present mais non executable est un faux OK.
+  // SANS shell : on imite exactement le vrai lanceur (claude-stream.ts spawn
+  // sans shell). --version qui repond ne garantit PAS que `-p` marche (auth,
+  // version) — la sonde attrape « introuvable / non lançable comme au run »,
+  // pas « ne peut pas vraiment travailler ». C'est la limite honnete du check.
   const claudeBin = deps.resolveClaudeBin();
-  const claudeOk = deps.probe(claudeBin, "--version");
+  const claudeOk = deps.probe(claudeBin, "--version", false);
   checks.push(claudeOk
-    ? { name: "claude", status: "ok", detail: `Claude Code répond (${claudeBin})`, critical: true }
-    : { name: "claude", status: "fail", detail: `Claude Code introuvable ou muet (${claudeBin})`, hint: CLAUDE_INSTALL, critical: true });
+    ? { name: "claude", status: "ok", detail: `Claude Code lançable (${claudeBin})`, critical: true }
+    : { name: "claude", status: "fail", detail: `Claude Code non lançable comme au run (${claudeBin})`, hint: CLAUDE_INSTALL, critical: true });
 
   // 2. Catalogue — CRITIQUE. Sans behaviors/presets/templates, aucun prompt
   //    ne s'assemble. Message deja clair cote getCatalogRoots ; ici on le
@@ -93,10 +104,11 @@ export function runDoctor(deps: DoctorDeps): DoctorReport {
     }
   }
 
-  // 5 & 6. jq et curl — utilises par les hooks/scripts. Warn : un run peut
-  //    demarrer sans, mais certains hooks echoueront en silence.
+  // 5 & 6. jq et curl — utilises par les hooks/scripts SHELL, donc sonde AVEC
+  //    shell (contrairement a claude). Warn : un run peut demarrer sans, mais
+  //    certains hooks echoueront en silence.
   for (const tool of ["jq", "curl"]) {
-    const ok = deps.probe(tool, "--version");
+    const ok = deps.probe(tool, "--version", true);
     checks.push(ok
       ? { name: tool, status: "ok", detail: `${tool} présent`, critical: false }
       : { name: tool, status: "warn", detail: `${tool} absent — certains hooks en dépendent`, hint: installHint(tool, deps.platform), critical: false });
