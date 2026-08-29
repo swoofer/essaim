@@ -304,23 +304,31 @@ describe("completeTask", () => {
     vi.unstubAllGlobals();
   });
 
-  it("calls propose-resolution endpoint with correct body", async () => {
-    const capturedBodies: Record<string, unknown>[] = [];
-    const mockFetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
-      capturedBodies.push(JSON.parse(init.body as string));
+  it("propose PUIS auto-approuve — sinon le thread reste bloque en 'resolving'", async () => {
+    // #2 — propose-resolution seul laisse le thread en 'resolving' : le
+    // coordinator attend une approbation, qui n'etait JAMAIS emise. Mesure :
+    // sur 6 runs, TOUS les threads resolus finissaient 'resolving', jamais
+    // 'resolved' — la couche de consensus ne concluait pas. L'agent qui a fait
+    // le travail auto-approuve : pour un thread sans expected_respondents (le
+    // cas mesure, exp=[]), une seule approbation suffit -> resolved.
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+      calls.push({ url: url as string, body: JSON.parse(init.body as string) });
       return { ok: true, json: async () => ({ status: "resolving" }) };
     });
     vi.stubGlobal("fetch", mockFetch);
 
     await completeTask("http://localhost:3100", "t-42", "agent-1", "Fixed the null check");
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch.mock.calls[0][0]).toBe("http://localhost:3100/api/propose-resolution");
-    expect(capturedBodies[0]).toEqual({
+    expect(calls[0].url).toBe("http://localhost:3100/api/propose-resolution");
+    expect(calls[0].body).toEqual({
       thread_id: "t-42",
       agent_id: "agent-1",
       summary: "Fixed the null check",
     });
+    // L'auto-approbation, meme agent, meme thread.
+    expect(calls[1].url).toBe("http://localhost:3100/api/approve-resolution");
+    expect(calls[1].body).toMatchObject({ thread_id: "t-42", agent_id: "agent-1" });
   });
 
   it("doesn't throw on network failure", async () => {
