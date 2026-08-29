@@ -7,6 +7,7 @@ import {
   verifyFailingTest,
   isTestFile,
   parseChangedFiles,
+  parseUntrackedFiles,
   type ExecResult,
 } from "../../src/agent-loop/falsifiability.js";
 
@@ -199,4 +200,232 @@ describe("verifyFailingTest contre un vrai dépôt git", () => {
     expect(existsSync(join(repo, "tests", "z.test.js"))).toBe(true);
     expect(git(repo, "stash", "list").stdout.trim()).toBe("");
   });
+});
+
+// ── Le défaut mesuré : l'agent COMMITE, le garde-fou regarde ailleurs ───
+//
+// 54 refus sur un banc de 6 runs, TOUS avec le même motif « aucun fichier de
+// test modifié — rien ne prouve le défaut », et 3 des 4 vrais défauts finissant
+// `poisoned` par run. Le garde-fou n'était pas trop strict, il était AVEUGLE :
+// behaviors/phase-execute.yaml:56 ordonne « chaque tâche nécessite son PROPRE
+// commit », falsifiability.ts:70 n'interrogeait que `git status` — l'arbre que
+// le commit vient précisément de vider. Relevé sur un worktree réel du banc :
+// `git status --porcelain --untracked-files=all` ne montrait que `?? .mcp.json`
+// pendant que `git show --name-only HEAD` listait bien src ET tests.
+describe("verifyFailingTest quand l'agent a COMMITÉ (arbre propre)", () => {
+  const git = (cwd: string, ...args: string[]) =>
+    spawnSync("git", args, { cwd, encoding: "utf8" });
+
+  const realExec = (cwd: string) => ({
+    async exec(cmd: string, args: string[]): Promise<ExecResult> {
+      const r = spawnSync(cmd, args, { cwd, encoding: "utf8" });
+      return { code: r.status ?? -1, stdout: (r.stdout ?? "") + (r.stderr ?? "") };
+    },
+    // HORS du worktree : un patch déposé dedans se retrouverait dans le
+    // `git status` du contrôle suivant, compté comme fichier source.
+    async writeTemp(content: string): Promise<string> {
+      const p = join(mkdtempSync(join(tmpdir(), "essaim-patch-")), "p.patch");
+      writeFileSync(p, content);
+      return p;
+    },
+  });
+
+  let repo: string;
+  let base: string;
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "essaim-fals-commit-"));
+    git(repo, "init", "-q");
+    git(repo, "config", "user.email", "t@t");
+    git(repo, "config", "user.name", "t");
+    writeFileSync(join(repo, "src.js"), "module.exports = 'buggy';\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "base");
+    base = git(repo, "rev-parse", "HEAD").stdout.trim();
+  });
+
+  afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+  /** Ce que phase-execute EXIGE : patch + test, dans un commit, arbre vidé. */
+  const commitPatchAndTest = () => {
+    writeFileSync(join(repo, "src.js"), "module.exports = 'patched';\n");
+    mkdirSync(join(repo, "tests"), { recursive: true });
+    writeFileSync(join(repo, "tests", "a.test.js"), "// repro\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "fix(scanner): repro + patch");
+  };
+
+  /** Sonde HONNÊTE : elle échoue dès que le patch n'est plus là. */
+  const honestProbe = {
+    cmd: process.execPath,
+    args: [
+      "-e",
+      "const fs=require('fs');" +
+        "process.exit(fs.readFileSync('src.js','utf8').includes('patched')?0:1);",
+    ],
+  };
+
+  it("voit le patch commité et accepte un test qui échoue sans lui", async () => {
+    commitPatchAndTest();
+    // L'arbre est propre : c'est tout ce que voyait le garde-fou.
+    expect(git(repo, "status", "--porcelain", "--untracked-files=all").stdout.trim()).toBe("");
+
+    const v = await verifyFailingTest(realExec(repo), honestProbe, base);
+
+    expect(v.testFiles).toEqual(["tests/a.test.js"]);
+    expect(v.sourceFiles).toEqual(["src.js"]);
+    expect(v.falsifiable).toBe(true);
+    expect(v.reason).toContain("échoue sans le patch");
+  });
+
+  it("refuse un test complaisant commité, et rend le worktree intact", async () => {
+    commitPatchAndTest();
+    // Sonde COMPLAISANTE : elle sort 0 quel que soit l'état du worktree.
+    const v = await verifyFailingTest(
+      realExec(repo),
+      { cmd: process.execPath, args: ["-e", "process.exit(0)"] },
+      base,
+    );
+
+    expect(v.falsifiable).toBe(false);
+    expect(v.reason).toContain("passe SANS le patch");
+    // Ne JAMAIS laisser un worktree amputé de son patch.
+    expect(readFileSync(join(repo, "src.js"), "utf8")).toContain("patched");
+    expect(git(repo, "stash", "list").stdout.trim()).toBe("");
+  });
+
+  it("neutralise aussi un fichier source NON SUIVI quand le test est commité", async () => {
+    // Mixte : le test part au commit, le patch reste un fichier neuf non suivi.
+    // `git diff` ignore les non-suivis — sans traitement explicite, le patch
+    // serait invisible et le contrôle s'ouvrirait en grand.
+    mkdirSync(join(repo, "tests"), { recursive: true });
+    writeFileSync(join(repo, "tests", "b.test.js"), "// repro\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "test only");
+    writeFileSync(join(repo, "newsrc.js"), "module.exports = 1;\n");
+
+    const v = await verifyFailingTest(
+      realExec(repo),
+      {
+        cmd: process.execPath,
+        args: ["-e", "process.exit(require('fs').existsSync('newsrc.js')?0:1);"],
+      },
+      base,
+    );
+
+    // CONTRAT CHANGÉ, et c'est délibéré. La rédaction précédente faisait entrer
+    // ce fichier non suivi dans le patch via `git add --intent-to-add` pour que
+    // la neutralisation le supprime. Mesuré : ça mettait AUSSI `.mcp.json` — non
+    // suivi dans tous les worktrees d'agent — dans le « patch de production »,
+    // et comme la restauration est un `git apply` unique donc ATOMIQUE, un
+    // artefact recréé par le lancement des tests faisait échouer le patch
+    // ENTIER : le correctif de l'agent disparaissait pendant que la tâche
+    // partait en completeTask. On préfère désormais ne rien conclure.
+    expect(v.sourceFiles).toEqual(["newsrc.js"]);
+    expect(v.falsifiable).toBe(true);
+    expect(v.reason).toContain("non suivi");
+    expect(v.reason).not.toContain("passe SANS le patch");
+    // Et surtout : le fichier de l'agent n'a pas bougé d'un octet.
+    expect(existsSync(join(repo, "newsrc.js"))).toBe(true);
+    expect(git(repo, "status", "--porcelain", "--untracked-files=all").stdout).toContain("?? newsrc.js");
+  });
+
+  // RÉGRESSION — le garde-fou ne doit JAMAIS faire perdre le correctif.
+  //
+  // La première rédaction du patch inverse faisait entrer tout fichier NON
+  // SUIVI non-test dans le « patch de production » via `git add
+  // --intent-to-add`, pour que la neutralisation le supprime. Or `.mcp.json`
+  // est non suivi dans TOUS les worktrees d'agent (promptweave l'y dépose à la
+  // création), et la restauration est un `git apply` unique, donc ATOMIQUE :
+  // il suffisait que le lancement des tests recrée l'artefact pour que git
+  // refuse le patch ENTIER (« already exists in working directory ») et que le
+  // correctif de l'agent disparaisse — pendant que le verdict restait
+  // `falsifiable: true` et que la tâche partait en completeTask.
+  //
+  // La base de comparaison n'est donc pas un simple SHA : c'est le SHA PLUS
+  // l'inventaire des non-suivis déjà présents. Ce test échoue si on le retire.
+  it("ne touche pas à un artefact non suivi préexistant, et garde le patch intact", async () => {
+    const mcp = join(repo, ".mcp.json");
+    writeFileSync(mcp, "{}\n");
+    const baseUntracked = parseUntrackedFiles(
+      git(repo, "status", "--porcelain", "--untracked-files=all").stdout,
+    );
+    expect(baseUntracked).toContain(".mcp.json");
+
+    // L'agent corrige la source ET écrit le test, puis COMMITE LES DEUX —
+    // nommément, sans `git add -A` : dans les vrais worktrees du banc,
+    // `.mcp.json` est resté NON SUIVI (`?? .mcp.json` dans status).
+    writeFileSync(join(repo, "src.js"), "module.exports = 'patched';\n");
+    mkdirSync(join(repo, "tests"), { recursive: true });
+    writeFileSync(join(repo, "tests", "a.test.js"), "// repro\n");
+    git(repo, "add", "--", "src.js", "tests/a.test.js");
+    git(repo, "commit", "-qm", "fix + test");
+
+    // Lanceur : recrée l'artefact (le cas qui faisait échouer la restauration
+    // atomique), puis échoue si le patch est absent — un vrai test de régression.
+    const runner = {
+      cmd: process.execPath,
+      args: [
+        "-e",
+        `const fs=require("fs");fs.writeFileSync(${JSON.stringify(mcp)},"{}");`
+          + `process.exit(fs.readFileSync(${JSON.stringify(join(repo, "src.js"))},"utf8").includes("patched")?0:1)`,
+      ],
+    };
+
+    const v = await verifyFailingTest(realExec(repo), runner, base, baseUntracked);
+
+    expect(v.falsifiable).toBe(true);
+    expect(v.sourceFiles).not.toContain(".mcp.json");
+    // LE POINT DU TEST : le correctif de l'agent est toujours là.
+    expect(readFileSync(join(repo, "src.js"), "utf8")).toContain("patched");
+  });
+});
+
+// ── Second étage : une neutralisation sans effet ne doit RIEN conclure ──
+//
+// Réparer la base de diff sans réparer la neutralisation aurait été PIRE que le
+// défaut d'origine : `git stash push` sur des chemins propres-parce-que-commités
+// sort 0 SANS RIEN REMISER (vérifié sur un dépôt jetable), le test était alors
+// rejoué AVEC le patch encore en place, il passait, et le garde-fou concluait
+// « le test passe SANS le patch ». 54 refus muets seraient devenus 54 refus
+// MENSONGERS. D'où ce contrôle de l'effet de la neutralisation.
+describe("verifyFailingTest — garde-fou du garde-fou", () => {
+  /** Faux exécuteur qui matche la ligne de commande COMPLÈTE. */
+  function scriptedExec(reply: (line: string) => ExecResult | undefined) {
+    const calls: string[] = [];
+    return {
+      calls,
+      deps: {
+        async exec(cmd: string, args: string[]): Promise<ExecResult> {
+          const line = `${cmd} ${args.join(" ")}`;
+          calls.push(line);
+          return reply(line) ?? { code: 0, stdout: "" };
+        },
+        async writeTemp(_content: string): Promise<string> {
+          return "/tmp/essaim.patch";
+        },
+      },
+    };
+  }
+
+  it("fail-open explicite quand la neutralisation n'a rien changé", async () => {
+    const { deps } = scriptedExec((line) => {
+      if (line.startsWith("git status")) return { code: 0, stdout: "" }; // arbre propre
+      if (line === "git diff --name-only BASE HEAD") return { code: 0, stdout: "src/a.ts\ntests/unit/x.test.ts\n" };
+      if (line === "git diff --binary BASE -- src/a.ts") return { code: 0, stdout: "--- a/src/a.ts\n+++ b/src/a.ts\n" };
+      if (line.startsWith("git apply -R")) return { code: 0, stdout: "" }; // ment : sort 0 sans agir
+      // Le contrôle d'effet : le fichier est TOUJOURS modifié après « neutralisation ».
+      if (line === "git diff --name-only BASE -- src/a.ts") return { code: 0, stdout: "src/a.ts\n" };
+      return { code: 0, stdout: "" }; // le lanceur de tests passe, patch en place
+    });
+
+    const v = await verifyFailingTest(deps, TEST_CMD, "BASE");
+
+    // Le seul verdict négatif légitime est « test complaisant ». Ici on ne sait
+    // rien : il faut le dire, pas accuser.
+    expect(v.falsifiable).toBe(true);
+    expect(v.reason).toContain("sans effet");
+    expect(v.reason).not.toContain("passe SANS le patch");
+  });
+
 });

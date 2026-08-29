@@ -11,8 +11,11 @@ import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, unclaim
 import { createLogger } from "../logger.js";
 import { resolveEffort, upgradeEffort, parseSeverity, EFFORT_PROFILES, isThinkingLevel, type EffortLevel, type ConcreteEffortLevel, type ThinkingLevel } from "./effort.js";
 import { authHeaders } from "../coordinator-auth.js";
-import { verifyFailingTest, type FalsifiabilityDeps } from "./falsifiability.js";
+import { verifyFailingTest, parseUntrackedFiles, type FalsifiabilityDeps } from "./falsifiability.js";
 import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { detectLanguage } from "../orchestrator/scanner.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -151,7 +154,16 @@ function gitExec(cwd: string): FalsifiabilityDeps {
   return {
     exec(cmd, args) {
       return new Promise((resolve) => {
-        const child = spawn(cmd, args, { cwd, shell: process.platform === "win32" });
+        // `shell` UNIQUEMENT pour le lanceur de tests. Sur Windows `pnpm`/`npx`
+        // sont des .cmd et exigent un shell ; `git` est un vrai .exe et n'en a
+        // pas besoin. Or sous `shell: true` Node NE CITE PAS les arguments :
+        // un chemin contenant une espace (« my src.ts », ou un tmpdir sous
+        // `C:\Users\Jean Dupont\...`) se scindait en deux pathspecs et le
+        // fichier n'était jamais neutralisé — un bon correctif se faisait alors
+        // refuser par « le test passe SANS le patch », le pire des verdicts
+        // puisqu'il a l'air d'un vrai. Le contrôle d'effet ne le rattrapait pas :
+        // il rejouait le même pathspec cassé.
+        const child = spawn(cmd, args, { cwd, shell: process.platform === "win32" && cmd !== "git" });
         let stdout = "";
         child.stdout?.on("data", (d) => { stdout += String(d); });
         child.stderr?.on("data", (d) => { stdout += String(d); });
@@ -159,6 +171,35 @@ function gitExec(cwd: string): FalsifiabilityDeps {
         child.on("close", (code) => resolve({ code: code ?? -1, stdout }));
       });
     },
+    // HORS du worktree : un patch déposé dedans apparaîtrait dans le
+    // `git status` du contrôle suivant et serait compté comme fichier source.
+    async writeTemp(content) {
+      const file = join(mkdtempSync(join(tmpdir(), "essaim-falsifiability-")), "neutralize.patch");
+      writeFileSync(file, content);
+      return file;
+    },
+  };
+}
+
+/**
+ * HEAD relevé AVANT que l'agent touche à la tâche : la base contre laquelle le
+ * garde-fou mesure ce qui a été produit. Sans elle il n'inspectait que l'arbre
+ * de travail, que le commit par tâche (behaviors/phase-execute.yaml:56) vide.
+ * Rendre `undefined` si git ne répond pas — le contrôle retombe alors sur son
+ * comportement historique plutôt que de bloquer une tâche légitime.
+ */
+async function taskBaseline(
+  deps: FalsifiabilityDeps,
+): Promise<{ sha?: string; untracked: string[] }> {
+  const r = await deps.exec("git", ["rev-parse", "HEAD"]);
+  const sha = r.stdout.trim();
+  // Les non-suivis DÉJÀ LÀ avant la tâche. Sans cet inventaire, `.mcp.json` —
+  // que promptweave dépose dans chaque worktree à sa création — compte comme
+  // « fichier de production changé » à chaque tâche.
+  const st = await deps.exec("git", ["status", "--porcelain", "--untracked-files=all"]);
+  return {
+    sha: r.code === 0 && sha ? sha : undefined,
+    untracked: st.code === 0 ? parseUntrackedFiles(st.stdout) : [],
   };
 }
 
@@ -1163,6 +1204,54 @@ export async function runAgentLoop(
               const execTools = toolsForMode(phase.toolsMode, config.allowedTools);
               const execBlocked = disallowedForMode(phase.toolsMode);
               const freshExec = config.freshSessionPerTask === true;
+
+              // Relevé AVANT le premier envoi : le garde-fou de falsifiabilité
+              // compare contre ce SHA. Sans lui il n'inspecte que l'arbre de
+              // travail, que le commit par tâche vide — 54 refus « aucun
+              // fichier de test modifié » sur un banc de 6 runs.
+              const falsifiabilityDeps = gitExec(config.workspacePath);
+              const taskBase = phase.requireFailingTest
+                ? await taskBaseline(falsifiabilityDeps)
+                : undefined;
+
+              /**
+               * Un seul chemin « l'agent a dit DONE: », pour les DEUX envois.
+               * Celui de reprise après rate limit appelait completeTask sans
+               * passer par le garde-fou : un DONE arraché après la pause était
+               * accepté sans preuve, `requireFailingTest` ou non.
+               *
+               * Le DONE: ne suffit pas quand le behavior exige une preuve.
+               * Mesuré : un agent a « corrigé » deux champs non contrôlables
+               * par le moteur, avec un test qui passait avant comme après.
+               * Un FALSE_POSITIVE n'a ni patch ni test : c'est une issue que
+               * la mission de sentinelle autorise explicitement. Mesuré sur un
+               * vrai swarm — un agent a correctement identifié le faux positif
+               * et s'est fait refuser sa résolution, faute de test à montrer.
+               */
+              const settleDone = async (content: string, after: string): Promise<void> => {
+                const taskSummary = extractDoneSummary(content, "Done");
+                const verdict =
+                  phase.requireFailingTest && !FALSE_POSITIVE_PATTERN.test(taskSummary)
+                    ? await verifyFailingTest(falsifiabilityDeps, testCommandFor(config.workspacePath), taskBase?.sha, taskBase?.untracked)
+                    : null;
+                if (verdict && !verdict.falsifiable) {
+                  logger.warn(`Work-stealing: DONE refusé — ${verdict.reason}`, {
+                    taskId: task.id,
+                    testFiles: verdict.testFiles,
+                  });
+                  // Dire POURQUOI dans le thread. Sans ça le prochain agent
+                  // reprend la tâche sans savoir ce qui a été refusé et refait
+                  // la même chose : mesuré, trois refus d'affilée pour « aucun
+                  // test » sur des tâches reprises en boucle.
+                  await postRefusal(config, task.id, verdict.reason);
+                  await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
+                  return;
+                }
+                logger.info(`Work-stealing: completed${after} — "${taskSummary.slice(0, 80)}"`);
+                await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
+                tasksDone++;
+              };
+
               const resp = await send(taskPrompt, { model: execProfile.model, thinking: execProfile.thinking, maxTurns: execProfile.maxTurns, allowedTools: execTools, disallowedTools: execBlocked, freshSession: freshExec });
 
               // Detect rate limit — pause and wait for reset instead of wasting turns.
@@ -1211,10 +1300,7 @@ export async function runAgentLoop(
                 const retryResp = await send(taskPrompt, { model: execProfile.model, thinking: execProfile.thinking, maxTurns: execProfile.maxTurns, allowedTools: execTools, disallowedTools: execBlocked, freshSession: freshExec });
                 if (!retryResp.rateLimited) {
                   if (hasDoneMarker(retryResp.content)) {
-                    const taskSummary = extractDoneSummary(retryResp.content, "Done");
-                    logger.info(`Work-stealing: completed after retry — "${taskSummary.slice(0, 80)}"`);
-                    await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
-                    tasksDone++;
+                    await settleDone(retryResp.content, " after retry");
                   } else {
                     logger.warn(`Work-stealing: aborting task after retry (no DONE:) — unclaiming thread=${task.id} subtype=${retryResp.subtype ?? "?"}`);
                     await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
@@ -1236,34 +1322,7 @@ export async function runAgentLoop(
               // with partial/unrelated content (e.g. "Je vais explorer..."),
               // blocking the real work from ever happening.
               if (hasDoneMarker(resp.content)) {
-                const taskSummary = extractDoneSummary(resp.content, "Done");
-                // Le DONE: ne suffit pas quand le behavior exige une preuve.
-                // Mesuré : un agent a « corrigé » deux champs non contrôlables
-                // par le moteur, avec un test qui passait avant comme après.
-                // Un FALSE_POSITIVE n'a ni patch ni test : c'est une issue que
-                // la mission de sentinelle autorise explicitement. Mesuré sur un
-                // vrai swarm — un agent a correctement identifié le faux positif
-                // et s'est fait refuser sa résolution, faute de test à montrer.
-                const verdict =
-                  phase.requireFailingTest && !FALSE_POSITIVE_PATTERN.test(taskSummary)
-                    ? await verifyFailingTest(gitExec(config.workspacePath), testCommandFor(config.workspacePath))
-                    : null;
-                if (verdict && !verdict.falsifiable) {
-                  logger.warn(`Work-stealing: DONE refusé — ${verdict.reason}`, {
-                    taskId: task.id,
-                    testFiles: verdict.testFiles,
-                  });
-                  // Dire POURQUOI dans le thread. Sans ça le prochain agent
-                  // reprend la tâche sans savoir ce qui a été refusé et refait
-                  // la même chose : mesuré, trois refus d'affilée pour « aucun
-                  // test » sur des tâches reprises en boucle.
-                  await postRefusal(config, task.id, verdict.reason);
-                  await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
-                } else {
-                  logger.info(`Work-stealing: completed — "${taskSummary.slice(0, 80)}"`);
-                  await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
-                  tasksDone++;
-                }
+                await settleDone(resp.content, "");
               } else {
                 // subtype distingue « l'agent a divagué » (success) de « il a
                 // manqué de tours » (error_max_turns). On le JOURNALISE sans
