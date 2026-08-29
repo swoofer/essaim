@@ -190,17 +190,20 @@ function gitExec(cwd: string): FalsifiabilityDeps {
  */
 async function taskBaseline(
   deps: FalsifiabilityDeps,
-): Promise<{ sha?: string; untracked: string[] }> {
+): Promise<{ sha: string; untracked: string[] } | undefined> {
   const r = await deps.exec("git", ["rev-parse", "HEAD"]);
   const sha = r.stdout.trim();
   // Les non-suivis DÉJÀ LÀ avant la tâche. Sans cet inventaire, `.mcp.json` —
   // que promptweave dépose dans chaque worktree à sa création — compte comme
   // « fichier de production changé » à chaque tâche.
   const st = await deps.exec("git", ["status", "--porcelain", "--untracked-files=all"]);
-  return {
-    sha: r.code === 0 && sha ? sha : undefined,
-    untracked: st.code === 0 ? parseUntrackedFiles(st.stdout) : [],
-  };
+  // Tout ou rien. Une base partielle est PIRE qu'aucune : sans `sha` le
+  // contrôle retombe sur l'arbre seul (le défaut aveugle de #142), et sans
+  // l'inventaire des non-suivis `.mcp.json` redevient un « fichier de
+  // production » et fait sauter le contrôle à chaque DONE:. L'appelant ne
+  // mémorise que ce qui est complet.
+  if (r.code !== 0 || !sha || st.code !== 0) return undefined;
+  return { sha, untracked: parseUntrackedFiles(st.stdout) };
 }
 
 /**
@@ -640,6 +643,48 @@ export async function runAgentLoop(
 
   // Track which threads this agent has claimed (for MQTT filtering)
   const claimedThreadIds = new Set<string>();
+
+  /**
+   * Ligne de base du garde-fou de falsifiabilité, UNE PAR THREAD.
+   *
+   * Clé = le thread, jamais l'agent. Une base unique par agent, relevée au
+   * démarrage de la boucle, serait plus courte et complaisante : le même
+   * worktree sert à toutes les tâches d'affilée, donc le test écrit pour la
+   * tâche 1 créditerait la tâche 2 qui n'en a produit aucun. Voir le cas
+   * « ne crédite PAS un thread du test écrit pour le thread précédent ».
+   *
+   * PURGÉE À LA COMPLÉTION (voir settleDone). Le cas « thread complété, puis
+   * un AUTRE thread sur le même fichier » se règle tout seul — l'autre thread
+   * a sa propre clé, donc sa propre base, qui inventorie le travail du premier
+   * comme préexistant, commité ou non. Ce qui reste à trancher est le thread
+   * ROUVERT par le coordinator : sans purge il rejouerait éternellement la
+   * base de sa toute première réclamation et se ferait créditer d'un test déjà
+   * livré. On purge donc — une reprise après complétion repart d'une base
+   * fraîche et doit prouver son propre travail. Le sens conservateur : le
+   * garde-fou peut trop demander, jamais trop peu.
+   *
+   * Portée du run, comme claimedThreadIds : un thread abandonné au cycle N
+   * peut être re-réclamé au cycle N+1, dans le même worktree.
+   */
+  // UN SEUL emplacement, pas une Map — et c'est le point du correctif.
+  //
+  // Une Map par thread paraissait plus juste : chaque thread garderait sa base
+  // et la retrouverait à la reprise. Deux relectures indépendantes l'ont cassée
+  // par exécution : l'entrée survit à l'abandon, mais aussi à TOUT ce qui se
+  // passe entre les deux tentatives. Ordonnancement mesuré — A réclamé (base
+  // S0), A abandonné, B réclamé, B écrit son test et COMMITE (ce que
+  // phase-execute.yaml:56 ordonne), B complété, puis A re-réclamé : `git diff
+  // S0 HEAD` remonte alors les fichiers de B, et A est ACCEPTÉ sur la preuve
+  // de B sans avoir rien écrit. Le garde-fou devenait complaisant là où main
+  // refusait correctement.
+  //
+  // Un emplacement unique rend la péremption impossible par construction :
+  // toute réclamation d'un AUTRE thread l'écrase, donc la base n'est réutilisée
+  // que sur des tentatives CONSÉCUTIVES du même thread — exactement le cas G3
+  // (thread 2a2548b3 déréclamé en error_max_turns puis re-réclamé dans la
+  // foulée, le test de la tentative 1 restant invisible et un travail réel
+  // jeté). Effacé aussi à la complétion : un thread rouvert doit reprouver.
+  let lastBaseline: { threadId: string; base: { sha: string; untracked: string[] } } | null = null;
 
   const mqtt: MqttListener = createMqttListener({
     url: config.mqttUrl,
@@ -1239,10 +1284,32 @@ export async function runAgentLoop(
               // compare contre ce SHA. Sans lui il n'inspecte que l'arbre de
               // travail, que le commit par tâche vide — 54 refus « aucun
               // fichier de test modifié » sur un banc de 6 runs.
+              //
+              // RELEVÉ UNE FOIS PAR THREAD, PAS PAR TENTATIVE. Une tâche peut
+              // être re-réclamée par le MÊME agent après un abandon sans DONE:
+              // (`error_max_turns`), et le travail de l'essai précédent est
+              // alors DÉJÀ dans l'arbre. Mesuré au run G3 : un refus sur douze,
+              // thread 2a2548b3 réclamé deux fois — l'essai 1 écrit source et
+              // test sans commiter, l'essai 2 n'a plus rien à écrire, lance les
+              // tests et dit DONE:. Une base relevée à la seconde réclamation
+              // inventorie le test de l'essai 1 comme non-suivi PRÉEXISTANT, le
+              // soustrait, et refuse « aucun fichier de test modifié » sur un
+              // travail réellement fait — qui part ensuite à la poubelle. La
+              // soustraction de #142 retournée contre le correctif qu'elle
+              // protège. L'unité de jugement est le THREAD.
               const falsifiabilityDeps = gitExec(config.workspacePath);
-              const taskBase = phase.requireFailingTest
-                ? await taskBaseline(falsifiabilityDeps)
-                : undefined;
+              let taskBase: { sha: string; untracked: string[] } | undefined =
+                lastBaseline?.threadId === task.id ? lastBaseline.base : undefined;
+              if (phase.requireFailingTest && !taskBase) {
+                taskBase = await taskBaseline(falsifiabilityDeps);
+                // `taskBaseline` rend undefined si git a hoqueté — on ne
+                // mémorise QUE les relevés réussis. Mémoriser un échec le
+                // figerait pour toutes les tentatives suivantes du thread,
+                // alors qu'un `index.lock` (l'agent commite dans le même
+                // worktree) est une collision ordinaire dont la tentative
+                // suivante doit pouvoir se relever.
+                lastBaseline = taskBase ? { threadId: task.id, base: taskBase } : null;
+              }
 
               /**
                * Un seul chemin « l'agent a dit DONE: », pour les DEUX envois.
@@ -1279,6 +1346,10 @@ export async function runAgentLoop(
                 }
                 logger.info(`Work-stealing: completed${after} — "${taskSummary.slice(0, 80)}"`);
                 await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
+                // La base ne survit PAS à la complétion : elle n'existe que
+                // pour recoller les tentatives d'un thread INACHEVÉ. Sur refus,
+                // au contraire, on la garde — c'est tout l'objet du correctif.
+                lastBaseline = null;
                 tasksDone++;
               };
 

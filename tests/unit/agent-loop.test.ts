@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentLoopConfig, AgentLoopResult, AgentLoopLogger } from "../../src/agent-loop/agent-loop.js";
 
 // ── Mocks ──────────────────────────────────────────────────────────────
@@ -102,14 +106,20 @@ vi.mock("../../src/agent-loop/work-stealing.js", () => ({
 // Mock falsifiability — le garde-fou est testé contre un vrai dépôt git dans
 // tests/unit/falsifiability.test.ts. Ici on vérifie uniquement que le loop
 // l'appelle sur TOUS les chemins où l'agent dit DONE:, et qu'il lui obéit.
-const mockVerifyFailingTest = vi.fn(async () => ({
+const mockVerifyFailingTest = vi.fn(async (..._args: unknown[]) => ({
   falsifiable: true,
   reason: "ok",
   testFiles: [] as string[],
   sourceFiles: [] as string[],
 }));
-vi.mock("../../src/agent-loop/falsifiability.js", () => ({
-  verifyFailingTest: (...args: unknown[]) => mockVerifyFailingTest(...(args as [])),
+// Le reste du module reste RÉEL (`importOriginal` + étalement). Deux raisons :
+// agent-loop importe aussi `parseUntrackedFiles` — qu'un mock ne rendant que
+// `verifyFailingTest` laissait `undefined`, sauvé par le seul court-circuit
+// `st.code === 0 ? ... : []` — et les cas « ligne de base par THREAD » plus bas
+// font tourner le VRAI garde-fou sur un VRAI dépôt git.
+vi.mock("../../src/agent-loop/falsifiability.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/agent-loop/falsifiability.js")>()),
+  verifyFailingTest: (...args: unknown[]) => mockVerifyFailingTest(...args),
 }));
 
 // Mock fetch for coordinator REST
@@ -1831,6 +1841,209 @@ describe("runAgentLoop — phased mode", () => {
     const reviewPrompt = mockSend.mock.calls[1][0] as string;
     expect(reviewPrompt).toContain("DISCOVERY:\nsrc/auth.ts | 42 | Missing null check | critical");
     expect(reviewPrompt).toContain("- [t-existing] Vieux bug dans auth.ts");
+  });
+
+  // ── L'UNITÉ DE JUGEMENT EST LE THREAD, PAS LA TENTATIVE ──────────────────
+  //
+  // Run G3, après #142 et #143 : refus tombés de 29 à 1. Le dernier, ligne par
+  // ligne dans le log réel :
+  //
+  //   l.77   [work-stealing] claimed thread=2a2548b3 : critical: preflight.ts
+  //   essai 1  l'agent écrit src/orchestrator/preflight.ts ET
+  //            tests/unit/preflight-auth.test.ts, sans jamais commiter
+  //   l.196  WARN aborting task (no DONE: marker) subtype=error_max_turns
+  //   l.197  [work-stealing] claimed thread=2a2548b3   <- MÊME thread, MÊME agent
+  //   essai 2  le travail est déjà là : l'agent n'écrit RIEN, lance vitest, DONE:
+  //   l.268  WARN DONE refusé — aucun fichier de test modifié {"testFiles":[]}
+  //
+  // Vérifié : la branche de l'agent ne portait AUCUN commit au-delà de la base.
+  // Le travail de l'essai 1 n'existait donc que NON SUIVI, dans l'arbre.
+  //
+  // Cause : `taskBaseline()` était relevé à CHAQUE réclamation. Au second essai
+  // son inventaire des non-suivis contenait DÉJÀ le test écrit au premier, qui
+  // se faisait alors soustraire comme « préexistant » — la soustraction de #142
+  // retournée contre le correctif qu'elle protégeait, sur un chemin plus étroit.
+  // Un travail RÉELLEMENT FAIT était refusé puis jeté.
+  describe("ligne de base par THREAD", () => {
+    const git = (cwd: string, ...args: string[]) =>
+      spawnSync("git", args, { cwd, encoding: "utf8" });
+
+    type Verdict = { falsifiable: boolean; reason: string; testFiles: string[]; sourceFiles: string[] };
+    let repo: string;
+    let realVerify: (...args: never[]) => Promise<Verdict>;
+
+    beforeEach(async () => {
+      repo = mkdtempSync(join(tmpdir(), "essaim-thread-base-"));
+      git(repo, "init", "-q");
+      git(repo, "config", "user.email", "t@t");
+      git(repo, "config", "user.name", "t");
+      writeFileSync(join(repo, "base.js"), "export const a = 1;\n");
+      git(repo, "add", "-A");
+      git(repo, "commit", "-qm", "base");
+      // promptweave dépose `.mcp.json` dans CHAQUE worktree d'agent à sa
+      // création, et il y reste NON SUIVI : c'est lui qui rend l'inventaire
+      // des non-suivis indispensable (#142), et lui qu'on reproduit ici.
+      writeFileSync(join(repo, ".mcp.json"), "{}\n");
+      mkdirSync(join(repo, "tests", "unit"), { recursive: true });
+
+      // Le VRAI garde-fou, sur ce VRAI dépôt : c'est son verdict qu'on mesure,
+      // pas un mock qui dirait ce qu'on veut entendre.
+      const actual = await vi.importActual<typeof import("../../src/agent-loop/falsifiability.js")>(
+        "../../src/agent-loop/falsifiability.js",
+      );
+      realVerify = actual.verifyFailingTest as unknown as (...args: never[]) => Promise<Verdict>;
+    });
+
+    afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+    /** Branche le vrai garde-fou et collecte ses verdicts, dans l'ordre. */
+    function captureVerdicts(): Verdict[] {
+      const verdicts: Verdict[] = [];
+      mockVerifyFailingTest.mockImplementation(async (...args: unknown[]) => {
+        const v = await realVerify(...(args as never[]));
+        verdicts.push(v);
+        return v;
+      });
+      return verdicts;
+    }
+
+    const discovery = { content: "DISCOVERY:\nitem", toolCalls: [], costUsd: 0.01, durationMs: 100, sessionId: "s1" };
+
+    // `maxTurns` = le nombre EXACT d'envois scénarisés (1 découverte + 2
+    // exécutions) : la boucle sort alors sur son propre gardien plutôt que
+    // d'aller dormir MAX_EMPTY_RETRIES x 10 s sur un pool vide. Pas de faux
+    // minuteurs, donc les `spawn` de git réels ne risquent pas d'être affamés.
+    const phases = () => [
+      { name: "discover", prompt: "Scan", toolsMode: "read_only" as const, loop: false, effort: "low" as const },
+      { name: "execute", prompt: "Fix", toolsMode: "full" as const, loop: true, effort: "high" as const, requireFailingTest: true },
+    ];
+
+    it("voit le test de l'essai 1 quand le MÊME thread est réclamé une seconde fois", async () => {
+      let claims = 0;
+      mockClaimNextTask.mockImplementation(async () => {
+        claims++;
+        return claims <= 2
+          ? { id: "t-2a2548b3", description: "critical: orchestrator/preflight.ts", file: undefined, severity: "critical" }
+          : null;
+      });
+
+      mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
+
+      mockSend
+        .mockResolvedValueOnce(discovery)
+        // Essai 1 : l'agent écrit son test de régression… et manque de tours.
+        // Rien n'est commité — exactement l'état constaté sur la branche G3.
+        .mockImplementationOnce(async () => {
+          writeFileSync(join(repo, "tests", "unit", "preflight-auth.test.ts"), "// repro\n");
+          return { content: "je continue", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1", subtype: "error_max_turns" };
+        })
+        // Essai 2 : le travail est déjà là, l'agent n'écrit RIEN et conclut.
+        .mockResolvedValueOnce({ content: "DONE: preflight corrigé + test", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" });
+
+      const verdicts = captureVerdicts();
+
+      await runAgentLoop(makeConfig({ workspacePath: repo, maxTurns: 3, phases: phases() }), silentLogger);
+
+      expect(verdicts).toHaveLength(1);
+      // LE POINT DU TEST : le test de l'essai 1 est VU au second essai.
+      expect(verdicts[0].testFiles).toEqual(["tests/unit/preflight-auth.test.ts"]);
+      expect(verdicts[0].falsifiable).toBe(true);
+      expect(mockCompleteTask).toHaveBeenCalledWith(
+        "http://localhost:3100", "t-2a2548b3", "test-agent", expect.any(String),
+      );
+    });
+
+    // RÉGRESSION — LA BASE MÉMORISÉE NE DOIT PAS PÉRIMER.
+    //
+    // Première rédaction : une Map<threadId, base>. Deux relectures
+    // indépendantes l'ont cassée par exécution. L'entrée survit à l'abandon —
+    // c'est voulu — mais aussi à tout ce qui se passe ENTRE les deux
+    // tentatives. Ordonnancement mesuré : A réclamé (base S0), A abandonné,
+    // B réclamé, B écrit son test et COMMITE, B complété, puis A re-réclamé.
+    // `git diff S0 HEAD` remonte alors les fichiers de B, et A était ACCEPTÉ
+    // sur la preuve de B sans avoir rien écrit — là où main refusait
+    // correctement. Un emplacement UNIQUE rend ça impossible : la réclamation
+    // de B écrase celle de A.
+    it("ne crédite PAS un thread rouvert du travail commité entre-temps par un autre", async () => {
+      let claims = 0;
+      mockClaimNextTask.mockImplementation(async () => {
+        claims++;
+        if (claims === 1) return { id: "t-A", description: "defaut A", file: undefined, severity: undefined };
+        if (claims === 2) return { id: "t-B", description: "defaut B", file: undefined, severity: undefined };
+        if (claims === 3) return { id: "t-A", description: "defaut A", file: undefined, severity: undefined };
+        return null;
+      });
+
+      mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
+
+      mockSend
+        .mockResolvedValueOnce(discovery)
+        // A, essai 1 : rien produit, plafonne.
+        .mockResolvedValueOnce({ content: "je continue", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1", subtype: "error_max_turns" })
+        // B : écrit source + test et COMMITE, comme phase-execute l'ordonne.
+        .mockImplementationOnce(async () => {
+          writeFileSync(join(repo, "base.js"), "export const a = 2;\n");
+          writeFileSync(join(repo, "tests", "unit", "b.test.ts"), "// repro de B\n");
+          git(repo, "add", "--", "base.js", "tests/unit/b.test.ts");
+          git(repo, "commit", "-qm", "fix B + test");
+          return { content: "DONE: B corrige", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" };
+        })
+        // A, essai 2 : n'écrit RIEN et prétend avoir fini.
+        .mockResolvedValueOnce({ content: "DONE: A corrige", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" });
+
+      const verdicts = captureVerdicts();
+
+      await runAgentLoop(makeConfig({ workspacePath: repo, maxTurns: 4, phases: phases() }), silentLogger);
+
+      // Deux verdicts : celui de B, puis celui de A au second essai.
+      expect(verdicts).toHaveLength(2);
+      // LE POINT DU TEST : A ne doit rien voir du test de B.
+      expect(verdicts[1].testFiles).not.toContain("tests/unit/b.test.ts");
+      expect(verdicts[1].testFiles).toEqual([]);
+      expect(mockCompleteTask).not.toHaveBeenCalledWith(
+        "http://localhost:3100", "t-A", "test-agent", expect.any(String),
+      );
+    });
+
+    // GARDE-FOU CONTRE LA SUR-CORRECTION. Une ligne de base « par AGENT »,
+    // relevée une seule fois au démarrage de la boucle, serait plus simple et
+    // FAUSSE : l'agent enchaîne plusieurs tâches dans le MÊME worktree, et le
+    // test écrit pour la tâche 1 créditerait la tâche 2 qui n'en a produit
+    // aucun. Le garde-fou deviendrait complaisant — le défaut exact qu'il
+    // existe pour attraper. La clé DOIT être le thread : ce cas échoue si on
+    // la remplace par une base globale.
+    it("ne crédite PAS un thread du test écrit pour le thread précédent", async () => {
+      let claims = 0;
+      mockClaimNextTask.mockImplementation(async () => {
+        claims++;
+        if (claims === 1) return { id: "t-un", description: "premier défaut", file: undefined, severity: undefined };
+        if (claims === 2) return { id: "t-deux", description: "second défaut", file: undefined, severity: undefined };
+        return null;
+      });
+
+      mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
+
+      mockSend
+        .mockResolvedValueOnce(discovery)
+        // Thread 1 : test écrit, DONE: — accepté.
+        .mockImplementationOnce(async () => {
+          writeFileSync(join(repo, "tests", "unit", "un.test.ts"), "// repro\n");
+          return { content: "DONE: premier corrigé", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" };
+        })
+        // Thread 2 : rien d'écrit, DONE: quand même — doit être REFUSÉ.
+        .mockResolvedValueOnce({ content: "DONE: second corrigé", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" });
+
+      const verdicts = captureVerdicts();
+
+      await runAgentLoop(makeConfig({ workspacePath: repo, maxTurns: 3, phases: phases() }), silentLogger);
+
+      expect(verdicts).toHaveLength(2);
+      expect(verdicts[0].falsifiable).toBe(true);
+      expect(verdicts[0].testFiles).toEqual(["tests/unit/un.test.ts"]);
+      expect(verdicts[1].falsifiable).toBe(false);
+      expect(verdicts[1].testFiles).toEqual([]);
+      expect(mockCompleteTask).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
