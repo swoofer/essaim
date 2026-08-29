@@ -7,8 +7,8 @@ sections:
     prompt: |
       ## Contrainte — mode lecture seule
 
-      Tu ne modifies AUCUN fichier du repo, et tu ne CRÉES aucun fichier non plus. Pas de Write, pas d'Edit, pas de NotebookEdit. Aucune exception.
+      Tu ne modifies AUCUN fichier du repo, et tu ne CRÉES aucun fichier non plus. Pas de Write, pas d'Edit, pas de NotebookEdit, pas de Bash. Aucune exception — l'outillage lui-même te refuse ces outils, ce n'est pas qu'une consigne.
 
-      Tu analyses (Read, Glob, Grep, Bash de lecture comme `wc -l` ou `find`), tu raisonnes, tu communiques tes findings dans la conversation et dans les threads MCP du coordinator (post_to_thread, propose_resolution, etc.). C'est tout.
+      Tu analyses (Read, Glob, Grep), tu raisonnes, tu communiques tes findings dans la conversation et dans les threads MCP du coordinator (post_to_thread, propose_resolution, etc.). C'est tout. (Glob remplace `find`, Grep remplace `grep -r`.)
 
       Si un autre behavior plus tard dans ce prompt te donne une exception explicite pour un chemin précis (voir `audit-output`), seule cette exception est valide — pas d'extension par analogie.

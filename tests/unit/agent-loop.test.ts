@@ -1449,13 +1449,16 @@ describe("runAgentLoop — phased mode", () => {
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
     await loopPromise;
 
-    // discover (read_only): block write tools
+    // discover (read_only): block write tools — Bash COMPRIS (DF4). L'ancienne
+    // version de ce test affirmait `not.toContain("Bash")`, ce qui enshrinait
+    // le trou : `echo > f` sous --dangerously-skip-permissions ecrivait l'arbre
+    // malgre le mode « lecture seule ». Bash est desormais bloque dur.
     const discoverBlocked = mockSend.mock.calls[0][1].disallowedTools;
     expect(discoverBlocked).toContain("Write");
     expect(discoverBlocked).toContain("Edit");
     expect(discoverBlocked).toContain("NotebookEdit");
+    expect(discoverBlocked).toContain("Bash");
     expect(discoverBlocked).not.toContain("Read");
-    expect(discoverBlocked).not.toContain("Bash");
     // AskUserQuestion attend une réponse humaine qu'un run headless n'a pas,
     // et --dangerously-skip-permissions ne l'auto-approuve pas : seule une
     // règle de deny empêche l'agent de rester suspendu, tâche réclamée.
@@ -1470,6 +1473,45 @@ describe("runAgentLoop — phased mode", () => {
     expect(reviewBlocked).toContain("Write");
     expect(reviewBlocked).toContain("Skill");  // meta tool also blocked
     expect(reviewBlocked).toContain("AskUserQuestion");
+  });
+
+  // DF4 / Defect 1 — un agent read-only NON phase (gardien, phare) tombe en
+  // one-shot, dont les sends ne passent aucune option. Le verrou vit dans le
+  // wrapper `send` : TOUT envoi d'un run read_only doit bloquer l'ecriture, y
+  // compris les envois nus (one-shot, coordination). Sans le wrapper, l'agent
+  // ecrivait l'arbre reel sous --dangerously-skip-permissions.
+  it("un run read-only bloque l'ecriture sur un envoi one-shot nu", async () => {
+    mockSend.mockResolvedValue({
+      content: "DONE: audit termine",
+      toolCalls: [],
+      costUsd: 0.01,
+      durationMs: 100,
+      sessionId: "s1",
+    });
+
+    // Pas de phases -> mode one-shot ; readOnly:true -> le wrapper doit bloquer.
+    await runAgentLoop(makeConfig({ readOnly: true }), silentLogger);
+
+    const oneShotBlocked = mockSend.mock.calls[0][1].disallowedTools;
+    for (const t of ["Write", "Edit", "NotebookEdit", "Bash"]) {
+      expect(oneShotBlocked, `${t} doit etre bloque sur l'envoi one-shot read-only`).toContain(t);
+    }
+  });
+
+  it("un run NON read-only ne bloque PAS l'ecriture en one-shot", async () => {
+    mockSend.mockResolvedValue({
+      content: "DONE: corrige",
+      toolCalls: [],
+      costUsd: 0.01,
+      durationMs: 100,
+      sessionId: "s1",
+    });
+
+    await runAgentLoop(makeConfig({ readOnly: false }), silentLogger);
+
+    const oneShotBlocked = mockSend.mock.calls[0][1].disallowedTools;
+    expect(oneShotBlocked).not.toContain("Write");
+    expect(oneShotBlocked).not.toContain("Bash");
   });
 
   it("disallowedTools blocks nested-agent and human-interaction tools in full mode", async () => {

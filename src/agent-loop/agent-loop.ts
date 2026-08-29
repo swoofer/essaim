@@ -34,6 +34,11 @@ export interface AgentLoopConfig {
   maxBudgetUsd?: number;
   maxTurns?: number;
   dangerouslySkipPermissions?: boolean;
+  // DF4 — l'agent est declare lecture seule (behavior read-only-mode). Sous
+  // --dangerously-skip-permissions l'allowlist ne protege rien : le mode
+  // one-shot passe alors disallowedForMode("read_only") pour bloquer dur toute
+  // ecriture (Write/Edit/NotebookEdit/Bash). Cable depuis agent.read_only.
+  readOnly?: boolean;
   // Max times the phased sequence (discover → review → execute) is re-run
   // when execute exits with an empty pool while real work was done.
   // Default 1 (no re-discover). Raise this for raids that need extra pool refills.
@@ -343,14 +348,17 @@ function toolsForMode(
   return [...mcpTools, ...readUserTools];
 }
 
-function disallowedForMode(
+export function disallowedForMode(
   toolsMode: "read_only" | "full" | "none",
 ): string[] {
   // Nested agents are blocked in every mode — see NESTED_AGENT_TOOLS comment.
   if (toolsMode === "full") return [...NESTED_AGENT_TOOLS];
   if (toolsMode === "none") return [...ALL_USER_TOOLS];
-  // read_only: block write tools explicitly + nested agents
-  return [...WRITE_USER_TOOLS, ...NESTED_AGENT_TOOLS];
+  // read_only: block write tools + Bash + nested agents. Bash EST un vecteur
+  // d'ecriture (`echo > f`, `rm`, `sed -i`) ; l'omettre laissait un agent
+  // read-only ecrire l'arbre sous --dangerously-skip-permissions, ou seul
+  // --disallowedTools bloque vraiment (l'allowlist y est ignoree). DF4.
+  return [...WRITE_USER_TOOLS, "Bash", ...NESTED_AGENT_TOOLS];
 }
 
 // ── Prompt injections ──────────────────────────────────────────────────
@@ -727,6 +735,13 @@ export async function runAgentLoop(
     // (ask_llm_decide / ask_llm_respond / propose_resolution) et mode one-shot.
     const blocked = new Set(opts?.disallowedTools ?? []);
     for (const tool of ALWAYS_BLOCKED) blocked.add(tool);
+    // DF4 — verrou lecture seule au niveau SESSION. Un agent read-only (preset
+    // avec read-only-mode) ne doit ecrire sous AUCUN envoi : ni le one-shot, ni
+    // les envois de coordination (ask_llm_*, propose_resolution) qui ne passent
+    // aucune option. Sous --dangerously-skip-permissions, seul --disallowedTools
+    // bloque dur ; le poser ici couvre TOUS les envois d'un coup. Les phases
+    // (phased mode) passent deja leur propre disallow, superset compatible.
+    if (config.readOnly) for (const tool of disallowedForMode("read_only")) blocked.add(tool);
     const resp = await claude.send(content, { ...opts, disallowedTools: [...blocked] });
 
     totalCost += resp.costUsd;
@@ -868,7 +883,15 @@ export async function runAgentLoop(
     // Fix 5: send to separate session to avoid polluting main context
     logger.info("Processing important MQTT interrupts", { count: important.length, skipped: interrupts.length - important.length });
     const formatted = formatInterrupts(important);
-    await interruptClaude.send(formatted, { maxTurns: 1, disallowedTools: [...ALWAYS_BLOCKED] });
+    // interruptClaude est une session SEPAREE : elle ne passe pas par le wrapper
+    // `send`, donc le verrou read_only doit etre applique ici aussi (DF4). Le
+    // contenu d'une interruption vient d'un pair — un agent read-only ne doit
+    // pas pouvoir ecrire l'arbre sur injection.
+    const interruptBlocked = [
+      ...ALWAYS_BLOCKED,
+      ...(config.readOnly ? disallowedForMode("read_only") : []),
+    ];
+    await interruptClaude.send(formatted, { maxTurns: 1, disallowedTools: interruptBlocked });
     return true;
   }
 
@@ -1463,6 +1486,9 @@ export async function runAgentLoop(
         // ③ WORK LOOP — send initial prompt, then iterate
         logger.info(`Phase 3: work loop (protocol.phase=${protocol.phase})`);
         currentPhase = "main";
+        // DF4 : le verrou read_only est applique par le wrapper `send` (voir
+        // `if (config.readOnly)` plus haut), donc les envois one-shot ci-dessous
+        // heritent du blocage d'ecriture sans traitement special ici.
         const initialResp = await send(config.prompt);
         if (hasDoneMarker(initialResp.content)) {
           summary = extractDoneSummary(initialResp.content, "Complete");

@@ -37,7 +37,13 @@ const DEFAULT_MCP_TOOLS = [
 ];
 
 const CODE_TOOLS = ["Edit", "Read", "Write", "Bash", "Glob", "Grep"];
-const READ_ONLY_TOOLS = ["Read", "Bash", "Glob", "Grep"];
+// Bash EXCLU : Claude Code n'a pas de « Bash en lecture seule » — `echo > f`,
+// `rm`, `sed -i` ecrivent l'arbre autant que Write. Tant que Bash figurait ici,
+// le mode lecture-seule etait une promesse de prompt, pas un verrou. Read/Glob/
+// Grep couvrent les besoins de lecture (Grep = ripgrep, Glob = find). Perte
+// assumee : `git log`, `wc -l` — un auditeur ne peut plus les lancer, mais il
+// ne peut plus rien ecrire non plus, ce qui est le point (DF4).
+const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
 
 function prefixMcpTools(names: string[]): string[] {
   return names.map((n) => (n.startsWith(MCP_COORDINATOR_PREFIX) ? n : `${MCP_COORDINATOR_PREFIX}${n}`));
@@ -163,6 +169,7 @@ export async function launchAgentLoop(
     mcpConfigPath: mcpConfigPath || "",
     prompt: fullPrompt,
     allowedTools: buildAgentLoopAllowedTools(agent),
+    readOnly: agent.read_only,
     model: agent.model,
     phases: agent.phases,
     maxTurns: 50,

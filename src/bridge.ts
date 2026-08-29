@@ -1,7 +1,41 @@
 // bce/engine/bridge.ts
 import { resolve } from 'path';
-import { runPipeline } from '@swoofer/promptweave';
+import { runPipeline, Registry, resolveBehaviors } from '@swoofer/promptweave';
 import type { PipelineResult } from '@swoofer/promptweave';
+
+// DF4 — SÛRETÉ PAR CONSTRUCTION. Un preset dont les behaviors resolus incluent
+// `read-only-mode` produit un agent SANS aucun outil d'ecriture. Le signal est
+// la liste de behaviors resolue par promptweave (gere heritage + composition),
+// PAS le type de workspace : migrate-phase2 est `shared` et ECRIT
+// deliberement — il n'inclut simplement pas read-only-mode. Mesure : sans ce
+// cablage, `essaim run gardien -p .` donnait Write+Edit+Bash sur l'arbre REEL,
+// parce que `read_only` n'etait jamais positionne et buildAllowedTools retombait
+// sur CODE_TOOLS. Le behavior read-only-mode etait du texte de prompt sans verrou.
+const READ_ONLY_BEHAVIOR = 'read-only-mode';
+// audit-output « decoupe un droit d'ecriture pour une liste fixe de chemins
+// d'artefacts » (behaviors/audit-output.yaml). Un preset qui l'inclut (gardien
+// -> AUDIT.md, phare-* -> tmp/audit/*) N'EST donc PAS lecture seule : il DOIT
+// ecrire son livrable. Le bloquer entierement regresse #34 (« solo gardien a
+// produit son audit sur stdout mais aucun AUDIT.md »). L'ecriture path-scopee
+// de ces presets sous --dangerously-skip-permissions demande un hook PreToolUse
+// que le verrou d'outils ne sait pas exprimer — c'est un chantier distinct
+// (#1b). Ici, read_only ne couvre donc QUE les lecteurs purs.
+const AUDIT_WRITE_BEHAVIOR = 'audit-output';
+
+function presetIsReadOnly(registry: Registry, preset: string): boolean {
+  try {
+    const behaviors = resolveBehaviors(
+      { name: 'x', preset, add: [], remove: [], params: {} } as never,
+      registry,
+    ).behaviors;
+    return behaviors.includes(READ_ONLY_BEHAVIOR) && !behaviors.includes(AUDIT_WRITE_BEHAVIOR);
+  } catch {
+    // Preset introuvable / registry incomplet : runPipeline jettera plus loin
+    // avec un message clair. Ici on ne DECIDE rien — on laisse read_only a false
+    // et le vrai chemin echoue, plutot que de relacher la contrainte en silence.
+    return false;
+  }
+}
 
 // Import the orchestrator types for MiniProject compatibility
 // We define a minimal interface here to avoid circular deps
@@ -56,6 +90,10 @@ export function buildProjectFromBce(
     const available = Object.keys(templates).join(', ');
     throw new Error(`Unknown BCE template: "${templateId}". Available: ${available}`);
   }
+
+  // Registry charge UNE fois pour tout le template : presetIsReadOnly le
+  // reinterroge par agent, mais sans relire le catalogue a chaque agent.
+  const registry = Registry.load(getCatalogRoots(catalogOpts));
 
   if (options?.agentCount !== undefined) {
     const hasDynamic = def.agents.some((a) => a.count === "dynamic");
@@ -147,6 +185,7 @@ export function buildProjectFromBce(
         prompt: result.output.prompt,
         profile: agentDef.profile,
         role: agentDef.idPrefix,
+        read_only: presetIsReadOnly(registry, agentDef.preset),
         modules: registeredModules,
         launch_delay: agentDef.launch_delay,
         hooks: result.output.hooks,
@@ -190,7 +229,7 @@ export function buildSolo(
   setParams?: Record<string, Record<string, unknown>>,
   projectPath?: string,
   catalogs?: string[],
-): { prompt: string; mcpTools: string[] } {
+): { prompt: string; mcpTools: string[]; read_only: boolean } {
   // catalogs en DERNIER argument, jamais réordonné : c'est de la surface publique.
   const catalogOpts: CatalogOptions = { catalogs, projectPath };
   const templates = loadTemplates(projectPath, catalogOpts);
@@ -222,7 +261,12 @@ export function buildSolo(
     params: {} as Record<string, Record<string, unknown>>,
   };
   const result = runPipeline(agent, getCatalogRoots(catalogOpts), launchParams);
-  return { prompt: result.output.prompt, mcpTools: result.output.mcpTools };
+  // Meme verrou DF4 que le chemin parallele : un preset read-only lance en solo
+  // ne doit pas non plus exposer d'outil d'ecriture. L'appelant (cli/solo.ts)
+  // transmet ce flag a buildAllowedTools.
+  const registry = Registry.load(getCatalogRoots(catalogOpts));
+  const read_only = presetIsReadOnly(registry, agentDef.preset);
+  return { prompt: result.output.prompt, mcpTools: result.output.mcpTools, read_only };
 }
 
 /** @deprecated Prefer buildSolo() — this drops the tool allowlist (see #34). */

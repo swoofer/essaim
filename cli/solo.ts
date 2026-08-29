@@ -26,12 +26,17 @@ export function buildSoloArgs(
   prompt: string,
   mcpTools: string[],
   mcpConfigPath: string | null,
+  readOnly = false,
 ): string[] {
   const args = ["-p", prompt];
   if (mcpConfigPath) {
     args.push("--mcp-config", mcpConfigPath);
   }
-  args.push("--allowedTools", buildAllowedTools({ tools: mcpTools } as AgentConfig));
+  // solo n'utilise PAS --dangerously-skip-permissions : en headless `-p`, un
+  // outil hors allowlist est refuse. L'allowlist EST donc le verrou ici, et
+  // read_only en retire Write/Edit/Bash (DF4). Le read_only vient du preset
+  // (buildSolo le derive de la presence du behavior read-only-mode).
+  args.push("--allowedTools", buildAllowedTools({ tools: mcpTools, read_only: readOnly } as AgentConfig));
   return args;
 }
 
@@ -94,13 +99,14 @@ export function createSoloCommand(): Command {
         for (const [behavior, values] of Object.entries(setFileParams)) {
           setParams[behavior] = { ...setParams[behavior], ...values };
         }
-        const { prompt, mcpTools } = buildSolo(template, context, setParams, projectPath, opts.catalog);
+        const { prompt, mcpTools, read_only } = buildSolo(template, context, setParams, projectPath, opts.catalog);
 
         const mcpConfigPath = resolve(projectPath, ".mcp.json");
         const args = buildSoloArgs(
           prompt,
           mcpTools,
           existsSync(mcpConfigPath) ? mcpConfigPath : null,
+          read_only,
         );
 
         console.log(`\nSolo mode: ${template}`);
