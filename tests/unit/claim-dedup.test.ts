@@ -262,3 +262,127 @@ describe('claimNextTask — départage déterministe après double claim réussi
     expect(unclaimed).toHaveLength(0);
   });
 });
+
+// #142 — une annonce de coordination n'est pas un item de travail.
+//
+// Mesure (banc de 6 runs, charge identique de 4 vrais défauts) : 22 des 23
+// threads abandonnés étaient des ANNONCES d'intention, jamais du travail. Un
+// agent en réclamait une, cherchait 20 tours ce qu'il devait faire, plafonnait
+// en error_max_turns, la déréclamait — et elle repartait au pool pour le
+// suivant. 15 tours sur 59 (25 %) finissaient ainsi, brûlant 16,4 M des 32,9 M
+// de jetons cache-read : LA MOITIÉ de la dépense du banc.
+//
+// Discriminant RETENU : timeout_seconds === 0, c'est-à-dire keep_open.
+// Le coordinator écrit `keepOpen ? 0 : 600` (consultation.ts:229, avec
+// `keepOpen = params.keep_open || assignedTo !== null` ligne 210) et listThreads
+// fait `SELECT * FROM threads` — la colonne arrive donc telle quelle dans
+// /api/threads-active. Un `0` signifie « ne se périme jamais » : le balayeur
+// l'ignore (`AND timeout_seconds > 0`), c'est un item qui ATTEND UN PRENEUR.
+//
+// Discriminant ÉCARTÉ : « target_files vide ⇒ pas une tâche ». Réfuté sur
+// quatre chemins livrés, dont src/security/ingest.ts qui poste `target_files:
+// []` avec `keep_open: true` pour tout finding sans code_location (documenté
+// tel quel dans src/security/types.ts) — il serait devenu invisible au swarm de
+// remédiation, en silence, exit 0. Les cas ci-dessous verrouillent ça.
+describe("claimNextTask — une annonce de coordination n'est pas une tâche (#142)", () => {
+  it("n'essaie même pas de claim une annonce d'intention (timeout_seconds=600)", async () => {
+    // La forme exacte de la ligne SQLite du run A1 : target_files vide, des
+    // modules, run_id NULL, timeout 600. Elle reste `open` dès que le scorer
+    // d'impact a trouvé un pair concerné (sinon le coordinator l'auto-résout).
+    const fetchMock = mockCoordinator([
+      { id: 't1', status: 'open', claimed_by: null, target_files: '[]', target_modules: '["agent-loop","orchestrator"]', expected_respondents: '[]', run_id: null, timeout_seconds: 600, subject: 'agent-sentinelle-1 starting work on agent-loop, orchestrator' },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task).toBeNull();
+    const claimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/claim-task'));
+    expect(claimed).toHaveLength(0);
+  });
+
+  it("claim un item de travail semé SANS fichier cible (timeout_seconds=0) — le discriminant n'est PAS target_files", async () => {
+    // C'est le cas que « target_files vide ⇒ pas une tâche » aurait cassé :
+    // un finding de sécurité sans code_location (src/security/ingest.ts:81,
+    // keep_open: true) est du travail légitime, et il doit rester réclamable.
+    vi.stubGlobal('fetch', mockCoordinator([
+      { id: 't2', status: 'open', claimed_by: null, target_files: '[]', target_modules: '[]', run_id: 'bench-A1', timeout_seconds: 0, subject: 'high: secret en clair dans la config' },
+    ]));
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task?.id).toBe('t2');
+  });
+
+  it("les trois familles réelles du run A1 côte à côte : seul l'item semé est réclamé", async () => {
+    const fetchMock = mockCoordinator([
+      // ANNONCE — agent-loop.ts n'envoie pas keep_open → 600 → écartée.
+      { id: 'a1', status: 'open', claimed_by: null, target_files: '[]', target_modules: '["agent-loop","orchestrator","pipeline","security"]', expected_respondents: '[]', run_id: null, timeout_seconds: 600, subject: 'agent-sentinelle-3 starting work on agent-loop' },
+      // TRAVAIL semé — ingest.ts envoie keep_open: true → 0 → réclamable.
+      { id: 'w1', status: 'open', claimed_by: null, target_files: '["src/orchestrator/preflight.ts"]', target_modules: '[]', expected_respondents: '[]', run_id: 'bench-A1', timeout_seconds: 0, subject: 'major: pas de garde sur le chemin destructif' },
+      // ANNONCE announce-before-write postée par un agent via le MCP
+      // announce_work, avec ses fichiers : elle doit alimenter busyFiles mais
+      // ne JAMAIS être réclamée. expected_respondents "[]" ne discrimine rien
+      // ici — hypothèse testée sur coordinator réel et réfutée.
+      { id: 'a2', status: 'open', claimed_by: null, target_files: '["src/orchestrator/preflight.ts","tests/unit/preflight.test.ts"]', target_modules: '["orchestrator"]', expected_respondents: '["agent-sentinelle-3","seeder"]', run_id: null, timeout_seconds: 600, subject: 'je vais toucher preflight.ts' },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task?.id).toBe('w1');
+    const claimed = fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith('/api/claim-task'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string).thread_id);
+    expect(claimed).toEqual(['w1']); // a1 et a2 jamais tentés
+  });
+
+  it('timeout_seconds absent dégrade vers RÉCLAMABLE, jamais vers l\'exclusion', async () => {
+    // Même prudence que threadFiles : une colonne manquante ou illisible ne
+    // doit pas transformer du gaspillage en PERTE SILENCIEUSE (un pool de
+    // vrais items tous écartés sort par « pool empty », exit 0, rapport vert).
+    vi.stubGlobal('fetch', mockCoordinator([
+      { id: 't3', status: 'open', claimed_by: null, target_files: '["src/a.ts"]' },
+    ]));
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+    expect(task?.id).toBe('t3');
+  });
+
+  it('timeout_seconds illisible dégrade aussi vers réclamable', async () => {
+    vi.stubGlobal('fetch', mockCoordinator([
+      { id: 't4', status: 'open', claimed_by: null, target_files: '["src/a.ts"]', timeout_seconds: 'jamais' },
+    ]));
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+    expect(task?.id).toBe('t4');
+  });
+
+  it('tolérance de forme : timeout_seconds en chaîne, target_files en TABLEAU déjà décodé', async () => {
+    // Le coordinator livre des chaînes ; un appelant (ou un futur coordinator
+    // qui désérialiserait) peut livrer des types natifs. Les deux formes
+    // doivent conclure pareil, sinon on rejoue le bug de classe de #139.
+    const fetchMock = mockCoordinator([
+      { id: 'a1', status: 'open', claimed_by: null, target_files: [], timeout_seconds: '600' },
+      { id: 'w1', status: 'open', claimed_by: null, target_files: ['src/a.ts'], timeout_seconds: '0' },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+
+    expect(task?.id).toBe('w1');
+    const claimed = fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith('/api/claim-task'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string).thread_id);
+    expect(claimed).toEqual(['w1']);
+  });
+
+  it('le dispatch dirigé reste réclamable par son destinataire (assigned_to implique keep_open côté coordinator)', async () => {
+    vi.stubGlobal('fetch', mockCoordinator([
+      { id: 't5', status: 'open', claimed_by: null, assigned_to: 'hunter-2', target_files: '[]', timeout_seconds: 0, subject: 'lead → worker' },
+    ]));
+
+    const task = await claimNextTask('https://c', 'hunter-2');
+    expect(task?.id).toBe('t5');
+  });
+});
