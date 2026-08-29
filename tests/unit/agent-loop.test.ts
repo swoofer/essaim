@@ -1953,6 +1953,58 @@ describe("runAgentLoop — phased mode", () => {
       );
     });
 
+    // RÉGRESSION — LA BASE MÉMORISÉE NE DOIT PAS PÉRIMER.
+    //
+    // Première rédaction : une Map<threadId, base>. Deux relectures
+    // indépendantes l'ont cassée par exécution. L'entrée survit à l'abandon —
+    // c'est voulu — mais aussi à tout ce qui se passe ENTRE les deux
+    // tentatives. Ordonnancement mesuré : A réclamé (base S0), A abandonné,
+    // B réclamé, B écrit son test et COMMITE, B complété, puis A re-réclamé.
+    // `git diff S0 HEAD` remonte alors les fichiers de B, et A était ACCEPTÉ
+    // sur la preuve de B sans avoir rien écrit — là où main refusait
+    // correctement. Un emplacement UNIQUE rend ça impossible : la réclamation
+    // de B écrase celle de A.
+    it("ne crédite PAS un thread rouvert du travail commité entre-temps par un autre", async () => {
+      let claims = 0;
+      mockClaimNextTask.mockImplementation(async () => {
+        claims++;
+        if (claims === 1) return { id: "t-A", description: "defaut A", file: undefined, severity: undefined };
+        if (claims === 2) return { id: "t-B", description: "defaut B", file: undefined, severity: undefined };
+        if (claims === 3) return { id: "t-A", description: "defaut A", file: undefined, severity: undefined };
+        return null;
+      });
+
+      mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
+
+      mockSend
+        .mockResolvedValueOnce(discovery)
+        // A, essai 1 : rien produit, plafonne.
+        .mockResolvedValueOnce({ content: "je continue", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1", subtype: "error_max_turns" })
+        // B : écrit source + test et COMMITE, comme phase-execute l'ordonne.
+        .mockImplementationOnce(async () => {
+          writeFileSync(join(repo, "base.js"), "export const a = 2;\n");
+          writeFileSync(join(repo, "tests", "unit", "b.test.ts"), "// repro de B\n");
+          git(repo, "add", "--", "base.js", "tests/unit/b.test.ts");
+          git(repo, "commit", "-qm", "fix B + test");
+          return { content: "DONE: B corrige", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" };
+        })
+        // A, essai 2 : n'écrit RIEN et prétend avoir fini.
+        .mockResolvedValueOnce({ content: "DONE: A corrige", toolCalls: [], costUsd: 0.02, durationMs: 100, sessionId: "s1" });
+
+      const verdicts = captureVerdicts();
+
+      await runAgentLoop(makeConfig({ workspacePath: repo, maxTurns: 4, phases: phases() }), silentLogger);
+
+      // Deux verdicts : celui de B, puis celui de A au second essai.
+      expect(verdicts).toHaveLength(2);
+      // LE POINT DU TEST : A ne doit rien voir du test de B.
+      expect(verdicts[1].testFiles).not.toContain("tests/unit/b.test.ts");
+      expect(verdicts[1].testFiles).toEqual([]);
+      expect(mockCompleteTask).not.toHaveBeenCalledWith(
+        "http://localhost:3100", "t-A", "test-agent", expect.any(String),
+      );
+    });
+
     // GARDE-FOU CONTRE LA SUR-CORRECTION. Une ligne de base « par AGENT »,
     // relevée une seule fois au démarrage de la boucle, serait plus simple et
     // FAUSSE : l'agent enchaîne plusieurs tâches dans le MÊME worktree, et le
