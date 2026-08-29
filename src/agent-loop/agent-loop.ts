@@ -407,7 +407,7 @@ async function coordinatorPost(
   return (await resp.json()) as Record<string, unknown>;
 }
 
-async function announceViaRest(
+export async function announceViaRest(
   coordinatorUrl: string,
   agentId: string,
   work: WorkDescription,
@@ -421,6 +421,25 @@ async function announceViaRest(
     target_files: work.targetFiles,
     depends_on_files: work.dependsOnFiles,
     exports_affected: work.exportsAffected,
+    // PAS d'estampille run_id ici — et c'est DÉLIBÉRÉ, contrairement aux deux
+    // autres chemins d'annonce (postDiscoveries et le NOUVEAU groupé, qui la
+    // passent tous deux depuis #32).
+    //
+    // Elle ne fermerait qu'une fuite INTER-runs, dont le banc de 6 runs n'a
+    // mesuré aucune occurrence, et dont le vrai dommage — être réclamée comme
+    // tâche — est déjà fermé par isWorkItem() dans work-stealing.ts. En face,
+    // elle régresserait une ligne de rapport rendue honnête exprès :
+    // /api/threads-summary filtre en ÉGALITÉ STRICTE sur run_id (voir le
+    // commentaire de fetchThreadsSummary dans orchestrator/metrics.ts), donc
+    // les annonces en sont aujourd'hui exclues et la note « État final
+    // (coordinator, faisant autorité) » ne compte que du vrai travail.
+    // Estampillées, les N annonces de boot entreraient dans le total : un raid
+    // à 4 agents qui corrige 4 bugs afficherait 8 threads au lieu de 4.
+    // Vérifié sur un rapport réel du banc : threads_opened=9, threads_final
+    // {total:4, poisoned:4} — l'égalité stricte est prouvée par artefact.
+    //
+    // À rouvrir seulement si /api/threads-summary apprend à ne compter que les
+    // items de travail (`AND timeout_seconds = 0`), côté mcp-coordinator.
   });
 
   const threadId = (data.thread_id as string) || "";
@@ -1042,6 +1061,17 @@ export async function runAgentLoop(
             // Work-stealing loop with grace period for late discoveries
             let tasksDone = 0;
             let emptyRetries = 0;
+            // Laissé à 3, contre mon intuition — et c'est la mesure qui a
+            // tranché. Le garde-fou isWorkItem() supprime une temporisation
+            // ACCIDENTELLE : avant, un agent arrivé en execute avant ses pairs
+            // réclamait une annonce et y brûlait des minutes, pendant
+            // lesquelles les découvertes des pairs plus lents atterrissaient.
+            // La crainte était qu'un agent rapide sorte désormais en 30 s sans
+            // rien faire. Sur les 3 runs de validation, ça ne s'est produit
+            // AUCUNE fois : les 4 agents de chaque run ont pris leur tâche
+            // (« 1 tasks done » x4), et le second cycle seul trouve le pool
+            // vide. Porter le budget à 6 aurait ajouté 30 s d'attente par
+            // agent et par cycle pour un problème qui ne se manifeste pas.
             const MAX_EMPTY_RETRIES = 3;
             const EMPTY_WAIT_MS = 10_000;  // 10s between retries
 

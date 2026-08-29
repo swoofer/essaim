@@ -41,6 +41,50 @@ function safeParseArray(raw: string): unknown[] {
   }
 }
 
+// Une ANNONCE de coordination n'est pas un item de travail (#142).
+//
+// Mesuré sur un banc de 6 runs à charge identique : 22 des 23 threads
+// abandonnés étaient des annonces d'intention. claimNextTask réclamait
+// n'importe quel thread ouvert non réclamé ; comme une annonce porte
+// target_files vide, computeBusyFiles() ne la voyait jamais en conflit et
+// rien ne l'écartait. L'agent la réclamait, cherchait 20 tours ce qu'il
+// devait faire, plafonnait en error_max_turns, la déréclamait — et elle
+// repartait au pool pour le suivant. 15 tours sur 59 (25 %) finissaient
+// ainsi, brûlant 16,4 M des 32,9 M de jetons cache-read : LA MOITIÉ de la
+// dépense du banc.
+//
+// Le discriminant est keep_open, que le coordinator persiste dans
+// timeout_seconds : `keepOpen ? 0 : 600` à l'INSERT (consultation.ts, avec
+// `keepOpen = params.keep_open || assignedTo !== null`), et listThreads fait
+// `SELECT * FROM threads` — la colonne arrive donc telle quelle dans
+// /api/threads-active. Le balayeur confirme le sens : il ne périme que
+// `timeout_seconds > 0`. Un 0 veut dire « ne se périme jamais », c'est-à-dire
+// un item qui ATTEND UN PRENEUR. Les trois chemins qui postent du vrai
+// travail (postDiscoveries et le NOUVEAU groupé ci-dessous, findingToAnnounce
+// dans security/ingest.ts) envoient tous keep_open: true ; announceViaRest
+// est le seul à ne pas l'envoyer. Le dispatch dirigé est couvert gratuitement
+// (assigned_to implique keepOpen côté coordinator).
+//
+// Discriminant ÉCARTÉ — « target_files vide ⇒ pas une tâche » : il sépare
+// bien les familles observées, mais il casse trois producteurs de vrai
+// travail sans fichier, dont security/ingest.ts qui poste target_files: []
+// pour tout finding sans code_location (documenté tel quel dans
+// security/types.ts). La vuln serait sortie du pool en silence, exit 0,
+// rapport vert — du gaspillage transformé en PERTE, ce qui est pire.
+// Également écarté : expected_respondents (vaut "[]" pour l'annonce COMME
+// pour l'item semé — hypothèse testée sur coordinator réel et réfutée).
+//
+// Même prudence de lecture que threadFiles ci-dessus (#139) : la valeur
+// arrive d'une ligne SQLite brute, elle peut être un nombre, une chaîne, ou
+// manquer. Absente ou illisible, on dégrade vers RÉCLAMABLE — jamais vers
+// l'exclusion, sinon un pool de vrais items tous écartés fait sortir l'agent
+// par « pool empty », proprement, sans avoir rien fait.
+function isWorkItem(thread: Record<string, unknown>): boolean {
+  const raw = thread.timeout_seconds;
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  return !Number.isFinite(n) || n === 0;
+}
+
 const DISCOVERY_MARKER = "DISCOVERY:";
 
 /**
@@ -248,6 +292,16 @@ export async function claimNextTask(
 
   let busyFiles = computeBusyFiles(open, agentId);
 
+  // COMPTEUR D'ÉCARTÉS — en info, pas en debug, et c'est le point.
+  // La dégradation d'isWorkItem() est « réclamable » : un thread dont
+  // timeout_seconds est illisible passe. Un garde-fou qui dégrade en silence ne
+  // peut pas être distingué d'un garde-fou INERTE — c'est exactement ce qui
+  // s'est passé avec le départage post-claim de #141, dont le compteur de
+  // cessions valait 0 sur trois runs sans que personne le voie. Une valeur nulle
+  // ici, alors que des tours finissent en error_max_turns, veut dire que le
+  // mécanisme ne sert à rien : il faut pouvoir le lire dans le log du run.
+  let skippedAnnounces = 0;
+
   // What has already LANDED on each file this run, so the executing agent can
   // recognise a duplicate rather than re-committing it.
   const doneByFile = new Map<string, string[]>();
@@ -264,6 +318,12 @@ export async function claimNextTask(
   for (const thread of threads) {
     if (thread.status !== "open") continue;
     if (thread.claimed_by) continue;
+    // Le garde-fou de #142.
+    if (!isWorkItem(thread)) {
+      skippedAnnounces++;
+      log.debug(`skipping thread=${thread.id} — annonce de coordination (timeout_seconds=${String(thread.timeout_seconds)}), pas un item de travail`);
+      continue;
+    }
 
     const files = threadFiles(thread);
     const conflict = files.find((f) => busyFiles.has(f));
@@ -299,6 +359,9 @@ export async function claimNextTask(
         if (relatedDone.length > 0) {
           log.info(`thread=${threadId}: ${relatedDone.length} résolution(s) déjà livrée(s) sur ${files.join(", ")} — contexte injecté`);
         }
+        if (skippedAnnounces > 0) {
+          log.info(`claimNextTask: ${skippedAnnounces} annonce(s) de coordination écartée(s) — pas des items de travail`);
+        }
         return {
           id: threadId,
           description: subject,
@@ -325,6 +388,9 @@ export async function claimNextTask(
     }
   }
 
+  if (skippedAnnounces > 0) {
+    log.info(`claimNextTask: ${skippedAnnounces} annonce(s) de coordination écartée(s) — pas des items de travail`);
+  }
   log.debug("claimNextTask: nothing to claim");
   return null;
 }
