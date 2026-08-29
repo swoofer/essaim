@@ -396,7 +396,24 @@ export async function claimNextTask(
 }
 
 /**
- * Mark a task complete by proposing resolution.
+ * Termine une tache : propose la resolution PUIS auto-approuve (#2).
+ *
+ * `propose-resolution` fait passer le thread en `resolving` — le coordinator
+ * attend alors une approbation. Cette approbation n'etait JAMAIS emise :
+ * `approveResolution` cote coordinator existait, l'appel cote essaim aussi
+ * (approveResolutionViaRest), mais rien ne l'appelait. Mesure : sur 6 runs,
+ * TOUS les threads « resolus » finissaient `resolving`, jamais `resolved` — la
+ * couche de consensus ne concluait jamais.
+ *
+ * L'agent qui a fait le travail auto-approuve sa propre proposition. Cote
+ * coordinator, `allRespondentsApproved` rend true des que `expected_respondents`
+ * est vide (verifie sur les bases du banc : les threads bloques avaient tous
+ * exp=[]), donc une seule approbation resout le thread. Un thread AVEC des
+ * repondants attendus (chevauchement de module) n'est PAS resolu par cette
+ * auto-approbation seule — il attend le vrai consensus, comportement correct.
+ *
+ * L'approbation est resiliente (catch) : si propose a echoue, le thread n'est
+ * pas `resolving` et approveResolution jetterait — on avale, comme propose.
  */
 export async function completeTask(
   coordinatorUrl: string,
@@ -405,12 +422,22 @@ export async function completeTask(
   summary: string,
 ): Promise<void> {
   log.debug(`completeTask: thread=${threadId}`, { summary: summary.slice(0, 80) });
-  await coordinatorPost(`${coordinatorUrl}/api/propose-resolution`, {
+  const proposed = await coordinatorPost(`${coordinatorUrl}/api/propose-resolution`, {
     thread_id: threadId,
     agent_id: agentId,
     summary,
+  }).then(() => true).catch((err) => {
+    log.warn("completeTask: propose-resolution failed", { error: (err as Error).message });
+    return false;
+  });
+  if (!proposed) return;
+  await coordinatorPost(`${coordinatorUrl}/api/approve-resolution`, {
+    thread_id: threadId,
+    agent_id: agentId,
   }).catch((err) => {
-    log.warn("completeTask failed", { error: (err as Error).message });
+    // Un thread avec expected_respondents non vide n'est pas resolu ici : ce
+    // n'est pas une erreur. On journalise en debug, pas en warn.
+    log.debug("completeTask: approve-resolution non concluante (repondants attendus ?)", { error: (err as Error).message });
   });
 }
 
