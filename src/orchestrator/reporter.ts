@@ -269,6 +269,23 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       for (const wt of r.worktrees) {
         md += `| ${wt.agent_id} | \`${wt.branch}\` | \`${wt.path}\` |\n`;
       }
+
+      // Récupérer (#163) : le travail de chaque agent vit sur SA branche. On
+      // offre les commandes NON DESTRUCTIVES pour l'inspecter et le rejouer sur
+      // sa propre branche — en remplacement de l'ancienne recette
+      // `git branch -D 'mini-project-*'` (qui EFFAÇAIT le livrable, et dont le
+      // `xargs -r` n'existe pas sous PowerShell). Ces commandes sont du git pur,
+      // portables Windows/POSIX.
+      const base = r.identity?.base_sha;
+      if (base) {
+        md += `\n### Récupérer le travail\n\n`;
+        md += `Chaque agent a commité sur sa branche. Pour inspecter puis rejouer son travail :\n\n`;
+        md += `| Agent | Voir les commits | Voir le diff | Rejouer sur ta branche |\n`;
+        md += `|-------|------------------|--------------|------------------------|\n`;
+        for (const wt of r.worktrees) {
+          md += `| ${wt.agent_id} | \`git log ${base}..${wt.branch}\` | \`git diff ${base}..${wt.branch}\` | \`git cherry-pick ${base}..${wt.branch}\` |\n`;
+        }
+      }
     }
 
     if (r.security) {
