@@ -3,7 +3,30 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { uniqueReportBase } from '../../src/orchestrator/reporter.js';
+import { uniqueReportBase, tscCompilationStatus } from '../../src/orchestrator/reporter.js';
+
+// #152 — colonne Compilation TRI-ÉTAT, fondée sur le code de sortie de tsc et non
+// sur includes("error") (qui rendait un faux OK quand tsc était injoignable).
+describe('tscCompilationStatus (#152)', () => {
+  it('tsc rend 0 -> true (OK)', () => {
+    expect(tscCompilationStatus('/ws', () => ({ code: 0, output: '' }))).toBe(true);
+  });
+
+  it('tsc tourne et échoue (error TSxxxx) -> false (FAIL)', () => {
+    const output = 'src/a.ts(12,3): error TS2322: Type string is not assignable to number.';
+    expect(tscCompilationStatus('/ws', () => ({ code: 1, output }))).toBe(false);
+  });
+
+  it("tsc INJOIGNABLE (npx introuvable, code 127, aucun diagnostic tsc) -> undefined, JAMAIS true (acceptance #152)", () => {
+    const r = tscCompilationStatus('/ws', () => ({ code: 127, output: 'npx: command not found' }));
+    expect(r).toBeUndefined();
+    expect(r).not.toBe(true); // le faux OK est banni
+  });
+
+  it('spawn impossible (code null) -> undefined (non vérifié)', () => {
+    expect(tscCompilationStatus('/ws', () => ({ code: null, output: '' }))).toBeUndefined();
+  });
+});
 import { loadTemplates } from '../../src/template-loader.js';
 
 let dir: string;
