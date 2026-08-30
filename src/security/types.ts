@@ -154,6 +154,10 @@ export interface SecurityRunLedger {
   status: EngineStatus;
   findingsBySeverity: Record<Severity, number>;
   ingested: number;
+  // Findings que le scan a trouvés mais que le semis n'a PAS pu enregistrer
+  // (POST /api/announce en échec, ou 200 sans thread_id). >0 => `degraded`, sinon
+  // N vulnérabilités jamais consignées passeraient pour un run propre (#190).
+  ingestFailed: number;
   verified: number;
   reopened: number;
   falsePositives: number;

@@ -43,7 +43,7 @@ function imageDigestOf(image: string): string {
 
 export function buildLedger(
   scan: ScanResult,
-  extra: { ingested: number; outOfScopeDropped: number; suppressed: number },
+  extra: { ingested: number; outOfScopeDropped: number; suppressed: number; ingestFailed: number },
 ): SecurityRunLedger {
   const r = scan.results[0];
   const bySev: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
@@ -53,10 +53,15 @@ export function buildLedger(
     status: r?.status ?? "skipped",
     findingsBySeverity: bySev,
     ingested: extra.ingested,
+    ingestFailed: extra.ingestFailed,
     verified: 0,
     reopened: 0,
     falsePositives: 0,
-    degraded: scan.degraded,
+    // Posture conservatrice anti-false-clean (cf. verify.ts:41) : un finding
+    // trouvé mais non semé est une vuln qui ne sera jamais corrigée. Tout échec
+    // de semis dégrade le run -> exit 1 (cli/security.ts). Sinon exit 0 vert
+    // malgré N vulnérabilités perdues (#190).
+    degraded: scan.degraded || extra.ingestFailed > 0,
     durationMs: r?.durationMs ?? 0,
     exitCode: r?.exitCode,
     engineVersion: r?.engineVersion,
@@ -165,7 +170,7 @@ export async function runSecurityPrePhase(
   const ingest = await ingestFindings(p.coordinatorUrl, authorId, fresh.fresh);
   writeEngineReport(p.projectPath, p.runId, scan);
 
-  const ledger = buildLedger(scan, { ingested: ingest.posted.length, outOfScopeDropped: inScope.dropped, suppressed: fresh.suppressed });
+  const ledger = buildLedger(scan, { ingested: ingest.posted.length, outOfScopeDropped: inScope.dropped, suppressed: fresh.suppressed, ingestFailed: ingest.failed });
   return { ledger, postedMap: ingest.posted, engineId: cfg.engines[0] };
 }
 

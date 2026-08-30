@@ -110,7 +110,17 @@ export async function ingestFindings(coordinatorUrl: string, agentId: string, fi
   for (const f of findings) {
     try {
       const data = await coordPost(`${coordinatorUrl}/api/announce`, findingToAnnounce(f, agentId));
-      posted.push({ threadId: String(data.thread_id ?? ""), finding: f });
+      // Un 200 SANS thread_id = thread NON créé (coordinator « vivant mais
+      // dysfonctionnel », ex. base verrouillée qui répond 200+erreur). Le compter
+      // comme ingéré faussait le ledger et laissait un finding perdu passer pour
+      // semé — faux vert (#190). On le traite comme un échec de semis.
+      const threadId = String(data.thread_id ?? "");
+      if (threadId) {
+        posted.push({ threadId, finding: f });
+      } else {
+        failed++;
+        log.error("security: announce 200 sans thread_id — finding NON semé", { fingerprint: f.fingerprint });
+      }
     } catch (err) {
       failed++;
       log.error("security: failed to ingest finding", { fingerprint: f.fingerprint, err: (err as Error).message });

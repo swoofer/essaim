@@ -231,7 +231,10 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       md += `| ${s.engine} | ${s.license} | ${s.status}${s.degraded ? " (degraded)" : ""} | ${Math.round(s.durationMs / 1000)}s | ${s.exitCode ?? "N/A"} | ${s.engineVersion ?? "N/A"} | \`${s.imageDigest ?? "N/A"}\` |\n`;
       md += `\n**Findings par sévérité:** `;
       md += `critical ${s.findingsBySeverity.critical}, high ${s.findingsBySeverity.high}, medium ${s.findingsBySeverity.medium}, low ${s.findingsBySeverity.low}, info ${s.findingsBySeverity.info}\n`;
-      md += `\n**Remédiation:** ${s.ingested} ingérés · ${s.verified} verified · ${s.reopened} reopened · ${s.falsePositives} faux-positifs · ${s.suppressed} baselinés · ${s.outOfScopeDropped} hors-scope écartés\n`;
+      md += `\n**Remédiation:** ${s.ingested} ingérés · ${s.verified} verified · ${s.reopened} reopened · ${s.falsePositives} faux-positifs · ${s.suppressed} baselinés · ${s.outOfScopeDropped} hors-scope écartés`;
+      // Nommer les findings perdus au semis (thème #137) : sinon `degraded` est
+      // vrai sans dire pourquoi, et N vulnérabilités non consignées restent muettes.
+      md += s.ingestFailed > 0 ? ` · **${s.ingestFailed} ÉCHECS de semis (findings non consignés)**\n` : `\n`;
       if (s.reopened > 0) {
         md += `\n> ⚠️ ${s.reopened} finding(s) re-détecté(s) à la vérification — le run n'est PAS "clean" (révision humaine requise).\n`;
       }

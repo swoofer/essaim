@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { findingToAnnounce, ingestFindings, registerSyntheticAuthor, syntheticAuthorId } from "../../src/security/ingest.js";
 import type { Finding } from "../../src/security/types.js";
+import { buildLedger } from "../../src/security/pre-phase.js";
+import type { ScanResult } from "../../src/security/scan.js";
 
 function finding(over: Partial<Finding> = {}): Finding {
   return {
@@ -177,5 +179,29 @@ describe("ingestFindings + registerSyntheticAuthor", () => {
 describe("syntheticAuthorId", () => {
   it("derives a stable id from the project basename", () => {
     expect(syntheticAuthorId("C:/Users/gagno/projet/essaim-new")).toBe("security-scanner@essaim-new");
+  });
+});
+
+describe("faux vert du semis sécurité (#190)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("ingestFindings : 200 SANS thread_id (thread non créé) → failed++, PAS ingéré", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/api/announce")) return { ok: true, json: async () => ({ status: "open" }) }; // pas de thread_id
+      return { ok: true, json: async () => ({}) };
+    }));
+    const res = await ingestFindings("http://c", "a", [finding()]);
+    expect(res.failed).toBe(1);
+    expect(res.posted).toHaveLength(0);
+  });
+
+  it("buildLedger : un échec de semis (ingestFailed>0) DÉGRADE le run → exit rouge, jamais vert sur findings perdus", () => {
+    const scan: ScanResult = { results: [], findings: [finding()], degraded: false };
+    const degradedLedger = buildLedger(scan, { ingested: 0, outOfScopeDropped: 0, suppressed: 0, ingestFailed: 2 });
+    expect(degradedLedger.degraded).toBe(true);
+    expect(degradedLedger.ingestFailed).toBe(2);
+    // Contrôle : 0 échec de semis et scan sain → PAS dégradé (pas de faux rouge).
+    const cleanLedger = buildLedger(scan, { ingested: 1, outOfScopeDropped: 0, suppressed: 0, ingestFailed: 0 });
+    expect(cleanLedger.degraded).toBe(false);
   });
 });

@@ -27,7 +27,7 @@ describe("writeReport — security section", () => {
       security: {
         engine: "strix", status: "vulns_found",
         findingsBySeverity: { critical: 0, high: 2, medium: 1, low: 0, info: 0 },
-        ingested: 3, verified: 2, reopened: 1, falsePositives: 0, degraded: false,
+        ingested: 3, ingestFailed: 0, verified: 2, reopened: 1, falsePositives: 0, degraded: false,
         durationMs: 142000, exitCode: 2, engineVersion: "1.3.1", license: "Apache-2.0",
         imageDigest: "sha256:abc", outOfScopeDropped: 4, suppressed: 1,
       },
