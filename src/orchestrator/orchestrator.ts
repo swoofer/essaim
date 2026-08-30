@@ -172,7 +172,10 @@ async function _runProjectBody(
   effectiveCoordinatorUrl: string,
   coordinatorJustSpawned: boolean,
 ): Promise<RunResult> {
-  const runDir = path.resolve("runs", `${project.id}-${mode}-${Date.now()}`);
+  // Ancré sur le dépôt CIBLE (-p), pas le cwd (#158) : `cd /ailleurs && essaim
+  // run -p <dépôt>` ne doit créer AUCUN dossier dans /ailleurs. workspace.base
+  // porte le -p résolu ; à défaut DEFAULT_BASE = cwd (comportement historique).
+  const runDir = path.resolve(project.workspace.base || DEFAULT_BASE, "runs", `${project.id}-${mode}-${Date.now()}`);
   fs.mkdirSync(runDir, { recursive: true });
 
   // Mint the run id BEFORE any agent starts, so every thread this swarm opens

@@ -90,3 +90,20 @@ describe("scanProject", () => {
   });
 });
 
+
+describe("scanProject — is_clean ignore les artefacts essaim (#158)", () => {
+  it("runs/ et reports/ non suivis ne salissent PAS le dépôt ; un vrai fichier, si", () => {
+    const dir = makeProject({ "src/a.ts": "export const a = 1;\n" }); // dépôt propre, commité
+    // essaim écrit SES artefacts (non suivis) dans le dépôt cible (#158) — ce ne
+    // sont pas du travail utilisateur, is_clean doit rester vrai.
+    fs.mkdirSync(path.join(dir, "runs", "run1"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "runs", "run1", "w.txt"), "worktree");
+    fs.mkdirSync(path.join(dir, "reports"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "reports", "report-x.md"), "# r");
+    expect(scanProject(dir).is_clean).toBe(true);
+
+    // un VRAI fichier non suivi de l'utilisateur, lui, salit bien le dépôt
+    fs.writeFileSync(path.join(dir, "user-wip.txt"), "en cours");
+    expect(scanProject(dir).is_clean).toBe(false);
+  });
+});

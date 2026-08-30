@@ -85,14 +85,13 @@ export function createWorkspaces(
 
 export function cleanupWorkspaces(workspace: WorkspaceResult): void {
   if (workspace.type !== "worktree") return;
-  for (const [agentId, worktreePath] of workspace.paths) {
-    // Le nom vient de la création, il n'est plus recalculé ici : un nettoyage
-    // qui recalcule est un nettoyage libre de viser la mauvaise branche.
-    const branchName = workspace.branches.get(agentId);
+  for (const [, worktreePath] of workspace.paths) {
+    // #158 — retire les WORKTREES mais GARDE les branches : elles SONT le
+    // livrable de l'agent (le rapport « Récupérer » propose `git cherry-pick`
+    // dessus, #163). Les effacer avec un `--cleanup` censé « ranger » détruisait
+    // le travail — l'ancien `git branch -D` est donc retiré. Le runDir, lui, est
+    // supprimé par l'appelant après l'écriture du rapport (run-core, #158).
     try { execSync(`git worktree remove "${worktreePath}" --force`, { cwd: workspace.basePath, stdio: "pipe" }); } catch {}
-    if (branchName) {
-      try { execSync(`git branch -D "${branchName}"`, { cwd: workspace.basePath, stdio: "pipe" }); } catch {}
-    }
   }
 }
 

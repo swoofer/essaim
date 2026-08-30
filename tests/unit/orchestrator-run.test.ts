@@ -580,3 +580,32 @@ describe("runProject — task_records survit au timeout global (#162)", () => {
     expect(a1?.exit_reason).toBe("aborted");
   });
 });
+
+// ── #158 — runs/ ancré sur -p (le dépôt cible), jamais le cwd ────────────────
+describe("runProject — runs/ ancré sur -p, pas le cwd (#158)", () => {
+  it("cd /ailleurs && run -p <dépôt> ⇒ runs/ dans <dépôt>, 0 dans le cwd", async () => {
+    // BASE_DIR = dépôt cible (-p), distinct du cwd (TMP_DIR, où le beforeEach a chdir).
+    const BASE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "essaim-base-"));
+    execSync("git init -q && git config user.email 't@t' && git config user.name 't'", { cwd: BASE_DIR });
+    fs.writeFileSync(path.join(BASE_DIR, ".gitkeep"), "");
+    execSync("git add . && git commit -q -m init", { cwd: BASE_DIR });
+
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent) => makeLoopResult(agent.id));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "none", base: BASE_DIR },
+    });
+
+    try {
+      // coordinatorUrl fourni ⇒ pas de coordinator embarqué (comme le test #107).
+      await runProject(project, "with_coordinator", false, { coordinatorUrl: "http://coordinator.test" });
+      // runs/ créé dans le dépôt CIBLE, PAS dans le cwd
+      expect(fs.existsSync(path.join(BASE_DIR, "runs"))).toBe(true);
+      expect(fs.existsSync(path.join(TMP_DIR, "runs"))).toBe(false);
+    } finally {
+      fs.rmSync(BASE_DIR, { recursive: true, force: true });
+    }
+  });
+});
