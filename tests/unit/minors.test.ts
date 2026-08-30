@@ -172,22 +172,45 @@ describe('reporter honnête (#165)', () => {
     expect(md).not.toContain('Métriques spécifiques');
   });
 
-  it('un fichier NEUF non commité compte dans le diff (agent qui écrit sans commiter ⇒ diff ≠ 0)', () => {
-    dir = mkdtempSync(join(tmpdir(), 'rep165diff-'));
-    const git = (...a: string[]) => spawnSync('git', a, { cwd: dir, encoding: 'utf8' });
+  function initRepo(): string {
+    const d = mkdtempSync(join(tmpdir(), 'rep165diff-'));
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: d, encoding: 'utf8' });
     git('init', '-q'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
-    writeFileSync(join(dir, 'base.ts'), 'export const a = 1;\n');
+    writeFileSync(join(d, 'base.ts'), 'export const a = 1;\n');
     git('add', '-A'); git('commit', '-qm', 'base');
-    const baseSha = git('rev-parse', 'HEAD').stdout.trim();
-    // l'agent écrit un NOUVEAU fichier sans `git add` ni commit
-    writeFileSync(join(dir, 'newfile.ts'), 'export const b = 2;\nexport const c = 3;\n');
+    return d;
+  }
+  const baseShaOf = (d: string) => spawnSync('git', ['rev-parse', 'HEAD'], { cwd: d, encoding: 'utf8' }).stdout.trim();
+  // Ce que l'orchestrateur dépose dans CHAQUE worktree (writeAgentWorkspace),
+  // non suivi partout — ne doit JAMAIS compter comme travail de l'agent.
+  function dropHarness(d: string) {
+    writeFileSync(join(d, '.mcp.json'), '{\n  "mcpServers": {}\n}\n');
+    mkdirSync(join(d, '.claude'), { recursive: true });
+    writeFileSync(join(d, '.claude', 'settings.json'), '{}\n');
+  }
+  const worktreeAt = (d: string, baseSha: string): WorkspaceResult => ({
+    type: 'worktree', basePath: d, baseSha, paths: new Map([['a1', d]]), branches: new Map(),
+  });
 
-    const workspace: WorkspaceResult = {
-      type: 'worktree', basePath: dir, baseSha,
-      paths: new Map([['a1', dir]]), branches: new Map(),
-    };
-    const results = collectAgentResults(workspace);
-    expect(countDiffLines(results[0].diff)).toBeGreaterThan(0); // LE compteur : diff ≠ 0
-    expect(results[0].diff).toContain('newfile.ts');            // et le fichier est nommé
+  it('un fichier NEUF non commité de l\'agent compte (⇒ diff ≠ 0) et est nommé ; le harnais est EXCLU', () => {
+    dir = initRepo();
+    const baseSha = baseShaOf(dir);
+    dropHarness(dir); // le harnais coexiste — il ne doit PAS gonfler le diff
+    writeFileSync(join(dir, 'newfile.ts'), 'export const b = 2;\nexport const c = 3;\n');
+    const { diff } = collectAgentResults(worktreeAt(dir, baseSha))[0];
+    expect(countDiffLines(diff)).toBeGreaterThan(0);
+    expect(diff).toContain('newfile.ts');
+    expect(diff).not.toContain('.mcp.json'); // harnais orchestrateur EXCLU
+  });
+
+  it('agent qui n\'a RIEN fait ⇒ diff 0 malgré le harnais (.mcp.json/.claude) — le garde #153 reste armé', () => {
+    // Régression trouvée en revue adversariale : sans exclusion, `git add -N`
+    // comptait ~8 lignes de .mcp.json → faux ≠ 0 → le garde anti-faux-vert #153
+    // (measuredDiffLines===0) devenait inatteignable.
+    dir = initRepo();
+    const baseSha = baseShaOf(dir);
+    dropHarness(dir); // SEUL le harnais est présent
+    const { diff } = collectAgentResults(worktreeAt(dir, baseSha))[0];
+    expect(countDiffLines(diff)).toBe(0);
   });
 });
