@@ -108,14 +108,20 @@ export function uniqueReportBase(dir: string, prefix: string, extensions: string
 }
 
 export function writeReport(results: RunResult[], outputDir: string): string {
-  fs.mkdirSync(outputDir, { recursive: true });
-  const base = uniqueReportBase(outputDir, `report-${Date.now()}`, [".json", ".md"]);
+  // Identité du run (#164) : nomme le rapport par run_id, l'écrit AUSSI dans le
+  // runDir, et porte un en-tête d'identité — le rapport se suffit (DF5). Absente
+  // (appelant legacy), on retombe sur l'horodatage et le seul outputDir.
+  const identity = results[0]?.identity;
+  const slug = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-");
+  const prefix = identity ? `report-${slug(identity.run_id)}` : `report-${Date.now()}`;
 
-  const jsonPath = path.join(outputDir, `${base}.json`);
-  fs.writeFileSync(jsonPath, JSON.stringify(results, null, 2));
-
-  const mdPath = path.join(outputDir, `${base}.md`);
   let md = `# Mini-projet Report\n\n*${new Date().toISOString()}*\n\n`;
+  if (identity) {
+    md += `> **run** \`${identity.run_id}\``
+      + ` · **baseSha** \`${identity.base_sha ?? "N/A"}\``
+      + ` · **essaim** v${identity.version}`
+      + ` · **coordinator** ${identity.coordinator_url}\n\n`;
+  }
 
   for (const r of results) {
     md += `## ${r.project_name} (${r.mode})\n\n`;
@@ -262,9 +268,24 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += "\n---\n\n";
   }
 
-  fs.writeFileSync(mdPath, md);
-  console.log(`Report: ${mdPath}`);
-  return mdPath;
+  // reports/ TOUJOURS ; et AUSSI le runDir quand on le connaît (#164), pour que
+  // le rapport vive à côté des artefacts du run. Chaque dossier a son propre nom
+  // libre (uniqueReportBase) : deux runs dans la même ms ne s'écrasent pas.
+  const targets = [outputDir];
+  if (identity?.run_dir && path.resolve(identity.run_dir) !== path.resolve(outputDir)) {
+    targets.push(identity.run_dir);
+  }
+  let primaryMd = "";
+  for (const dir of targets) {
+    fs.mkdirSync(dir, { recursive: true });
+    const base = uniqueReportBase(dir, prefix, [".json", ".md"]);
+    fs.writeFileSync(path.join(dir, `${base}.json`), JSON.stringify(results, null, 2));
+    const mdPath = path.join(dir, `${base}.md`);
+    fs.writeFileSync(mdPath, md);
+    if (!primaryMd) primaryMd = mdPath;
+  }
+  console.log(`Report: ${primaryMd}`);
+  return primaryMd;
 }
 
 function fmtTokens(n: number): string {

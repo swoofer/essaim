@@ -1,6 +1,6 @@
 // tests/unit/minors.test.ts — minors différés du pilote
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -212,5 +212,47 @@ describe('reporter honnête (#165)', () => {
     dropHarness(dir); // SEUL le harnais est présent
     const { diff } = collectAgentResults(worktreeAt(dir, baseSha))[0];
     expect(countDiffLines(diff)).toBe(0);
+  });
+});
+
+// #164 — le rapport se suffit : nommé par run_id, écrit AUSSI dans le runDir,
+// avec un en-tête d'identité (run_id, baseSha, version, coordinator).
+describe('rapport : identité + copie dans le runDir (#164)', () => {
+  let reportsDir: string, runDir: string;
+  afterEach(() => {
+    rmSync(reportsDir, { recursive: true, force: true });
+    if (runDir && runDir !== reportsDir) rmSync(runDir, { recursive: true, force: true });
+  });
+
+  it('nom contient run_id, copie dans le runDir, en-tête porte run_id/baseSha/version/coordinator', () => {
+    reportsDir = mkdtempSync(join(tmpdir(), 'reports164-'));
+    runDir = mkdtempSync(join(tmpdir(), 'runDir164-'));
+    const r: RunResult = {
+      ...runResult(),
+      identity: {
+        run_id: 'raid-abcd1234', run_dir: runDir, base_sha: 'deadbeef',
+        coordinator_url: 'http://127.0.0.1:3100', version: '9.9.9',
+      },
+    };
+    const mdPath = writeReport([r], reportsDir);
+    // 1) le nom contient le run_id
+    expect(mdPath).toContain('raid-abcd1234');
+    // 2) le rapport vit AUSSI dans le runDir (md ET json)
+    const inRunDir = readdirSync(runDir);
+    expect(inRunDir.some((f) => f.includes('raid-abcd1234') && f.endsWith('.md'))).toBe(true);
+    expect(inRunDir.some((f) => f.includes('raid-abcd1234') && f.endsWith('.json'))).toBe(true);
+    // 3) en-tête d'identité
+    const md = readFileSync(mdPath, 'utf8');
+    expect(md).toContain('raid-abcd1234');
+    expect(md).toContain('deadbeef');
+    expect(md).toContain('v9.9.9');
+    expect(md).toContain('http://127.0.0.1:3100');
+  });
+
+  it('sans identité (appelant legacy) : nom horodaté, un seul dossier', () => {
+    reportsDir = mkdtempSync(join(tmpdir(), 'reports164b-'));
+    runDir = reportsDir;
+    const mdPath = writeReport([runResult()], reportsDir);
+    expect(mdPath).toMatch(/report-\d+\.md$/);
   });
 });

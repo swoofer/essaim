@@ -124,6 +124,17 @@ export interface RunResult {
   custom_metrics: Record<string, unknown>;
   worktrees?: { agent_id: string; path: string; branch: string }[];
   security?: SecurityRunLedger; // present only for security runs; rendered by the reporter
+  // Identité du run (#164) : le rapport est nommé par run_id, écrit AUSSI dans le
+  // runDir, et porte un en-tête d'identité — pour qu'un lecteur qui n'a pas vu le
+  // terminal sache de quel run il s'agit (DF5). Optionnel : un appelant legacy de
+  // writeReport sans identité retombe sur l'horodatage + le seul dossier reports/.
+  identity?: {
+    run_id: string;
+    run_dir: string;
+    base_sha?: string;
+    coordinator_url: string;
+    version: string;
+  };
 }
 
 export interface AgentResult {
