@@ -623,7 +623,7 @@ export async function processReviewActions(
     const plan = descriptions.map((d, i) => `${i + 1}. ${d}`).join("\n");
     log.debug(`NOUVEAU (grouped): ${subject} — ${descriptions.length} items`);
     try {
-      await coordinatorPost(`${coordinatorUrl}/api/announce`, {
+      const data = await coordinatorPost(`${coordinatorUrl}/api/announce`, {
         agent_id: agentId,
         subject: subject.slice(0, 200),
         plan,
@@ -636,7 +636,12 @@ export async function processReviewActions(
         // de la phase review d'un run mort.
         run_id: currentRunId(),
       });
-      posted++;
+      // Un 200 SANS thread_id = thread NON créé (côté coordinator). Le compter
+      // gonflerait `posted` et rendrait le garde #184 AVEUGLE (posted>0 alors que
+      // la piscine reste vide) — faux vert résiduel. postDiscoveries valide déjà
+      // thread_id de la même façon ; on aligne ici pour que `posted` ne mente pas.
+      if (data.thread_id) posted++;
+      else log.warn("NOUVEAU group post: 200 sans thread_id — non compté", { subject: subject.slice(0, 80) });
     } catch (err) { log.warn("NOUVEAU group post failed", { error: (err as Error).message }); }
   }
 

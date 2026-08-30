@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, parseReviewActions, COORDINATOR_UNREACHABLE } from "../../src/agent-loop/work-stealing.js";
+import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, parseReviewActions, processReviewActions, COORDINATOR_UNREACHABLE } from "../../src/agent-loop/work-stealing.js";
 
 describe("parseDiscoveries", () => {
   it("parses pipe-separated discovery format", () => {
@@ -466,3 +466,28 @@ describe("parseReviewActions", () => {
   });
 });
 
+
+describe("processReviewActions — comptage honnête de `posted` (#184)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const nouveau = [{ type: "nouveau" as const, description: "src/a.ts:10 — Bug A" }];
+
+  it("200 AVEC thread_id → posted=1, newAttempted=1", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ thread_id: "t-1" }) })));
+    const r = await processReviewActions("http://c", "agent-1", "Agent 1", nouveau);
+    expect(r).toMatchObject({ posted: 1, newAttempted: 1 });
+  });
+
+  it("200 SANS thread_id (thread non créé) → posted=0, newAttempted=1 — le garde #184 doit voir le semis perdu", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) })));
+    const r = await processReviewActions("http://c", "agent-1", "Agent 1", nouveau);
+    // Sans la validation thread_id, posted valait 1 (mensonge) et le faux vert #184 revenait.
+    expect(r).toMatchObject({ posted: 0, newAttempted: 1 });
+  });
+
+  it("POST qui échoue (réseau) → posted=0, newAttempted=1", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+    const r = await processReviewActions("http://c", "agent-1", "Agent 1", nouveau);
+    expect(r).toMatchObject({ posted: 0, newAttempted: 1 });
+  });
+});
