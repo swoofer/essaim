@@ -45,8 +45,14 @@ export function collectAgentResults(workspace: WorkspaceResult): AgentResult[] {
         : safeExec("git diff HEAD", wsPath);
 
     const compilationOk = workspace.type !== "none"
-      ? !safeExec("npx tsc --noEmit 2>&1", wsPath).includes("error")
+      ? tscCompilationStatus(wsPath)
       : undefined;
+    // tsc n'a pas pu tourner (npx/tsc introuvable) sur un workspace où on
+    // l'attendait : ce n'est PAS « OK », c'est « non vérifié » — on le dit, sinon
+    // un rapport vert masquerait qu'aucune compilation n'a eu lieu (#152).
+    if (workspace.type !== "none" && compilationOk === undefined) {
+      console.warn(`reporter: tsc injoignable dans ${wsPath} — compilation NON vérifiée (colonne N/A, pas OK)`);
+    }
 
     results.push({
       agent_id: agentId,
@@ -244,6 +250,40 @@ function safeExec(cmd: string, cwd: string): string {
   } catch (e) {
     return (e as { stdout?: string }).stdout || "";
   }
+}
+
+/** Lance `npx tsc --noEmit` et rend {code, output}. code=0 en succès ; sur échec,
+ *  le code de sortie du process (null s'il n'a pas pu spawn). */
+function runTsc(cwd: string): { code: number | null; output: string } {
+  try {
+    execSync("npx tsc --noEmit", { cwd, encoding: "utf-8", stdio: "pipe" });
+    return { code: 0, output: "" };
+  } catch (e) {
+    const err = e as { status?: number | null; stdout?: string; stderr?: string };
+    return { code: err.status ?? null, output: (err.stdout ?? "") + (err.stderr ?? "") };
+  }
+}
+
+/**
+ * État de compilation TRI-ÉTAT (#152), fondé sur le CODE DE SORTIE de tsc — non
+ * sur `includes("error")`, qui rendait un FAUX OK quand tsc était injoignable
+ * (« command not found » ne contient pas « error »).
+ *   - `true`      : tsc a tourné et rendu 0 (OK).
+ *   - `false`     : tsc a tourné et rapporté des erreurs de type (FAIL) —
+ *                   reconnu à sa signature `error TSxxxx`, ce qui le distingue
+ *                   d'un échec de LANCEMENT.
+ *   - `undefined` : tsc n'a PAS pu tourner (npx/tsc introuvable) — « non vérifié »,
+ *                   JAMAIS confondu avec OK (acceptance #152 : injoignable ⇒ !== true).
+ * `run` est injecté pour le test.
+ */
+export function tscCompilationStatus(
+  cwd: string,
+  run: (cwd: string) => { code: number | null; output: string } = runTsc,
+): boolean | undefined {
+  const { code, output } = run(cwd);
+  if (code === 0) return true;                 // OK
+  if (/error TS\d+/.test(output)) return false; // tsc a tourné et échoué -> FAIL
+  return undefined;                             // tsc n'a pas pu tourner -> non vérifié
 }
 
 
