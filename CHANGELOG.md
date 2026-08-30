@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.16.0](https://github.com/swoofer/essaim/compare/v0.15.0...v0.16.0) (2026-08-30)
+
+
+### Features
+
+* **reporter:** rapport nommé par run_id, écrit aussi dans le runDir, en-tête d'identité ([#164](https://github.com/swoofer/essaim/issues/164)) ([#197](https://github.com/swoofer/essaim/issues/197)) ([d0ff2b3](https://github.com/swoofer/essaim/commit/d0ff2b3ac360a0b9d35fc1c769a00be9e1f92ff7))
+* **reporter:** registre par tâche (id, agent, verdict, motif) au rapport ([#162](https://github.com/swoofer/essaim/issues/162)) ([#198](https://github.com/swoofer/essaim/issues/198)) ([e709223](https://github.com/swoofer/essaim/commit/e709223fe8103b3667334ee875f8ecdcfd8f7fa0))
+
+
+### Bug Fixes
+
+* **agent-loop:** rouge si un semis discover/review perd TOUTES ses écritures ([#184](https://github.com/swoofer/essaim/issues/184)) ([#189](https://github.com/swoofer/essaim/issues/189)) ([90a6ddb](https://github.com/swoofer/essaim/commit/90a6ddb9bb9eb8210bb62be77985282dc3dd5de9))
+* **reporter:** diff compte les non-suivis, hot files nommés, section morte retirée ([#165](https://github.com/swoofer/essaim/issues/165)) ([#196](https://github.com/swoofer/essaim/issues/196)) ([5bd29a2](https://github.com/swoofer/essaim/commit/5bd29a2ee86ebc7e7cb206347ea7dfb8e40e55fc))
+* **reporter:** lancer tsc seulement sur un dépôt TS — dépôt Go ⇒ N/A ([#160](https://github.com/swoofer/essaim/issues/160)) ([#195](https://github.com/swoofer/essaim/issues/195)) ([35ddcfa](https://github.com/swoofer/essaim/commit/35ddcfa28c9dbae9cce6684ff80cb8a0c18c002b))
+* **security:** un semis de findings raté DÉGRADE le run — plus de faux vert ([#190](https://github.com/swoofer/essaim/issues/190)) ([#192](https://github.com/swoofer/essaim/issues/192)) ([113c603](https://github.com/swoofer/essaim/commit/113c603545ad3afa3726a20fe5de597023ee5419))
+
 ## [0.15.0](https://github.com/swoofer/essaim/compare/v0.14.1...v0.15.0) (2026-08-30)
 
 
