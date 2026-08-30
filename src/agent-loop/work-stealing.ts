@@ -596,7 +596,7 @@ export async function processReviewActions(
   agentId: string,
   agentName: string,
   actions: ReviewAction[],
-): Promise<{ posted: number; enriched: number; skipped: number }> {
+): Promise<{ posted: number; enriched: number; skipped: number; newAttempted: number }> {
   let posted = 0;
   let enriched = 0;
   let skipped = 0;
@@ -623,7 +623,7 @@ export async function processReviewActions(
     const plan = descriptions.map((d, i) => `${i + 1}. ${d}`).join("\n");
     log.debug(`NOUVEAU (grouped): ${subject} — ${descriptions.length} items`);
     try {
-      await coordinatorPost(`${coordinatorUrl}/api/announce`, {
+      const data = await coordinatorPost(`${coordinatorUrl}/api/announce`, {
         agent_id: agentId,
         subject: subject.slice(0, 200),
         plan,
@@ -636,9 +636,21 @@ export async function processReviewActions(
         // de la phase review d'un run mort.
         run_id: currentRunId(),
       });
-      posted++;
+      // Un 200 SANS thread_id = thread NON créé (côté coordinator). Le compter
+      // gonflerait `posted` et rendrait le garde #184 AVEUGLE (posted>0 alors que
+      // la piscine reste vide) — faux vert résiduel. postDiscoveries valide déjà
+      // thread_id de la même façon ; on aligne ici pour que `posted` ne mente pas.
+      if (data.thread_id) posted++;
+      else log.warn("NOUVEAU group post: 200 sans thread_id — non compté", { subject: subject.slice(0, 80) });
     } catch (err) { log.warn("NOUVEAU group post failed", { error: (err as Error).message }); }
   }
+
+  // Nombre de nouveaux threads que la review a TENTÉ de semer. Le déccompte des
+  // tentatives (et pas seulement des succès) est ce qui permet à l'appelant de
+  // distinguer « la review n'a rien de neuf à poster » (newAttempted=0, OK) de
+  // « la review a du neuf mais l'écriture coordinator est morte » (newAttempted>0
+  // && posted=0 -> faux vert, #184).
+  const newAttempted = byFile.size;
 
   // Process enrichments and doublons normally
   for (const action of others) {
@@ -670,6 +682,6 @@ export async function processReviewActions(
     }
   }
 
-  return { posted, enriched, skipped };
+  return { posted, enriched, skipped, newAttempted };
 }
 

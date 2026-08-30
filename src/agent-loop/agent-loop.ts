@@ -569,6 +569,14 @@ export async function runAgentLoop(
   let lastSendMs = 0;
   let mqttMessagesProcessed = 0;
   let exitReason: ExitReason = "done";
+  // #184 — SANTÉ DU CHEMIN D'ÉCRITURE AU SEMIS. Une phase discover/review qui a
+  // TROUVÉ du travail mais n'en a consigné AUCUN (tous les POST /api/announce
+  // échouent : coordinator lisible, écriture morte) laisse la piscine « vide-
+  // mais-joignable » ; la boucle execute en sortait "done" — faux vert : l'agent
+  // a trouvé des bugs qui n'existeront jamais côté coordinator. Sticky : un seul
+  // semis totalement perdu suffit à teindre le run en rouge. Le garde #151
+  // (unreachableStreak) ne le voit pas — il ne surveille que le chemin de CLAIM.
+  let seedWriteFailed = false;
   let summary = "";
   // ── Token + cost diagnostics ──────────────────────────────────────────
   const totalTokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
@@ -1112,7 +1120,11 @@ export async function runAgentLoop(
                 // No review phase — post discoveries immediately (backward compat)
                 if (tasks.length > 0) {
                   logger.info(`Discovery: found ${tasks.length} items, posting to coordinator`);
-                  await postDiscoveries(config.coordinatorUrl, config.agentId, tasks);
+                  const posted = await postDiscoveries(config.coordinatorUrl, config.agentId, tasks);
+                  if (posted.length === 0) {
+                    logger.error(`Discovery: ${tasks.length} trouvaille(s) et 0 thread enregistré — write-path coordinator mort (#184)`);
+                    seedWriteFailed = true;
+                  }
                 }
               }
 
@@ -1151,6 +1163,11 @@ export async function runAgentLoop(
                   config.coordinatorUrl, config.agentId, config.agentName, actions
                 );
                 logger.info(`Review: ${result.posted} new, ${result.enriched} enriched, ${result.skipped} duplicates skipped`);
+                // La review a du NEUF à semer mais l'écriture a tout raté : faux vert (#184).
+                if (result.newAttempted > 0 && result.posted === 0) {
+                  logger.error(`Review: ${result.newAttempted} nouveau(x) thread(s) tenté(s), 0 enregistré — write-path coordinator mort (#184)`);
+                  seedWriteFailed = true;
+                }
               } else {
                 // Fallback: if LLM didn't follow format, post all discoveries as-is
                 logger.warn("Review: no structured actions found, posting all discoveries as fallback");
@@ -1158,7 +1175,11 @@ export async function runAgentLoop(
                 const reviewPreview = resp.content.slice(0, 300).replace(/\n/g, "\\n");
                 logger.info(`Review fallback: ${tasks.length} tasks parsed from discovery content (${discoveryContent.length} chars). Haiku's response preview: ${reviewPreview}`);
                 if (tasks.length > 0) {
-                  await postDiscoveries(config.coordinatorUrl, config.agentId, tasks);
+                  const posted = await postDiscoveries(config.coordinatorUrl, config.agentId, tasks);
+                  if (posted.length === 0) {
+                    logger.error(`Review fallback: ${tasks.length} trouvaille(s) et 0 thread enregistré — write-path coordinator mort (#184)`);
+                    seedWriteFailed = true;
+                  }
                 }
               }
             } else {
@@ -1512,6 +1533,14 @@ export async function runAgentLoop(
           break;
         }
         logger.info(`Cycle ${cycle}: ${tasksDoneLastCycle} tasks done, pool exhausted — will re-discover`);
+        }
+        // #184 — Un semis totalement perdu (trouvailles trouvées, 0 consigné) prime
+        // sur "done" : le run n'est pas fini, il est rouge. Même verdict que le
+        // chemin de claim injoignable (#151) — l'utilisateur voit du rouge, pas un
+        // faux succès sur un travail qui n'existera jamais côté coordinator.
+        if (seedWriteFailed && exitReason === "done") {
+          logger.error("Semis: des trouvailles n'ont JAMAIS été enregistrées (write-path coordinator mort) — rapport rouge (#184)");
+          exitReason = "coordinator_unreachable";
         }
         // Only stamp "done" if no earlier phase/work-stealing loop set a terminal reason
         // (aborted, deadline_exceeded, rate_limited).
