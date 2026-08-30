@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import type { RunResult, AgentResult, WorkspaceResult } from "./types.js";
@@ -41,11 +41,26 @@ export function collectAgentResults(
     // construction. Diff against the commit the worktree branched off instead —
     // that covers committed AND uncommitted changes (#29).
     const diffMeasured = workspace.type === "worktree";
-    const diff = !diffMeasured
-      ? ""
-      : workspace.baseSha
-        ? safeExec(`git diff ${workspace.baseSha}`, wsPath)
-        : safeExec("git diff HEAD", wsPath);
+    // Intent-to-add : fait apparaître les fichiers NEUFS de l'AGENT non commités
+    // comme des ajouts dans le diff. Sans ça, un agent qui écrit un nouveau
+    // fichier sans `git add` rapportait diff=0 (« n'a rien fait ») alors qu'il a
+    // produit du code (#165). `-N` n'écrit AUCUN contenu dans l'index et ne
+    // commite rien ; le worktree par agent est jetable.
+    //
+    // On EXCLUT le harnais que l'orchestrateur dépose lui-même dans CHAQUE
+    // worktree (.mcp.json à la racine, .claude/ : hooks, settings.json,
+    // .coordinator-env — voir writeAgentWorkspace) : non suivis partout, ils
+    // n'appartiennent PAS à l'agent. falsifiability.ts:149 documente le même
+    // rake et refuse pour ça l'intent-to-add. Sans l'exclusion, `git add -N`
+    // les comptait → diff faussement ≠ 0 pour un agent qui n'a RIEN fait, et
+    // surtout le garde anti-faux-vert #153 (measuredDiffLines===0) devenait
+    // INATTEIGNABLE (~8 lignes de .mcp.json par agent) — une régression de faux
+    // vert introduite par la mesure censée être honnête.
+    //
+    // execFileSync (pas le shell de safeExec) : le pathspec `:!` casserait sous
+    // cmd.exe (Windows CI ne traite pas `'…'` comme des guillemets).
+    if (diffMeasured) safeGit(["add", "-N", "--", ".", ":!.mcp.json", ":!.claude"], wsPath);
+    const diff = !diffMeasured ? "" : safeGit(["diff", workspace.baseSha ?? "HEAD"], wsPath);
 
     // `npx tsc --noEmit` n'a de sens que sur un dépôt TypeScript. Sur un dépôt
     // Go/Python/Rust il ne prouve RIEN (rien à typer) et coûte ~10 s/agent — le
@@ -135,7 +150,9 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     }
     md += `| Messages | ${cm.messages_exchanged} |\n`;
     md += `| Introspections | ${cm.introspections_triggered} |\n`;
-    md += `| Hot files | ${cm.hot_files.length} |\n`;
+    // Nommer les hot files, pas seulement les compter : « 6 » ne dit pas OÙ la
+    // contention a eu lieu ; les noms, si (#165).
+    md += `| Hot files | ${cm.hot_files.length === 0 ? "aucun" : cm.hot_files.join(", ")} |\n`;
 
     if (finalState) {
       md += `\n> État final (coordinator, faisant autorité) : ${finalState.total} thread(s) au total — ${finalState.open} ouvert(s), ${finalState.resolving} en résolution, ${finalState.poisoned} empoisonné(s), ${finalState.cancelled} annulé(s), ${finalState.resolved} résolu(s).\n`;
@@ -145,13 +162,6 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       md += `\n### Conflits par layer\n\n`;
       for (const [layer, count] of Object.entries(r.coordinator_metrics.conflicts_by_layer)) {
         md += `- ${layer}: ${count}\n`;
-      }
-    }
-
-    if (Object.keys(r.custom_metrics).length > 0) {
-      md += `\n### Métriques spécifiques\n\n`;
-      for (const [key, value] of Object.entries(r.custom_metrics)) {
-        md += `- ${key}: ${JSON.stringify(value)}\n`;
       }
     }
 
@@ -267,6 +277,16 @@ function fmtTokens(n: number): string {
 function safeExec(cmd: string, cwd: string): string {
   try {
     return execSync(cmd, { cwd, encoding: "utf-8", stdio: "pipe" });
+  } catch (e) {
+    return (e as { stdout?: string }).stdout || "";
+  }
+}
+
+/** Comme safeExec mais SANS shell (args explicites) : indispensable pour les
+ *  pathspecs `:!…` de git, que le shell de cmd.exe (Windows) massacrerait. */
+function safeGit(args: string[], cwd: string): string {
+  try {
+    return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: "pipe" });
   } catch (e) {
     return (e as { stdout?: string }).stdout || "";
   }
