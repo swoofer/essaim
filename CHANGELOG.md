@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.15.0](https://github.com/swoofer/essaim/compare/v0.14.1...v0.15.0) (2026-08-30)
+
+
+### Features
+
+* **cli:** essaim doctor — preflight des dependances ([#148](https://github.com/swoofer/essaim/issues/148)) ([#179](https://github.com/swoofer/essaim/issues/179)) ([973255b](https://github.com/swoofer/essaim/commit/973255bcab20d0b8c9fcc921fef8d7a01f685ecb))
+
+
+### Bug Fixes
+
+* **agent-loop:** claude lançable sur Windows — résolution .exe/.cmd sans shell ([#149](https://github.com/swoofer/essaim/issues/149)) ([#180](https://github.com/swoofer/essaim/issues/180)) ([814375c](https://github.com/swoofer/essaim/commit/814375c3275973dee53347ce2957dedbd8d6769a))
+* **coordination:** completeTask auto-approuve — les threads de travail atteignent enfin 'resolved' ([#2](https://github.com/swoofer/essaim/issues/2)) ([#178](https://github.com/swoofer/essaim/issues/178)) ([6744315](https://github.com/swoofer/essaim/commit/67443155b12061a76c0642c9be382a6dc9e97d33))
+* **reporter:** colonne Compilation tri-état par code de sortie de tsc ([#152](https://github.com/swoofer/essaim/issues/152)) ([#185](https://github.com/swoofer/essaim/issues/185)) ([502c18a](https://github.com/swoofer/essaim/commit/502c18ad9d8446799cd37ab581b64def0fd6502c))
+* **reporter:** retirer « Sans consensus » quand l'état final autoritaire est là ([#154](https://github.com/swoofer/essaim/issues/154)) ([#187](https://github.com/swoofer/essaim/issues/187)) ([453b3e8](https://github.com/swoofer/essaim/commit/453b3e8851ce17217f33eef99c25cb69d0021ed3))
+* **run:** exit 1 quand rien n'a eu lieu — 0 thread résolu ET 0 diff ([#153](https://github.com/swoofer/essaim/issues/153)) ([#186](https://github.com/swoofer/essaim/issues/186)) ([d21af4e](https://github.com/swoofer/essaim/commit/d21af4e4792786a080deba43d507ca7afcc93e2f))
+* **security:** un agent read-only ne peut plus ecrire l'arbre de travail ([#1](https://github.com/swoofer/essaim/issues/1), DF4) ([#176](https://github.com/swoofer/essaim/issues/176)) ([21902a0](https://github.com/swoofer/essaim/commit/21902a025cc8f9668671e29e85c554ceaff10059))
+* **solo:** échec propre + CLAUDE_BIN + exit non-zéro sur kill ([#150](https://github.com/swoofer/essaim/issues/150)) ([#182](https://github.com/swoofer/essaim/issues/182)) ([f4699e2](https://github.com/swoofer/essaim/commit/f4699e2d1d3982df7af9e17247c3ad4dc57c0c17))
+* **work-stealing:** coordinator injoignable ≠ piscine vide — rapport rouge ([#151](https://github.com/swoofer/essaim/issues/151)) ([#183](https://github.com/swoofer/essaim/issues/183)) ([a3a558c](https://github.com/swoofer/essaim/commit/a3a558ca28f9ed0a18742b5c43b83461fbfe2d26))
+
+
+### Documentation
+
+* cadrage produit — definition de fini, portes, jalons, backlog ([#145](https://github.com/swoofer/essaim/issues/145)) ([7c6dd33](https://github.com/swoofer/essaim/commit/7c6dd33fd5078376faa1cb59fe1dbfcd1e5cd612))
+
 ## [0.14.1](https://github.com/swoofer/essaim/compare/v0.14.0...v0.14.1) (2026-08-29)
 
 
