@@ -181,6 +181,29 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       md += `| ${a.agent_name} | ${a.exit_code} | ${a.exit_reason ?? "N/A"} | ${a.compilation_ok === undefined ? "N/A" : a.compilation_ok ? "OK" : "FAIL"} | ${diffCell} |\n`;
     }
 
+    // Registre des tâches (#162) : POURQUOI chaque thread réclamé a fini
+    // done/refused/aborted. Le motif d'un refus du garde-fou de falsifiabilité
+    // n'était jusqu'ici qu'un log.warn volatil + un post dans un thread éphémère,
+    // jamais dans le rapport — un run avec ≥1 refus n'en gardait aucune trace
+    // lisible. DF5 : le rapport se suffit.
+    const taskRows = r.agent_results.flatMap((a) =>
+      (a.task_records ?? []).map((t) => ({ agent: a.agent_name, ...t })),
+    );
+    if (taskRows.length > 0) {
+      const refused = taskRows.filter((t) => t.verdict === "refused").length;
+      md += `\n### Registre des tâches\n\n`;
+      if (refused > 0) {
+        md += `> ⚠️ ${refused} tâche(s) refusée(s) par le garde-fou de falsifiabilité — motif dans la colonne ci-dessous.\n\n`;
+      }
+      md += `| Tâche | Agent | Verdict | Motif |\n|-------|-------|---------|-------|\n`;
+      for (const t of taskRows) {
+        // Le motif peut contenir `|`/retours ligne (message du garde-fou) : on
+        // les neutralise pour ne pas casser le tableau markdown.
+        const motif = t.reason.replace(/\r?\n/g, " ").replace(/\|/g, "\\|").slice(0, 200);
+        md += `| \`${t.threadId}\` | ${t.agent} | ${t.verdict} | ${motif} |\n`;
+      }
+    }
+
     // Token + cost breakdown (populated from agent-loop runs)
     const agentsWithTokens = r.agent_results.filter((a) => a.tokens);
     if (agentsWithTokens.length > 0) {

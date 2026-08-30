@@ -89,6 +89,7 @@ function makeLoopResult(agentId: string, exitReason: AgentLoopResult["exitReason
     agentId,
     exitReason,
     summary: "ok",
+    taskRecords: [],
     totalCostUsd: 0,
     turnsCount: 1,
     mqttMessagesProcessed: 0,
@@ -541,5 +542,41 @@ describe("runProject — turn details et exit reason dans le rapport", () => {
     expect(agent.turn_details!.map((d) => d.phase)).toEqual(["discover", "execute"]);
     expect(agent.turn_details![0].cacheReadTokens).toBe(900);
     expect(agent.turn_details![1].outputTokens).toBe(220);
+  });
+});
+
+// ── #162 — le registre des tâches survit au timeout global ──────────────────
+describe("runProject — task_records survit au timeout global (#162)", () => {
+  it("un refus enregistré AVANT le timeout reste dans task_records du rapport", async () => {
+    const stop = vi.fn(async () => {});
+    vi.mocked(startServer).mockResolvedValue({ port: 5556, stop } as never);
+
+    vi.mocked(launchAgentLoop).mockImplementation(async (agent, _ws, _url, _mcp, _prompt, opts) => {
+      return new Promise<AgentLoopResult>((resolve) => {
+        // Ne se résout QUE sur abort : se rabat 50 ms après (dans la fenêtre de
+        // grâce), en portant un refus déjà enregistré avant le timeout global.
+        opts?.abortSignal?.addEventListener("abort", () => {
+          setTimeout(() => resolve({
+            ...makeLoopResult(agent.id, "aborted"),
+            taskRecords: [{ threadId: "t-9", verdict: "refused", reason: "aucun fichier de test modifié" }],
+          }), 50);
+        });
+      });
+    });
+
+    vi.stubGlobal("fetch", makeFetchMock({ a1: true }));
+
+    const project = makeProject({
+      agents: [makeAgent({ id: "a1", name: "Agent A" })],
+      workspace: { type: "none", base: TMP_DIR },
+      timeout_minutes: 0.0025, // ~150ms — timeout bien avant que l'agent ne finisse seul
+    });
+
+    const result = await runProject(project, "with_coordinator", false, {});
+    const a1 = result.agent_results.find((a) => a.agent_id === "a1");
+    // Sans la capture en fenêtre de grâce, l'AgentLoopResult drainé était jeté →
+    // aucun task_records, exit_reason « N/A ». Le refus disparaissait du rapport.
+    expect(a1?.task_records).toEqual([{ threadId: "t-9", verdict: "refused", reason: "aucun fichier de test modifié" }]);
+    expect(a1?.exit_reason).toBe("aborted");
   });
 });

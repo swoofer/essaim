@@ -554,7 +554,17 @@ async function _runProjectBody(
     });
     try {
       await Promise.race([
-        Promise.allSettled(originalPromises.map((p) => p.catch(() => {}))),
+        Promise.allSettled(originalPromises.map((p, i) =>
+          p.then((v) => {
+            // #162 — l'agent a fini de se rabattre DANS la fenêtre de grâce : on
+            // RÉCUPÈRE son AgentLoopResult (taskRecords, tokens, exit_reason) au
+            // lieu de le jeter. Sans ça, un refus enregistré avant le timeout
+            // global disparaissait du rapport et exit_reason retombait à « N/A ».
+            // On n'écrase JAMAIS un résultat déjà capté par la course ci-dessus.
+            const agentId = entries[i][0];
+            if (!agentLoopResults.has(agentId)) agentLoopResults.set(agentId, v);
+          }).catch(() => {}),
+        )),
         gracePromise,
       ]);
     } finally {
@@ -614,6 +624,7 @@ async function _runProjectBody(
       agentResults[i].cost_by_model = loopResult.costByModel;
       agentResults[i].turn_details = loopResult.turnDetails;
       agentResults[i].exit_reason = loopResult.exitReason;
+      agentResults[i].task_records = loopResult.taskRecords;
     }
   }
 
