@@ -27,6 +27,7 @@ import { scanProject } from "./scanner.js";
 import { runSecurityPrePhase, runSecurityVerifyPhase } from "../security/pre-phase.js";
 
 import { getCatalogRoots, getScriptsDirs } from "../../cli/bce-resolver.js";
+import { getVersion } from "../../cli/version.js";
 import { runPipeline } from "@swoofer/promptweave";
 import { preflightQuotaCheck, resolveMaxUtilizationPct } from "./preflight.js";
 
@@ -675,6 +676,15 @@ async function _runProjectBody(
     custom_metrics: {},
     worktrees,
     security: securityLedger,
+    // Identité du run (#164) : consommée par writeReport pour nommer le rapport
+    // par run_id, l'écrire aussi dans le runDir, et poser l'en-tête d'identité.
+    identity: {
+      run_id: runId,
+      run_dir: runDir,
+      base_sha: workspace.baseSha,
+      coordinator_url: effectiveCoordinatorUrl,
+      version: getVersion(),
+    },
   };
 }
 
