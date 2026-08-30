@@ -652,14 +652,16 @@ async function _runProjectBody(
     for (const [agentId, wsPath] of workspace.paths) {
       log.info(`  ${agentId}: ${wsPath}  (branch: ${workspace.branches.get(agentId) ?? ""})`);
     }
-    // Preserving costs one branch + one worktree PER AGENT PER RUN, forever.
-    // The recipe belongs here rather than in the README because this is the
-    // moment the pile grows, in front of the person who just grew it, right
-    // under the list of what was kept — no doc lookup between the cost and the
-    // cure. Safe by construction: git refuses `branch -D` on a branch still
-    // checked out in a live worktree, so only orphans go.
+    // Le travail des agents EST ces branches. L'ancienne recette de nettoyage
+    // proposait `git worktree prune && … | xargs -r git branch -D`, qui les
+    // EFFACE (le `prune` en tête retire les worktrees, plus rien ne protège les
+    // branches du `branch -D`), et dont le `xargs -r` n'existe pas sous
+    // PowerShell : la seule commande copiable qu'essaim offrait effaçait le
+    // livrable. On ne propose donc AUCUNE commande destructrice ici — le rapport
+    // porte une section « Récupérer » (git log/diff/cherry-pick) pour inspecter
+    // et rejouer le travail sans risque (#163).
     log.info(
-      "  Cleanup when done: git worktree prune && git branch --list 'mini-project-*' --format='%(refname:short)' | xargs -r git branch -D",
+      "  Travail préservé sur ces branches — voir la section « Récupérer » du rapport (git log/diff/cherry-pick) pour l'inspecter ou le rejouer sur ta branche.",
     );
   }
 

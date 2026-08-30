@@ -287,3 +287,36 @@ describe('registre des tâches au rapport (#162)', () => {
     expect(md).not.toContain('Registre des tâches');
   });
 });
+
+// #163 — le rapport offre une section « Récupérer » NON DESTRUCTIVE
+// (git log/diff/cherry-pick par branche) à la place de l'ancienne recette
+// `git branch -D 'mini-project-*'` qui effaçait le livrable (xargs -r absent
+// sous PowerShell par-dessus).
+describe('rapport : section « Récupérer » non destructive (#163)', () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('git log/diff/cherry-pick par branche, jamais de commande qui efface', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep163-'));
+    const r: RunResult = {
+      ...runResult(),
+      worktrees: [{ agent_id: 'a1', path: '/w/a1', branch: 'mini-project-a1' }],
+      identity: { run_id: 'raid-x', run_dir: dir, base_sha: 'base123', coordinator_url: 'http://c', version: '1.0.0' },
+    };
+    const md = readFileSync(writeReport([r], dir), 'utf8');
+    expect(md).toContain('Récupérer le travail');
+    expect(md).toContain('git log base123..mini-project-a1');    // inspecter
+    expect(md).toContain('git diff base123..mini-project-a1');   // voir le diff
+    expect(md).toContain('git cherry-pick base123..mini-project-a1'); // rejouer
+    // AUCUNE recette destructrice ne subsiste dans le rapport
+    expect(md).not.toContain('branch -D');
+    expect(md).not.toContain('xargs');
+  });
+
+  it('sans base_sha (pas d\'identité) : pas de section « Récupérer » (commandes seraient fausses)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep163b-'));
+    const r: RunResult = { ...runResult(), worktrees: [{ agent_id: 'a1', path: '/w/a1', branch: 'b1' }] };
+    const md = readFileSync(writeReport([r], dir), 'utf8');
+    expect(md).not.toContain('Récupérer le travail');
+  });
+});
