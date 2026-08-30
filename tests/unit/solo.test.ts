@@ -100,11 +100,47 @@ describe('launchSolo — échec propre quand claude est absent (#150)', () => {
     h.restore();
   });
 
-  it("propage le code de sortie de l'agent", () => {
+  it("propage le code de sortie de l'agent (sortie propre)", () => {
     const h = harness();
     launchSolo(['-p', 'x'], '/tmp', 15, h.deps);
     h.child.emit('exit', 3);
     expect(h.exits).toEqual([3]);
+    h.restore();
+  });
+
+  it("enfant tué par signal (SIGINT/SIGTERM) → exit 124, JAMAIS 0 (pas de faux vert)", () => {
+    const h = harness();
+    launchSolo(['-p', 'x'], '/tmp', 15, h.deps);
+    h.child.emit('exit', null, 'SIGINT'); // code=null + signal : tué, pas fini
+    expect(h.exits).toEqual([124]);
+    h.restore();
+  });
+
+  it("timeout : tue l'agent puis exit 124 (l'anti-but même de J1)", () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let killed = false;
+    (h.child as EventEmitter & { kill: () => void }).kill = () => { killed = true; };
+    launchSolo(['-p', 'x'], '/tmp', 1, h.deps); // 1 minute
+    vi.advanceTimersByTime(60_000);
+    expect(killed).toBe(true);
+    h.child.emit('exit', null, 'SIGTERM');
+    expect(h.exits).toEqual([124]);
+    vi.useRealTimers();
+    h.restore();
+  });
+
+  it("timeoutMin=0 → aucun timer, l'agent n'est pas tué au spawn (#150)", () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let killed = false;
+    (h.child as EventEmitter & { kill: () => void }).kill = () => { killed = true; };
+    launchSolo(['-p', 'x'], '/tmp', 0, h.deps);
+    vi.advanceTimersByTime(3_600_000); // une heure : rien ne doit tuer
+    expect(killed).toBe(false);
+    h.child.emit('exit', 0);
+    expect(h.exits).toEqual([0]);
+    vi.useRealTimers();
     h.restore();
   });
 });
