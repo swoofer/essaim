@@ -1,12 +1,154 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter, Readable } from "stream";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   buildArgs,
+  composePrompt,
   createStreamParser,
   createClaudeStream,
+  resolveWindowsExecutable,
+  resolveCmdShimExe,
+  claudeSpawnNeedsShell,
   BudgetExceededError,
   type StreamEvent,
 } from "../../src/agent-loop/claude-stream.js";
+
+// ── resolveWindowsExecutable — issue #149 ───────────────────────────────
+// Le vrai lanceur spawn SANS shell : sur Windows, Node n'ajoute pas PATHEXT,
+// donc un « claude » nu ne trouve pas claude.cmd/claude.exe. On résout le vrai
+// fichier, en PRÉFÉRANT un .exe (runnable no-shell, prompt de n'importe quelle
+// longueur) au shim .cmd (force cmd.exe, plafond 8191 car + metachars).
+describe("resolveWindowsExecutable", () => {
+  let dirA: string;
+  let dirB: string;
+  beforeEach(() => {
+    dirA = mkdtempSync(join(tmpdir(), "e149a-"));
+    dirB = mkdtempSync(join(tmpdir(), "e149b-"));
+  });
+
+  it("préfère .exe au .cmd dans le même dossier", () => {
+    writeFileSync(join(dirA, "claude.cmd"), "");
+    writeFileSync(join(dirA, "claude.exe"), "");
+    expect(resolveWindowsExecutable("claude", [dirA])).toBe(join(dirA, "claude.exe"));
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it("préfère un .exe d'un dossier PLUS LOIN à un .cmd d'un dossier plus tôt", () => {
+    writeFileSync(join(dirA, "claude.cmd"), ""); // dossier prioritaire, mais shim
+    writeFileSync(join(dirB, "claude.exe"), ""); // dossier suivant, mais exécutable réel
+    expect(resolveWindowsExecutable("claude", [dirA, dirB])).toBe(join(dirB, "claude.exe"));
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it("trouve le .cmd quand aucun .exe n'existe (cas du test d'acceptation #149)", () => {
+    writeFileSync(join(dirA, "claude.cmd"), "");
+    expect(resolveWindowsExecutable("claude", [dirA])).toBe(join(dirA, "claude.cmd"));
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it("rend undefined quand le binaire est absent du PATH", () => {
+    expect(resolveWindowsExecutable("claude", [dirA, dirB])).toBeUndefined();
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it("un shim .cmd qui enveloppe un vrai .exe -> résout vers le .exe (cas npm)", () => {
+    // reproduit le shim npm : `"%dp0%\bin\claude.exe" %*` + le .exe qui existe
+    mkdirSync(join(dirA, "bin"));
+    writeFileSync(join(dirA, "bin", "claude.exe"), "");
+    writeFileSync(join(dirA, "claude.cmd"), '@echo off\r\n"%dp0%\\bin\\claude.exe"   %*\r\n');
+    expect(resolveWindowsExecutable("claude", [dirA])).toBe(join(dirA, "bin", "claude.exe"));
+    // et donc PAS de shell : le vrai binaire se lance directement
+    expect(claudeSpawnNeedsShell(resolveWindowsExecutable("claude", [dirA])!)).toBe(false);
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  });
+});
+
+// ── resolveCmdShimExe — issue #149 ──────────────────────────────────────
+describe("resolveCmdShimExe", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "e149shim-")); });
+
+  it("extrait le .exe enveloppé (résout %dp0%) quand il existe", () => {
+    mkdirSync(join(dir, "bin"));
+    writeFileSync(join(dir, "bin", "claude.exe"), "");
+    writeFileSync(join(dir, "claude.cmd"), '"%dp0%\\bin\\claude.exe"   %*\r\n');
+    expect(resolveCmdShimExe(join(dir, "claude.cmd"))).toBe(join(dir, "bin", "claude.exe"));
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("undefined si le .exe référencé n'existe pas (pas de faux positif)", () => {
+    writeFileSync(join(dir, "claude.cmd"), '"%dp0%\\bin\\claude.exe"   %*\r\n');
+    expect(resolveCmdShimExe(join(dir, "claude.cmd"))).toBeUndefined();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("undefined pour un shim sans référence .exe (ex. `node cli.js`)", () => {
+    writeFileSync(join(dir, "claude.cmd"), '"%dp0%\\node.exe" "%dp0%\\cli.js" %*\r\n');
+    // node.exe n'existe pas ici -> pas de .exe résoluble -> undefined (fallback shell)
+    expect(resolveCmdShimExe(join(dir, "claude.cmd"))).toBeUndefined();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// ── claudeSpawnNeedsShell — issue #149 ──────────────────────────────────
+describe("claudeSpawnNeedsShell", () => {
+  it("shell UNIQUEMENT pour une cible .cmd/.bat sous win32", () => {
+    expect(claudeSpawnNeedsShell("C:\\p\\claude.cmd", "win32")).toBe(true);
+    expect(claudeSpawnNeedsShell("C:\\p\\claude.CMD", "win32")).toBe(true); // insensible à la casse
+    expect(claudeSpawnNeedsShell("C:\\p\\claude.bat", "win32")).toBe(true);
+  });
+  it("PAS de shell pour un .exe, un chemin sans extension, ou hors win32", () => {
+    expect(claudeSpawnNeedsShell("C:\\p\\claude.exe", "win32")).toBe(false);
+    expect(claudeSpawnNeedsShell("C:\\Program Files\\claude\\claude.exe", "win32")).toBe(false);
+    expect(claudeSpawnNeedsShell("claude", "win32")).toBe(false); // nu → pas présumé .cmd
+    expect(claudeSpawnNeedsShell("/usr/local/bin/claude", "linux")).toBe(false);
+    expect(claudeSpawnNeedsShell("/x/claude.cmd", "linux")).toBe(false); // .cmd hors Windows = juste un nom
+  });
+});
+
+// ── Acceptation #149 (Windows uniquement) ───────────────────────────────
+// Le critère de l'issue : « faux claude.cmd sur le PATH ⇒ le processus démarre ».
+// On va plus loin (porte P3, pas de proxy) : un prompt long à metachars markdown
+// doit ARRIVER INTACT — via stdin, pas la ligne de commande cmd.exe. skipIf
+// hors win32 (un .cmd ne s'exécute que là), suivant le motif du CLAUDE.md.
+describe("acceptation #149 : faux claude.cmd démarre et reçoit le prompt intact", () => {
+  it.skipIf(process.platform !== "win32")("résout le .cmd, le lance, stdin intact", async () => {
+    // vrai spawnSync : le module child_process est mocké plus bas (pour le spawn
+    // de createClaudeStream), on récupère l'implémentation réelle pour cet e2e.
+    const { spawnSync } = await vi.importActual<typeof import("child_process")>("child_process");
+    const dir = mkdtempSync(join(tmpdir(), "e149cmd-"));
+    // claude.cmd recopie STDIN vers un fichier (more préserve tout le contenu)
+    writeFileSync(join(dir, "claude.cmd"), '@echo off\r\nmore > "%STDIN_OUT%"\r\nexit /b 0\r\n');
+
+    const bin = resolveWindowsExecutable("claude", [dir]);
+    expect(bin).toBe(join(dir, "claude.cmd")); // pas de .exe -> le .cmd (cas #149)
+    expect(claudeSpawnNeedsShell(bin!)).toBe(true);
+
+    const meta = 'SECTION & PIPE | REDIR > < PCT %PATH% QUOTE " PAREN ( ) CARET ^ ';
+    let prompt = meta;
+    while (prompt.length < 9000) prompt += "lorem ipsum " + meta; // > plafond cmd.exe 8191
+    prompt = prompt.slice(0, 9000);
+    const outFile = join(dir, "got.txt");
+
+    const r = spawnSync(bin!, buildArgs({ workspacePath: dir }, prompt, false, undefined, true), {
+      input: prompt, // ce que runOneTurn écrit sur stdin quand needsShell
+      shell: claudeSpawnNeedsShell(bin!),
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, STDIN_OUT: outFile },
+    });
+    expect(r.status).toBe(0); // LE PROCESSUS DÉMARRE (critère #149)
+    const got = readFileSync(outFile, "utf8").replace(/\r/g, "").replace(/\n$/, "");
+    expect(got).toBe(prompt); // 9000 car + metachars INTACTS (pas de troncature/injection)
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
 
 // ── buildArgs ──────────────────────────────────────────────────────────
 
@@ -53,6 +195,28 @@ describe("buildArgs", () => {
     expect(args).not.toContain("--allowedTools");
     expect(args).not.toContain("--mcp-config");
     expect(args).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("promptViaStdin=false (défaut) porte le prompt en arg -p", () => {
+    const args = buildArgs({ workspacePath: "/tmp" }, "trouve les bugs", false);
+    const idx = args.indexOf("-p");
+    expect(args[idx + 1]).toBe("trouve les bugs"); // la valeur suit -p
+  });
+
+  it("promptViaStdin=true rend un -p NU (prompt hors ligne de commande) — #149", () => {
+    const prompt = "SECTION & PIPE | > %PATH% \" ( )"; // metachars qui casseraient cmd.exe
+    const args = buildArgs({ workspacePath: "/tmp" }, prompt, false, undefined, true);
+    const idx = args.indexOf("-p");
+    expect(args[idx + 1]).toBe("--output-format"); // rien entre -p et le flag suivant
+    expect(args).not.toContain(prompt); // le prompt n'est PAS dans les args
+    expect(args.some((a) => a.includes("%PATH%"))).toBe(false);
+  });
+
+  it("composePrompt ajoute le mot-clé de thinking sur sa propre ligne", () => {
+    const plain = composePrompt("analyse", undefined);
+    expect(plain).toBe("analyse");
+    const withThink = composePrompt("analyse", { thinking: "think-hard" });
+    expect(withThink).toBe("analyse\n\nthink hard");
   });
 
   it("includes --model from opts when sendOpts.model is not provided", () => {

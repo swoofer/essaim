@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { basename, delimiter, dirname, join, resolve as resolvePath } from "path";
 import { EventEmitter } from "events";
 import { createLogger } from "../logger.js";
 import { thinkingKeyword, type ThinkingLevel } from "./effort.js";
@@ -211,19 +212,33 @@ function summarizeToolInput(name: string, input: Record<string, unknown>): strin
 
 // ── Build CLI args ─────────────────────────────────────────────────────
 
-export function buildArgs(opts: ClaudeStreamOptions, prompt: string, resume: boolean, sendOpts?: SendOptions): string[] {
-  // Extended-thinking trigger keyword (Claude CLI-specific: the keyword must appear in the user prompt).
-  // Appended on its own line at the end so the model picks it up regardless of the surrounding prompt.
-  const thinking = sendOpts?.thinking;
-  const kw = thinking ? thinkingKeyword(thinking) : "";
-  const promptWithThinking = kw ? `${prompt}\n\n${kw}` : prompt;
-  // Newlines in -p value break Bun's arg parser — flatten to single line
-  const sanitizedPrompt = promptWithThinking.replace(/\n+/g, " \\n ");
-  const args = [
-    "-p", sanitizedPrompt,
-    "--output-format", "stream-json",
-    "--verbose",
-  ];
+/**
+ * Prompt effectif = prompt + (mot-clé de thinking sur sa propre ligne à la fin,
+ * pour que le modèle le capte quel que soit le contexte). Exporté pour que
+ * runOneTurn puisse l'écrire sur stdin quand claude passe par un shell.
+ */
+export function composePrompt(prompt: string, sendOpts?: SendOptions): string {
+  const kw = sendOpts?.thinking ? thinkingKeyword(sendOpts.thinking) : "";
+  return kw ? `${prompt}\n\n${kw}` : prompt;
+}
+
+export function buildArgs(
+  opts: ClaudeStreamOptions,
+  prompt: string,
+  resume: boolean,
+  sendOpts?: SendOptions,
+  promptViaStdin = false,
+): string[] {
+  const full = composePrompt(prompt, sendOpts);
+  // Deux modes de livraison du prompt (#149) :
+  //  - promptViaStdin=true (chemin shell/.cmd Windows) : le prompt part par
+  //    stdin, HORS ligne de commande — ni plafond cmd.exe (8191 car) ni
+  //    interprétation de ses metachars. `-p` reste un flag nu.
+  //  - false (POSIX + Windows .exe, défaut) : prompt en arg -p, newlines
+  //    aplaties (elles cassent le parseur d'args de Bun).
+  const args = promptViaStdin
+    ? ["-p", "--output-format", "stream-json", "--verbose"]
+    : ["-p", full.replace(/\n+/g, " \\n "), "--output-format", "stream-json", "--verbose"];
   if (resume && opts.sessionId) {
     args.push("--resume", opts.sessionId);
   }
@@ -296,15 +311,95 @@ export function createStreamParser(emitter: EventEmitter, readable: NodeJS.Reada
 export function resolveClaudeBin(): string {
   const envPath = process.env.CLAUDE_BIN;
   if (envPath) return envPath;
+  const home = process.env.HOME || process.env.USERPROFILE;
   const candidates = [
-    process.env.HOME && `${process.env.HOME}/.local/bin/claude`,
-    process.env.HOME && `${process.env.HOME}/.claude/local/claude`,
+    home && `${home}/.local/bin/claude`,
+    home && `${home}/.claude/local/claude`,
     "/usr/local/bin/claude",
   ].filter(Boolean) as string[];
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }
+  // Windows : le spawn du run est SANS shell (buildChildEnv, prompt en arg qui
+  // peut faire des dizaines de Ko). Node n'applique alors PAS PATHEXT, donc un
+  // « claude » nu ne trouve ni claude.cmd ni claude.exe -> ENOENT (issue #149).
+  // On résout le vrai fichier sur le PATH, en préférant un .exe (runnable
+  // no-shell, sans plafond cmd.exe) au shim .cmd (voir claudeSpawnNeedsShell).
+  if (process.platform === "win32") {
+    const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+    const resolved = resolveWindowsExecutable("claude", dirs);
+    if (resolved) return resolved;
+  }
   return "claude";
+}
+
+/**
+ * Cherche `<name>` sur le PATH Windows en essayant les extensions exécutables,
+ * en PRÉFÉRANT .exe/.com (lançables par un spawn sans shell, prompt de toute
+ * longueur) à .cmd/.bat (shims qui forcent cmd.exe : plafond 8191 caractères de
+ * ligne de commande + interprétation des metachars du prompt). L'ordre des
+ * extensions prime sur l'ordre des dossiers : un vrai .exe plus loin sur le PATH
+ * bat un shim .cmd plus tôt. Rend undefined si rien n'est trouvé. Pur (dirs
+ * injectés) pour rester testable hors Windows.
+ */
+export function resolveWindowsExecutable(name: string, dirs: string[]): string | undefined {
+  // 1. Un vrai exécutable sur le PATH (install native) : parfait, aucun shell.
+  for (const ext of [".exe", ".com"]) {
+    for (const dir of dirs) {
+      const full = join(dir, name + ext);
+      if (existsSync(full)) return full;
+    }
+  }
+  // 2. Sinon un shim .cmd/.bat (install npm) : on tente d'en extraire le .exe
+  //    enveloppé pour lancer le vrai binaire SANS shell ; à défaut on rend le
+  //    shim lui-même (chemin shell, cf. claudeSpawnNeedsShell).
+  for (const ext of [".cmd", ".bat"]) {
+    for (const dir of dirs) {
+      const full = join(dir, name + ext);
+      if (existsSync(full)) return resolveCmdShimExe(full) ?? full;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Si `cmdPath` est un shim .cmd/.bat qui enveloppe un .exe — le cas des installs
+ * npm de claude, dont le shim fait `"%dp0%\...\claude.exe" %*` — rend le chemin
+ * absolu de ce .exe (résolvant %dp0%/%~dp0% vers le dossier du shim) s'il existe.
+ * Lancer ce .exe directement évite le shell, donc les plafonds (8191 car) et
+ * l'interprétation des metachars de cmd.exe sur TOUS les args (prompt comme
+ * --append-system-prompt, qui contient des `<`/`>` traités en redirections).
+ * Rend undefined si aucun .exe résoluble : parse best-effort, jamais bloquant.
+ */
+export function resolveCmdShimExe(cmdPath: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(cmdPath, "utf8");
+  } catch {
+    return undefined;
+  }
+  const shimDir = dirname(cmdPath);
+  // On ne matche QUE <nom>.exe (claude.exe pour claude.cmd) : un shim qui lance
+  // node.exe + un .js (npm/corepack/essaim...) ne doit PAS faire prendre node.exe
+  // pour le binaire — dans ce cas on rend undefined et on retombe sur le shell.
+  const exeName = basename(cmdPath).replace(/\.(cmd|bat)$/i, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = text.match(new RegExp(`"?([^"\\r\\n]*?${exeName}\\.exe)"?`, "i"));
+  if (!m) return undefined;
+  // %dp0% / %~dp0% / %~dp0 -> dossier du shim (le shim ajoute son propre "\").
+  const raw = m[1].trim().replace(/%~?dp0%?\\?/gi, shimDir + "\\");
+  const abs = resolvePath(raw);
+  return existsSync(abs) ? abs : undefined;
+}
+
+/**
+ * Un spawn a besoin d'un shell UNIQUEMENT pour lancer un shim .cmd/.bat sous
+ * Windows : Node refuse de les exécuter sans shell (patch CVE-2024-27980). Un
+ * .exe, un chemin sans extension, ou toute cible hors Windows se lancent sans
+ * shell — ce qui évite les plafonds/metachars de cmd.exe et les problèmes de
+ * chemin à espace. `platform` est injecté pour le test.
+ */
+export function claudeSpawnNeedsShell(bin: string, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(bin);
 }
 
 // ── Run one turn ──────────────────────────────────────────────────────
@@ -325,20 +420,27 @@ function runOneTurn(
   sendOpts?: SendOptions,
   onSpawn?: (child: ChildProcess) => void,
 ): Promise<AssistantResponse> {
-  const args = buildArgs(options, prompt, resume, sendOpts);
+  // shell UNIQUEMENT pour un shim .cmd/.bat (Node refuse de les lancer sans) ;
+  // un .exe/chemin sans ext se lance sans shell -> pas de plafond cmd.exe ni
+  // d'interprétation des metachars. Voir claudeSpawnNeedsShell / buildArgs (#149).
+  const needsShell = claudeSpawnNeedsShell(claudeBin);
+  const args = buildArgs(options, prompt, resume, sendOpts, needsShell);
 
   const turnStart = Date.now();
-  log.debug("spawn", { claudeBin, resume, promptLength: prompt.length });
+  log.debug("spawn", { claudeBin, resume, needsShell, promptLength: prompt.length });
 
   return new Promise<AssistantResponse>((resolve, reject) => {
     const child = spawn(claudeBin, args, {
       cwd: options.workspacePath,
       env: buildChildEnv(process.env, options.env),
       stdio: ["pipe", "pipe", "pipe"],
+      shell: needsShell,
     });
     log.info(`spawned claude (pid=${child.pid}, resume=${resume})`);
     onSpawn?.(child);
-    // Close stdin immediately — -p provides the prompt via args
+    // Sur le chemin shell, le prompt part par stdin (hors ligne de commande) ;
+    // sinon -p le porte en arg et stdin se ferme vide.
+    if (needsShell) child.stdin!.write(composePrompt(prompt, sendOpts));
     child.stdin!.end();
 
     const emitter = new EventEmitter();
