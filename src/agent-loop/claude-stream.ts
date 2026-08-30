@@ -332,8 +332,12 @@ export function resolveClaudeBin(): string {
  * Un chemin explicite vers un .exe passe tel quel. Si rien ne se résout, on rend
  * la valeur brute (le spawn échouera honnêtement plutôt que via un shell).
  */
-function normalizeWinClaudeBin(envPath: string): string {
-  if (/\.(cmd|bat)$/i.test(envPath)) return resolveCmdShimExe(envPath) ?? envPath;
+export function normalizeWinClaudeBin(envPath: string): string {
+  // Un .cmd/.bat non déballable ne doit PAS être rendu tel quel : spawn(.cmd)
+  // sans shell lève EINVAL SYNCHRONE (pas un event 'error'), ce qui à
+  // launchAgent — hors try/catch — fuiterait le slot de concurrence et lèverait
+  // un rejet non géré. On rend "claude" (échec async ENOENT propre, géré).
+  if (/\.(cmd|bat)$/i.test(envPath)) return resolveCmdShimExe(envPath) ?? "claude";
   const isBareName = !envPath.includes("/") && !envPath.includes("\\") && !/\.[^.]+$/.test(envPath);
   if (isBareName) {
     const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
@@ -553,8 +557,20 @@ function runOneTurn(
       }
     });
 
-    child.on("error", (err) => {
-      if (!resolved) reject(err);
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (resolved) return;
+      // ENOENT = claude introuvable/non lançable (ex. install sans binaire natif
+      // sur Windows, ou CLAUDE_BIN mal réglé). On rend le message ACTIONNABLE au
+      // lieu d'un « spawn claude ENOENT » opaque qui produit zéro agent (#149).
+      if (err.code === "ENOENT") {
+        reject(new Error(
+          `claude introuvable ou non lançable (${claudeBin}). Installez Claude Code ` +
+            `(binaire natif), ou définissez CLAUDE_BIN vers un vrai claude.exe. ` +
+            `« essaim doctor » diagnostique ceci. [${err.message}]`,
+        ));
+        return;
+      }
+      reject(err);
     });
   });
 }

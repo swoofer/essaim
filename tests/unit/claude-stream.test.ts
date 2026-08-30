@@ -10,6 +10,7 @@ import {
   createClaudeStream,
   resolveWindowsExecutable,
   resolveCmdShimExe,
+  normalizeWinClaudeBin,
   BudgetExceededError,
   type StreamEvent,
 } from "../../src/agent-loop/claude-stream.js";
@@ -109,6 +110,34 @@ describe("resolveCmdShimExe", () => {
     writeFileSync(join(dir, "claude.cmd"), '"%dp0%\\node.exe" "%dp0%\\cli.js" %*\r\n');
     // pas de claude.exe -> undefined -> le dossier est ignoré (jamais de shell)
     expect(resolveCmdShimExe(join(dir, "claude.cmd"))).toBeUndefined();
+    done();
+  });
+});
+
+// ── normalizeWinClaudeBin — issue #149 (re-revue) ───────────────────────
+describe("normalizeWinClaudeBin", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "e149env-")); });
+  const done = () => rmSync(dir, { recursive: true, force: true });
+
+  it("un CLAUDE_BIN=.cmd déballable -> le vrai .exe (pas de shell)", () => {
+    mkdirSync(join(dir, "bin"));
+    writeFileSync(join(dir, "bin", "claude.exe"), "");
+    writeFileSync(join(dir, "claude.cmd"), '"%dp0%\\bin\\claude.exe" %*\r\n');
+    expect(normalizeWinClaudeBin(join(dir, "claude.cmd"))).toBe(join(dir, "bin", "claude.exe"));
+    done();
+  });
+
+  it("un CLAUDE_BIN=.cmd NON déballable -> 'claude', jamais le .cmd brut (Finding 2 : évite EINVAL synchrone)", () => {
+    // spawn('X.cmd') sans shell lève EINVAL SYNCHRONE -> fuite de slot à
+    // launchAgent. On rend "claude" -> ENOENT async propre + géré.
+    writeFileSync(join(dir, "claude.cmd"), '"%dp0%\\node.exe" "%dp0%\\cli.js" %*\r\n');
+    expect(normalizeWinClaudeBin(join(dir, "claude.cmd"))).toBe("claude");
+    done();
+  });
+
+  it("un CLAUDE_BIN chemin explicite vers un .exe passe tel quel", () => {
+    expect(normalizeWinClaudeBin("C:\\Program Files\\claude\\claude.exe")).toBe("C:\\Program Files\\claude\\claude.exe");
     done();
   });
 });
