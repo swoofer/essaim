@@ -57,8 +57,17 @@ describe("#177 — chaîne pre-tool-use assemblée : le guard path-scope reste a
     expect(out).not.toContain('"permissionDecision":"deny"');
   });
 
-  it("REFUSE une écriture hors scope (src/x.ts) via la chaîne réelle", () => {
-    const out = runChain(hookPath, repo, join(repo, "src/x.ts"));
+  it("REFUSE une écriture hors scope (src/x.ts) via la chaîne réelle, en JSON PROPRE", () => {
+    const out = runChain(hookPath, repo, join(repo, "src/x.ts")).trim();
     expect(out).toContain('"permissionDecision":"deny"');
+    // Le deny doit être du JSON PARSABLE : un hook informatif (ex. la bannière
+    // check-interrupt) qui préfixerait du texte casserait le parse -> deny perdu
+    // -> fuite (revue sécurité). On exige donc un stdout intégralement JSON.
+    expect(() => JSON.parse(out)).not.toThrow();
+    expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+
+  it("le hook pre-tool-use assemblé N'inclut PLUS check-interrupt (source de pollution du stdout du guard)", () => {
+    expect(gardienPreToolHook()).not.toContain("check_interrupt");
   });
 });
