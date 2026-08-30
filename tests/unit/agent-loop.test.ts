@@ -90,7 +90,7 @@ const mockCompleteTask = vi.fn(async (_url: string, _threadId: string, _agentId:
 const mockUnclaimTask = vi.fn(async (_url: string, _threadId: string, _agentId: string) => {});
 const mockParseReviewActions = vi.fn((_output: string) => [] as Array<{ type: string; description?: string; threadId?: string; context?: string }>);
 const mockFetchExistingThreads = vi.fn(async (_url: string) => "(aucun thread actif)");
-const mockProcessReviewActions = vi.fn(async (_url: string, _agentId: string, _agentName: string, _actions: unknown[]) => ({ posted: 0, enriched: 0, skipped: 0 }));
+const mockProcessReviewActions = vi.fn(async (_url: string, _agentId: string, _agentName: string, _actions: unknown[]) => ({ posted: 0, enriched: 0, skipped: 0, newAttempted: 0 }));
 
 vi.mock("../../src/agent-loop/work-stealing.js", () => ({
   COORDINATOR_UNREACHABLE: "coordinator_unreachable",
@@ -585,7 +585,7 @@ describe("runAgentLoop — phased mode", () => {
     mockFetchExistingThreads.mockReset();
     mockFetchExistingThreads.mockResolvedValue("(aucun thread actif)");
     mockProcessReviewActions.mockReset();
-    mockProcessReviewActions.mockResolvedValue({ posted: 0, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 0, enriched: 0, skipped: 0, newAttempted: 0 });
 
     const mod = await import("../../src/agent-loop/agent-loop.js");
     runAgentLoop = mod.runAgentLoop;
@@ -749,6 +749,71 @@ describe("runAgentLoop — phased mode", () => {
     const result = await loopPromise;
 
     expect(result.exitReason).toBe("done");
+  });
+
+  it("découverte TROUVÉE mais AUCUN thread posté (write-path coordinator mort) → 'coordinator_unreachable', PAS 'done' (#184)", async () => {
+    vi.useFakeTimers();
+
+    // Le coordinator est LISIBLE (threads-active répondra vide) mais son ÉCRITURE
+    // est morte : chaque POST /api/announce échoue, donc postDiscoveries enregistre
+    // ZÉRO thread malgré 1 trouvaille. C'est le faux vert propre à #184 : la piscine
+    // paraît « vide-mais-joignable » à la phase execute, qui sortait "done" — alors
+    // que l'agent a TROUVÉ du travail et n'en a RIEN consigné.
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+    mockPostDiscoveries.mockResolvedValue([]); // 0 posté malgré 1 trouvé
+
+    // Piscine vide-mais-joignable : claim rend null, PAS UNREACHABLE — le garde
+    // #151 (unreachableStreak) est donc AVEUGLE ici, c'est bien #184 qui doit voir.
+    mockClaimNextTask.mockResolvedValue(null);
+
+    const loopPromise = runAgentLoop(makePhasedConfig(), silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    const result = await loopPromise;
+
+    expect(result.exitReason).toBe("coordinator_unreachable");
+    expect(result.exitReason).not.toBe("done"); // faux vert banni (#184)
+  });
+
+  it("phase review : NOUVEAUX trouvés mais 0 posté (write-path mort) → 'coordinator_unreachable', PAS 'done' (#184)", async () => {
+    vi.useFakeTimers();
+
+    const config = makeConfig({
+      phases: [
+        { name: "discover", prompt: "Find bugs", toolsMode: "read_only", loop: false },
+        { name: "review", prompt: "Review:\n{{params.my_discoveries}}", toolsMode: "none", loop: false },
+        { name: "execute", prompt: "Fix: {{params.current_task}}", toolsMode: "full", loop: true },
+      ],
+    });
+
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 42 | Bug A | critical",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 42, severity: "critical" },
+    ]);
+    mockSend.mockResolvedValueOnce({
+      content: "REVIEW:\nNOUVEAU | Bug A",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "Bug A" }]);
+    // La review a tenté de semer 1 nouveau thread et TOUT a échoué (write-path mort).
+    mockProcessReviewActions.mockResolvedValue({ posted: 0, enriched: 0, skipped: 0, newAttempted: 1 });
+
+    mockClaimNextTask.mockResolvedValue(null);
+
+    const loopPromise = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    const result = await loopPromise;
+
+    expect(result.exitReason).toBe("coordinator_unreachable");
+    expect(result.exitReason).not.toBe("done"); // faux vert banni (#184)
   });
 
   it("claims and executes tasks in work-stealing loop", async () => {
@@ -991,7 +1056,7 @@ describe("runAgentLoop — phased mode", () => {
     mockParseReviewActions.mockReturnValue([
       { type: "nouveau", description: "Bug A" },
     ]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
 
     // Execute: claimNextTask returns one task then null
     let claimCall = 0;
@@ -1172,7 +1237,7 @@ describe("runAgentLoop — phased mode", () => {
       toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
     });
     mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "Bug A" }]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
     mockClaimNextTask.mockResolvedValue(null);
 
     const loopPromise = runAgentLoop(config, silentLogger);
@@ -1463,7 +1528,7 @@ describe("runAgentLoop — phased mode", () => {
     });
     mockFetchExistingThreads.mockResolvedValue("(aucun thread actif)");
     mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "finding 1" }]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
     mockClaimNextTask.mockResolvedValue(null);
 
     const config = makeConfig({
@@ -1521,7 +1586,7 @@ describe("runAgentLoop — phased mode", () => {
     });
     mockFetchExistingThreads.mockResolvedValue("(aucun thread actif)");
     mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "finding" }]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
     mockClaimNextTask.mockResolvedValue(null);
 
     const config = makeConfig({
@@ -1668,7 +1733,7 @@ describe("runAgentLoop — phased mode", () => {
     mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
     mockFetchExistingThreads.mockResolvedValue("(aucun thread actif)");
     mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "item" }]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
 
     const config = makeConfig({
       maxDiscoverCycles: 3,
@@ -1707,7 +1772,7 @@ describe("runAgentLoop — phased mode", () => {
     mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
     mockFetchExistingThreads.mockResolvedValue("(aucun thread actif)");
     mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "item" }]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
 
     const config = makeConfig({
       phases: [
@@ -1834,7 +1899,7 @@ describe("runAgentLoop — phased mode", () => {
     mockParseDiscoveries.mockReturnValue([{ id: "", description: "item", file: undefined, line: undefined, severity: undefined }]);
     mockFetchExistingThreads.mockResolvedValue("(aucun thread actif)");
     mockParseReviewActions.mockReturnValue([{ type: "nouveau", description: "item" }]);
-    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0 });
+    mockProcessReviewActions.mockResolvedValue({ posted: 1, enriched: 0, skipped: 0, newAttempted: 1 });
 
     const config = makeConfig({
       phases: [
