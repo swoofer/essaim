@@ -1,11 +1,12 @@
 import { Command } from "commander";
 import { resolve } from "path";
 import { existsSync } from "fs";
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { listTemplates } from "../src/orchestrator/template-engine.js";
 import { buildSolo } from "../src/bridge.js";
 import { buildAllowedTools } from "../src/orchestrator/agent-launcher.js";
+import { resolveClaudeBin } from "../src/agent-loop/claude-stream.js";
 import type { AgentConfig } from "../src/orchestrator/types.js";
 import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
 
@@ -38,6 +39,60 @@ export function buildSoloArgs(
   // (buildSolo le derive de la presence du behavior read-only-mode).
   args.push("--allowedTools", buildAllowedTools({ tools: mcpTools, read_only: readOnly } as AgentConfig));
   return args;
+}
+
+export interface SoloLaunchDeps {
+  spawn: (cmd: string, args: string[], opts: { stdio: "inherit"; cwd: string }) => ChildProcess;
+  resolveClaudeBin: () => string;
+  exit: (code: number) => void;
+  /** Enregistre un handler de signal ; injecté pour ne pas polluer process en test. */
+  onSignal?: (sig: "SIGINT" | "SIGTERM", cb: () => void) => void;
+}
+
+/**
+ * Lance `claude -p` pour un run solo et gère timeout / erreurs / signaux (#150).
+ * Extrait du `.action` pour être testable. Garanties du chantier :
+ *  - claude absent/non lançable -> UNE ligne d'erreur ACTIONNABLE sur stderr +
+ *    exit 1, jamais un stack trace nu (spawn peut lever EINVAL SYNCHRONE pour un
+ *    .cmd, ou émettre 'error' ENOENT en async — les deux sont attrapés) ;
+ *  - ZÉRO octet écrit sur stdout ici : stdout reste réservé à la sortie de
+ *    l'agent (stdio: "inherit"). Les diagnostics vont sur stderr ;
+ *  - le binaire vient de resolveClaudeBin (honore CLAUDE_BIN).
+ */
+export function launchSolo(args: string[], cwd: string, timeoutMin: number, deps: SoloLaunchDeps): void {
+  const claudeBin = deps.resolveClaudeBin();
+  const fail = (msg: string) => {
+    console.error(
+      `Impossible de lancer claude (${claudeBin}) : ${msg}. ` +
+        `Installez Claude Code, ou définissez CLAUDE_BIN vers un vrai claude.`,
+    );
+    deps.exit(1);
+  };
+  let child: ChildProcess;
+  try {
+    child = deps.spawn(claudeBin, args, { stdio: "inherit", cwd });
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e)); // spawn(.cmd) sans shell = EINVAL synchrone
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    console.error(`\nTimeout: ${timeoutMin} minutes exceeded. Killing agent.`);
+    child.kill();
+  }, timeoutMin * 60 * 1000);
+
+  const onSignal = deps.onSignal ?? ((s, cb) => { process.on(s, cb); });
+  onSignal("SIGINT", () => child.kill("SIGINT"));
+  onSignal("SIGTERM", () => child.kill("SIGTERM"));
+
+  child.on("error", (err: NodeJS.ErrnoException) => {
+    clearTimeout(timer);
+    fail(err.message); // ex. ENOENT : claude absent du PATH
+  });
+  child.on("exit", (code) => {
+    clearTimeout(timer);
+    deps.exit(code ?? 0);
+  });
 }
 
 export function createSoloCommand(): Command {
@@ -109,32 +164,20 @@ export function createSoloCommand(): Command {
           read_only,
         );
 
-        console.log(`\nSolo mode: ${template}`);
-        console.log(`  Project:  ${projectPath}`);
-        console.log(`  Timeout:  ${opts.timeout} minutes`);
-        console.log(`  Prompt:   ${prompt.length} chars`);
-        console.log(`  Tools:    ${args[args.indexOf("--allowedTools") + 1]}`);
-        console.log(`\nLaunching Claude Code...\n`);
+        // Diagnostics sur STDERR : stdout est réservé à la sortie de l'agent, donc
+        // « 0 octet de prompt sur stdout » quand claude est absent (#150). On
+        // n'imprime que la LONGUEUR du prompt, jamais son contenu.
+        console.error(`\nSolo mode: ${template}`);
+        console.error(`  Project:  ${projectPath}`);
+        console.error(`  Timeout:  ${opts.timeout} minutes`);
+        console.error(`  Prompt:   ${prompt.length} chars`);
+        console.error(`  Tools:    ${args[args.indexOf("--allowedTools") + 1]}`);
+        console.error(`\nLaunching Claude Code...\n`);
 
-        const child = spawn("claude", args, {
-          stdio: "inherit",
-          cwd: projectPath,
-        });
-
-        // Timeout
-        const timeoutMs = parseInt(opts.timeout, 10) * 60 * 1000;
-        const timer = setTimeout(() => {
-          console.error(
-            `\nTimeout: ${opts.timeout} minutes exceeded. Killing agent.`,
-          );
-          child.kill();
-        }, timeoutMs);
-
-        process.on("SIGINT", () => child.kill("SIGINT"));
-        process.on("SIGTERM", () => child.kill("SIGTERM"));
-        child.on("exit", (code) => {
-          clearTimeout(timer);
-          process.exit(code ?? 0);
+        launchSolo(args, projectPath, parseInt(opts.timeout, 10), {
+          spawn,
+          resolveClaudeBin, // honore CLAUDE_BIN
+          exit: (code) => process.exit(code),
         });
       },
     );
