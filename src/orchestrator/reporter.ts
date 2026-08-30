@@ -41,6 +41,13 @@ export function collectAgentResults(
     // construction. Diff against the commit the worktree branched off instead —
     // that covers committed AND uncommitted changes (#29).
     const diffMeasured = workspace.type === "worktree";
+    // Intent-to-add : fait apparaître les fichiers NEUFS non commités comme des
+    // ajouts dans le diff. Sans ça, un agent qui écrit un nouveau fichier sans
+    // `git add` rapportait diff=0 (« n'a rien fait ») alors qu'il a produit du
+    // code (#165). `-N` n'écrit AUCUN contenu dans l'index et ne commite rien ;
+    // le worktree par agent est jetable — même idiome que le garde de
+    // falsifiabilité sur ce même worktree.
+    if (diffMeasured) safeExec("git add -N -- .", wsPath);
     const diff = !diffMeasured
       ? ""
       : workspace.baseSha
@@ -135,7 +142,9 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     }
     md += `| Messages | ${cm.messages_exchanged} |\n`;
     md += `| Introspections | ${cm.introspections_triggered} |\n`;
-    md += `| Hot files | ${cm.hot_files.length} |\n`;
+    // Nommer les hot files, pas seulement les compter : « 6 » ne dit pas OÙ la
+    // contention a eu lieu ; les noms, si (#165).
+    md += `| Hot files | ${cm.hot_files.length === 0 ? "aucun" : cm.hot_files.join(", ")} |\n`;
 
     if (finalState) {
       md += `\n> État final (coordinator, faisant autorité) : ${finalState.total} thread(s) au total — ${finalState.open} ouvert(s), ${finalState.resolving} en résolution, ${finalState.poisoned} empoisonné(s), ${finalState.cancelled} annulé(s), ${finalState.resolved} résolu(s).\n`;
@@ -145,13 +154,6 @@ export function writeReport(results: RunResult[], outputDir: string): string {
       md += `\n### Conflits par layer\n\n`;
       for (const [layer, count] of Object.entries(r.coordinator_metrics.conflicts_by_layer)) {
         md += `- ${layer}: ${count}\n`;
-      }
-    }
-
-    if (Object.keys(r.custom_metrics).length > 0) {
-      md += `\n### Métriques spécifiques\n\n`;
-      for (const [key, value] of Object.entries(r.custom_metrics)) {
-        md += `- ${key}: ${JSON.stringify(value)}\n`;
       }
     }
 

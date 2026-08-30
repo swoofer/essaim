@@ -1,10 +1,11 @@
 // tests/unit/minors.test.ts — minors différés du pilote
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { uniqueReportBase, tscCompilationStatus, collectAgentResults } from '../../src/orchestrator/reporter.js';
-import type { WorkspaceResult } from '../../src/orchestrator/types.js';
+import { uniqueReportBase, tscCompilationStatus, collectAgentResults, countDiffLines, writeReport } from '../../src/orchestrator/reporter.js';
+import type { WorkspaceResult, RunResult, AgentResult } from '../../src/orchestrator/types.js';
 
 // #152 — colonne Compilation TRI-ÉTAT, fondée sur le code de sortie de tsc et non
 // sur includes("error") (qui rendait un faux OK quand tsc était injoignable).
@@ -135,5 +136,58 @@ describe('collectAgentResults — tsc seulement sur dépôt TS (#160)', () => {
     const results = collectAgentResults(workspaceOf(dir), run);
     expect(run).toHaveBeenCalledWith(dir);
     expect(results[0].compilation_ok).toBe(true);
+  });
+});
+
+// #165 — rapport honnête : le diff compte les fichiers NON SUIVIS (agent qui écrit
+// sans commiter ⇒ diff ≠ 0), les hot files sont NOMMÉS, et la section morte
+// « Métriques spécifiques » (custom_metrics câblé à {}) est retirée.
+function runResult(over: Partial<RunResult['coordinator_metrics']> = {}, agents: AgentResult[] = []): RunResult {
+  return {
+    project_id: 'p', project_name: 'proj', mode: 'with_coordinator', duration_ms: 1000,
+    coordinator_metrics: {
+      agents_count: agents.length, duration_total_ms: 1000, threads_opened: 0,
+      threads_resolved_consensus: 0, threads_auto_resolved: 0, threads_without_consensus: 0,
+      messages_exchanged: 0, conflicts_by_layer: {}, introspections_triggered: 0,
+      introspections_concerned: 0, avg_resolution_time_ms: 0, hot_files: [], ...over,
+    },
+    agent_results: agents, custom_metrics: {},
+  };
+}
+
+describe('reporter honnête (#165)', () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('hot files NOMMÉS, pas seulement comptés', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep165-'));
+    const md = readFileSync(writeReport([runResult({ hot_files: ['src/a.ts', 'src/b.ts'] })], dir), 'utf8');
+    expect(md).toContain('src/a.ts, src/b.ts');       // les NOMS
+    expect(md).not.toContain('| Hot files | 2 |');    // plus le simple compte
+  });
+
+  it('la section morte « Métriques spécifiques » (custom_metrics {}) a disparu', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep165b-'));
+    const md = readFileSync(writeReport([runResult()], dir), 'utf8');
+    expect(md).not.toContain('Métriques spécifiques');
+  });
+
+  it('un fichier NEUF non commité compte dans le diff (agent qui écrit sans commiter ⇒ diff ≠ 0)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep165diff-'));
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: dir, encoding: 'utf8' });
+    git('init', '-q'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    writeFileSync(join(dir, 'base.ts'), 'export const a = 1;\n');
+    git('add', '-A'); git('commit', '-qm', 'base');
+    const baseSha = git('rev-parse', 'HEAD').stdout.trim();
+    // l'agent écrit un NOUVEAU fichier sans `git add` ni commit
+    writeFileSync(join(dir, 'newfile.ts'), 'export const b = 2;\nexport const c = 3;\n');
+
+    const workspace: WorkspaceResult = {
+      type: 'worktree', basePath: dir, baseSha,
+      paths: new Map([['a1', dir]]), branches: new Map(),
+    };
+    const results = collectAgentResults(workspace);
+    expect(countDiffLines(results[0].diff)).toBeGreaterThan(0); // LE compteur : diff ≠ 0
+    expect(results[0].diff).toContain('newfile.ts');            // et le fichier est nommé
   });
 });
