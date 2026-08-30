@@ -816,6 +816,46 @@ describe("runAgentLoop — phased mode", () => {
     expect(result.exitReason).not.toBe("done"); // faux vert banni (#184)
   });
 
+  it("semis raté MAIS l'agent réclame+complète du travail des pairs → coordinator prouvé writable → 'done', PAS faux rouge (#191)", async () => {
+    vi.useFakeTimers();
+
+    // L'agent trouve du travail mais TOUS ses POST announce échouent (blip
+    // transitoire) → 0 semé → seedWriteFailed=true (#184). MAIS la piscine
+    // contient du travail des pairs : le claim RÉUSSIT (claim-task UPDATE la
+    // ligne = preuve que le coordinator accepte des écritures MAINTENANT), et
+    // l'agent complète le fix. Le semis raté était donc transitoire, pas une
+    // écriture morte : le run corrige réellement du code → "done", pas rouge.
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+    mockPostDiscoveries.mockResolvedValue([]); // semis raté (transitoire)
+
+    // Piscine des pairs : un claim réussit, puis pool vide.
+    let claimCall = 0;
+    mockClaimNextTask.mockImplementation(async () => {
+      claimCall++;
+      if (claimCall === 1) return { id: "t-peer", description: "Peer bug", file: "src/peer.ts", severity: "major" };
+      return null;
+    });
+    // L'agent complète la tâche des pairs.
+    mockSend.mockResolvedValueOnce({
+      content: "DONE: fixed peer bug",
+      toolCalls: [], costUsd: 0.02, durationMs: 300, sessionId: "s1",
+    });
+
+    const loopPromise = runAgentLoop(makePhasedConfig(), silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    const result = await loopPromise;
+
+    // Le coordinator s'est prouvé writable (claim réussi) → le faux rouge est banni.
+    expect(result.exitReason).toBe("done");
+    expect(result.exitReason).not.toBe("coordinator_unreachable");
+  });
+
   it("claims and executes tasks in work-stealing loop", async () => {
     vi.useFakeTimers();
 

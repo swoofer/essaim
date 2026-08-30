@@ -1305,6 +1305,18 @@ export async function runAgentLoop(
               // Reset on successful claim (progrès réel)
               noProgressRetries = 0;
               unreachableStreak = 0;
+              // #191 — Un claim RÉUSSI (claim-task UPDATE la ligne côté coordinator)
+              // prouve que l'écriture fonctionne MAINTENANT. Si un semis discover/
+              // review avait tout raté (seedWriteFailed), c'était donc un blip
+              // transitoire, pas une écriture morte : sinon ce faux rouge teindrait
+              // un run qui corrige réellement du travail des pairs. On efface le
+              // drapeau sur la preuve d'écriture, comme unreachableStreak plus haut.
+              // Le cas #184 (agent seul, piscine vide) ne claim JAMAIS, donc
+              // n'atteint jamais cette ligne → reste rouge, invariant préservé.
+              if (seedWriteFailed) {
+                logger.warn("Work-stealing: claim réussi — coordinator writable, l'échec de semis était transitoire (#191) ; seedWriteFailed effacé");
+                seedWriteFailed = false;
+              }
               claimedThreadIds.add(task.id);
 
               logger.info(`Work-stealing: claimed "${task.description.slice(0, 80)}"`);
