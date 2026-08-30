@@ -85,7 +85,7 @@ vi.mock("../../src/agent-loop/coordination-protocol.js", () => ({
 // Mock work-stealing
 const mockParseDiscoveries = vi.fn((_output: string) => [] as Array<{ id: string; description: string; file?: string; line?: number; severity?: string }>);
 const mockPostDiscoveries = vi.fn(async (_url: string, _agentId: string, _tasks: unknown[]) => [] as Array<{ id: string; description: string; file?: string; line?: number; severity?: string }>);
-const mockClaimNextTask = vi.fn(async (_url: string, _agentId: string) => null as { id: string; description: string; file?: string; severity?: string } | null);
+const mockClaimNextTask = vi.fn(async (_url: string, _agentId: string) => null as { id: string; description: string; file?: string; severity?: string } | null | "coordinator_unreachable");
 const mockCompleteTask = vi.fn(async (_url: string, _threadId: string, _agentId: string, _summary: string) => {});
 const mockUnclaimTask = vi.fn(async (_url: string, _threadId: string, _agentId: string) => {});
 const mockParseReviewActions = vi.fn((_output: string) => [] as Array<{ type: string; description?: string; threadId?: string; context?: string }>);
@@ -93,6 +93,7 @@ const mockFetchExistingThreads = vi.fn(async (_url: string) => "(aucun thread ac
 const mockProcessReviewActions = vi.fn(async (_url: string, _agentId: string, _agentName: string, _actions: unknown[]) => ({ posted: 0, enriched: 0, skipped: 0 }));
 
 vi.mock("../../src/agent-loop/work-stealing.js", () => ({
+  COORDINATOR_UNREACHABLE: "coordinator_unreachable",
   parseDiscoveries: (output: string) => mockParseDiscoveries(output),
   postDiscoveries: (url: string, agentId: string, tasks: unknown[]) => mockPostDiscoveries(url, agentId, tasks),
   claimNextTask: (url: string, agentId: string) => mockClaimNextTask(url, agentId),
@@ -657,6 +658,96 @@ describe("runAgentLoop — phased mode", () => {
     // Should have tried to claim
     expect(mockClaimNextTask).toHaveBeenCalled();
     // Exits done (all phases completed, pool drained after retries)
+    expect(result.exitReason).toBe("done");
+  });
+
+  it("coordinator INJOIGNABLE en plein run → exitReason 'coordinator_unreachable', PAS 'done' (#151)", async () => {
+    vi.useFakeTimers();
+
+    // Phase discover OK : on poste une découverte, puis on entre en execute.
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+    mockPostDiscoveries.mockResolvedValue([
+      { id: "t-1", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+
+    // …puis le coordinator devient INJOIGNABLE : claim signale l'injoignabilité,
+    // PAS une piscine vide. La boucle doit finir en erreur, pas en "done".
+    mockClaimNextTask.mockResolvedValue("coordinator_unreachable");
+
+    const loopPromise = runAgentLoop(makePhasedConfig(), silentLogger);
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(10_000); // dépasser les 3 retries × 10s
+    }
+    const result = await loopPromise;
+
+    expect(result.exitReason).toBe("coordinator_unreachable");
+    expect(result.exitReason).not.toBe("done"); // le faux vert est banni (#151)
+  });
+
+  it("coordinator FLAPPING (vide/injoignable alternés) → 'coordinator_unreachable' DÉTERMINISTE, jamais 'done' (#151)", async () => {
+    vi.useFakeTimers();
+
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+    mockPostDiscoveries.mockResolvedValue([
+      { id: "t-1", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+
+    // Le coordinator flappe : COMMENCE par une réponse « vide » (null) puis
+    // alterne avec « injoignable ». Un seul compteur + flag => dès qu'une
+    // injoignabilité survient dans la fenêtre, le verdict est ROUGE, quel que
+    // soit l'ordre (avant : course non déterministe entre deux compteurs).
+    let n = 0;
+    mockClaimNextTask.mockImplementation(async () => (n++ % 2 === 0 ? null : "coordinator_unreachable"));
+
+    const loopPromise = runAgentLoop(makePhasedConfig(), silentLogger);
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    const result = await loopPromise;
+
+    expect(result.exitReason).toBe("coordinator_unreachable");
+    expect(result.exitReason).not.toBe("done");
+  });
+
+  it("UN SEUL blip d'injoignabilité dans un drain propre → reste 'done' (pas de faux rouge, seuil ≥2, #151)", async () => {
+    vi.useFakeTimers();
+
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+    mockPostDiscoveries.mockResolvedValue([
+      { id: "t-1", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+
+    // Drain propre avec UN blip transitoire : vide, vide, injoignable(1×), vide…
+    // 1 injoignabilité < seuil 2 -> le run est réellement drainé -> "done", pas
+    // un faux rouge sur un simple hoquet du coordinator.
+    const seq: Array<null | "coordinator_unreachable"> = [null, null, "coordinator_unreachable", null];
+    let i = 0;
+    mockClaimNextTask.mockImplementation(async () => (i < seq.length ? seq[i++] : null));
+
+    const loopPromise = runAgentLoop(makePhasedConfig(), silentLogger);
+    for (let k = 0; k < 7; k++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    const result = await loopPromise;
+
     expect(result.exitReason).toBe("done");
   });
 

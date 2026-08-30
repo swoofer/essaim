@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, parseReviewActions } from "../../src/agent-loop/work-stealing.js";
+import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, parseReviewActions, COORDINATOR_UNREACHABLE } from "../../src/agent-loop/work-stealing.js";
 
 describe("parseDiscoveries", () => {
   it("parses pipe-separated discovery format", () => {
@@ -59,6 +59,13 @@ describe("postDiscoveries", () => {
   });
 });
 
+// claimNextTask rend désormais Task | null | COORDINATOR_UNREACHABLE (#151) :
+// ce garde narrow vers un vrai Task pour l'accès aux propriétés dans les tests.
+function asTask(t: Awaited<ReturnType<typeof claimNextTask>>): { id: string; description: string; file?: string; severity?: string } {
+  if (t === null || t === COORDINATOR_UNREACHABLE) throw new Error(`attendu un Task, reçu ${String(t)}`);
+  return t;
+}
+
 // ── claimNextTask ─────────────────────────────────────────────────────
 
 describe("claimNextTask", () => {
@@ -87,8 +94,8 @@ describe("claimNextTask", () => {
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
     expect(task).not.toBeNull();
-    expect(task!.id).toBe("t-1");
-    expect(task!.description).toBe("Bug in auth");
+    expect(asTask(task).id).toBe("t-1");
+    expect(asTask(task).description).toBe("Bug in auth");
     // Should have called threads-active then claim-task (2 fetches total)
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
@@ -117,8 +124,8 @@ describe("claimNextTask", () => {
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
     expect(task).not.toBeNull();
-    expect(task!.id).toBe("t-2");
-    expect(task!.description).toBe("Available");
+    expect(asTask(task).id).toBe("t-2");
+    expect(asTask(task).description).toBe("Available");
     // claim-task should only be called once (skipped t-1)
     expect(claimedUrls).toHaveLength(1);
   });
@@ -146,7 +153,7 @@ describe("claimNextTask", () => {
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
     expect(task).not.toBeNull();
-    expect(task!.id).toBe("t-2");
+    expect(asTask(task).id).toBe("t-2");
     // claim-task called once, for t-2 only
     expect(claimedBodies).toHaveLength(1);
     expect(claimedBodies[0].thread_id).toBe("t-2");
@@ -179,8 +186,8 @@ describe("claimNextTask", () => {
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
     expect(task).not.toBeNull();
-    expect(task!.id).toBe("t-2");
-    expect(task!.description).toBe("Race won");
+    expect(asTask(task).id).toBe("t-2");
+    expect(asTask(task).description).toBe("Race won");
     expect(claimCallCount).toBe(2);
   });
 
@@ -198,13 +205,59 @@ describe("claimNextTask", () => {
     expect(task).toBeNull();
   });
 
-  it("returns null when coordinator unreachable", async () => {
+  it("signale COORDINATOR_UNREACHABLE (≠ null) quand le fetch est rejeté (#151)", async () => {
+    // Coordinator injoignable NE DOIT PAS se confondre avec « piscine vide » :
+    // sinon la boucle sort en "done" et le rapport est un faux vert.
     const mockFetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
     vi.stubGlobal("fetch", mockFetch);
 
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
-    expect(task).toBeNull();
+    expect(task).toBe(COORDINATOR_UNREACHABLE);
+    expect(task).not.toBeNull(); // ≠ du null « rien à réclamer »
+  });
+
+  it("signale COORDINATOR_UNREACHABLE quand threads-active répond non-ok (500) (#151)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/api/threads-active")) return { ok: false, status: 500 };
+      return { ok: false };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const task = await claimNextTask("http://localhost:3100", "agent-1");
+
+    expect(task).toBe(COORDINATOR_UNREACHABLE);
+  });
+
+  it("signale COORDINATOR_UNREACHABLE quand threads-active répond 200 mais corps NON-tableau (#151, faux vert)", async () => {
+    // Un coordinator mourant qui répond 200 + {"error":...} ne doit PAS passer
+    // pour une piscine vide (-> done/vert) : c'est de l'injoignabilité.
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/api/threads-active")) return { ok: true, json: async () => ({ error: "database is locked" }) };
+      return { ok: false };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const task = await claimNextTask("http://localhost:3100", "agent-1");
+
+    expect(task).toBe(COORDINATOR_UNREACHABLE);
+  });
+
+  it("signale COORDINATOR_UNREACHABLE quand la LECTURE marche mais TOUS les claims jettent (write-path #151)", async () => {
+    // threads-active livre un vrai candidat, mais claim-task est mort (fetch
+    // rejeté) : chemin d'écriture injoignable, pas « piscine vide ».
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/api/threads-active")) {
+        return { ok: true, json: async () => [{ id: "t-1", status: "open", claimed_by: null, subject: "Work" }] };
+      }
+      if (url.includes("/api/claim-task")) throw new Error("ECONNRESET"); // coordinatorPost -> throw
+      return { ok: false };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const task = await claimNextTask("http://localhost:3100", "agent-1");
+
+    expect(task).toBe(COORDINATOR_UNREACHABLE);
   });
 
   it("returns null when all claims fail", async () => {
@@ -230,11 +283,16 @@ describe("claimNextTask", () => {
     expect(task).toBeNull();
   });
 
-  it("returns null when threads-active returns non-ok status", async () => {
-    const mockFetch = vi.fn().mockImplementation(async () => ({
-      ok: false,
-      status: 500,
-    }));
+  it("returns null (pas injoignable) quand la piscine est vraiment vide via un claim ratant tout", async () => {
+    // Un coordinator JOIGNABLE dont tous les claims échouent = « rien à réclamer »
+    // (null), à ne pas confondre avec injoignable — cf. les tests dédiés #151.
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/api/threads-active")) {
+        return { ok: true, json: async () => [{ id: "t-9", status: "open", claimed_by: null, subject: "X" }] };
+      }
+      if (url.includes("/api/claim-task")) return { ok: true, json: async () => ({ success: false }) };
+      return { ok: false };
+    });
     vi.stubGlobal("fetch", mockFetch);
 
     const task = await claimNextTask("http://localhost:3100", "agent-1");
@@ -262,7 +320,7 @@ describe("claimNextTask", () => {
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
     expect(task).not.toBeNull();
-    expect(task!.description).toBe("?");
+    expect(asTask(task).description).toBe("?");
   });
 
   it("skips thread when claim-task throws and tries next", async () => {
@@ -292,8 +350,8 @@ describe("claimNextTask", () => {
     const task = await claimNextTask("http://localhost:3100", "agent-1");
 
     expect(task).not.toBeNull();
-    expect(task!.id).toBe("t-2");
-    expect(task!.description).toBe("Works");
+    expect(asTask(task).id).toBe("t-2");
+    expect(asTask(task).description).toBe("Works");
   });
 });
 

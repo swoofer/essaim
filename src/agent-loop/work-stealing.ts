@@ -189,7 +189,16 @@ async function fetchActiveThreads(coordinatorUrl: string): Promise<Array<Record<
     });
     if (!resp.ok) { log.warn("fetchActiveThreads: threads-active failed", { status: resp.status }); return null; }
     const data = await resp.json();
-    return Array.isArray(data) ? data : [];
+    // Un 200 à corps NON-tableau (`{"error":"database is locked"}`, `null`,
+    // `{"threads":[…]}`…) signale un coordinator qui répond mais dysfonctionne :
+    // c'est de l'injoignabilité (-> null), PAS une piscine vide (-> []). Sinon
+    // un coordinator mourant renvoyant 200+erreur passait pour « pool drainé »,
+    // rapport vert (#151, faux vert résiduel).
+    if (!Array.isArray(data)) {
+      log.warn("fetchActiveThreads: 200 à corps non-tableau — traité comme injoignable", { sample: JSON.stringify(data).slice(0, 200) });
+      return null;
+    }
+    return data;
   } catch (err) {
     log.warn("fetchActiveThreads: coordinator unreachable", { error: (err as Error).message });
     return null;
@@ -279,12 +288,24 @@ async function resolveFileConflict(
  * Uses POST /api/claim-task which does UPDATE WHERE claimed_by IS NULL.
  * Returns null if no tasks available.
  */
+/**
+ * Sentinelle distincte de `null` : le coordinator est INJOIGNABLE (fetch rejeté,
+ * ou réponse non-ok), à ne PAS confondre avec « piscine vide » (`null`). La
+ * boucle de work-stealing s'en sert pour finir en exitReason d'erreur (rapport
+ * rouge) au lieu de « done » — un coordinator mort n'est pas un travail fini
+ * (#151). C'est une string plutôt qu'un objet pour rester ≠ de tout `Task`.
+ */
+export const COORDINATOR_UNREACHABLE = "coordinator_unreachable" as const;
+
 export async function claimNextTask(
   coordinatorUrl: string,
   agentId: string,
-): Promise<Task | null> {
+): Promise<Task | null | typeof COORDINATOR_UNREACHABLE> {
+  // fetchActiveThreads rend `null` UNIQUEMENT quand il n'a pas pu lire la piscine
+  // (non-ok / fetch rejeté) — jamais pour une piscine vide (qui rend `[]`). On
+  // remonte donc l'injoignabilité distinctement, au lieu de l'aplatir en `null`.
   const threads = await fetchActiveThreads(coordinatorUrl);
-  if (threads === null) return null;
+  if (threads === null) return COORDINATOR_UNREACHABLE;
 
   const open = threads.filter((t) => t.status === "open");
   const unclaimed = open.filter((t) => !t.claimed_by);
@@ -314,6 +335,16 @@ export async function claimNextTask(
     }
   }
 
+  // Panne du chemin d'ÉCRITURE : la lecture (threads-active) marche et livre des
+  // candidats, mais chaque POST claim-task JETTE (500 / fetch rejeté). On compte
+  // les tentatives réellement lancées et celles qui ont jeté : si des candidats
+  // existaient et que TOUTES ont jeté (aucune réponse), c'est de l'injoignabilité,
+  // pas une piscine vide — sinon un coordinator lisible-mais-non-inscriptible
+  // rendait un faux vert, travail réel abandonné (#151). Un `success:false`
+  // (course perdue) PROUVE au contraire la joignabilité et ne compte pas.
+  let claimsAttempted = 0;
+  let claimsThrew = 0;
+
   // Try to claim each open, unclaimed thread
   for (const thread of threads) {
     if (thread.status !== "open") continue;
@@ -342,6 +373,7 @@ export async function claimNextTask(
     const threadId = thread.id as string;
     const subject = (thread.subject as string) || "?";
     try {
+      claimsAttempted++;
       const result = await coordinatorPost(`${coordinatorUrl}/api/claim-task`, {
         thread_id: threadId,
         agent_id: agentId,
@@ -384,12 +416,19 @@ export async function claimNextTask(
         busyFiles = computeBusyFiles(refreshed.filter((t) => t.status === "open"), agentId);
       }
     } catch (err) {
+      claimsThrew++;
       log.warn(`claim error: ${threadId}`, { error: (err as Error).message });
     }
   }
 
   if (skippedAnnounces > 0) {
     log.info(`claimNextTask: ${skippedAnnounces} annonce(s) de coordination écartée(s) — pas des items de travail`);
+  }
+  // Des candidats existaient mais TOUS les claims ont jeté (aucune réponse) :
+  // chemin d'écriture mort -> injoignable, pas « rien à réclamer ».
+  if (claimsAttempted > 0 && claimsThrew === claimsAttempted) {
+    log.warn(`claimNextTask: ${claimsThrew}/${claimsAttempted} claims ont jeté — coordinator injoignable en écriture`);
+    return COORDINATOR_UNREACHABLE;
   }
   log.debug("claimNextTask: nothing to claim");
   return null;
