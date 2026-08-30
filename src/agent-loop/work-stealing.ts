@@ -279,12 +279,24 @@ async function resolveFileConflict(
  * Uses POST /api/claim-task which does UPDATE WHERE claimed_by IS NULL.
  * Returns null if no tasks available.
  */
+/**
+ * Sentinelle distincte de `null` : le coordinator est INJOIGNABLE (fetch rejeté,
+ * ou réponse non-ok), à ne PAS confondre avec « piscine vide » (`null`). La
+ * boucle de work-stealing s'en sert pour finir en exitReason d'erreur (rapport
+ * rouge) au lieu de « done » — un coordinator mort n'est pas un travail fini
+ * (#151). C'est une string plutôt qu'un objet pour rester ≠ de tout `Task`.
+ */
+export const COORDINATOR_UNREACHABLE = "coordinator_unreachable" as const;
+
 export async function claimNextTask(
   coordinatorUrl: string,
   agentId: string,
-): Promise<Task | null> {
+): Promise<Task | null | typeof COORDINATOR_UNREACHABLE> {
+  // fetchActiveThreads rend `null` UNIQUEMENT quand il n'a pas pu lire la piscine
+  // (non-ok / fetch rejeté) — jamais pour une piscine vide (qui rend `[]`). On
+  // remonte donc l'injoignabilité distinctement, au lieu de l'aplatir en `null`.
   const threads = await fetchActiveThreads(coordinatorUrl);
-  if (threads === null) return null;
+  if (threads === null) return COORDINATOR_UNREACHABLE;
 
   const open = threads.filter((t) => t.status === "open");
   const unclaimed = open.filter((t) => !t.claimed_by);

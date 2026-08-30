@@ -7,7 +7,7 @@ import {
   type WorkDescription,
   type AnnounceResult,
 } from "./coordination-protocol.js";
-import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, unclaimTask, parseReviewActions, fetchExistingThreads, processReviewActions } from "./work-stealing.js";
+import { parseDiscoveries, postDiscoveries, claimNextTask, completeTask, unclaimTask, parseReviewActions, fetchExistingThreads, processReviewActions, COORDINATOR_UNREACHABLE } from "./work-stealing.js";
 import { createLogger } from "../logger.js";
 import { resolveEffort, upgradeEffort, parseSeverity, EFFORT_PROFILES, isThinkingLevel, type EffortLevel, type ConcreteEffortLevel, type ThinkingLevel } from "./effort.js";
 import { authHeaders } from "../coordinator-auth.js";
@@ -85,6 +85,11 @@ export type ExitReason =
   | "deadline_exceeded"
   | "aborted"
   | "rate_limited"
+  // Le coordinator est devenu INJOIGNABLE en plein run (tué, réseau coupé) :
+  // distinct de "done", pour que le rapport soit ROUGE (orchestrator mappe tout
+  // ≠ "done" -> exit_code 1). Sans lui, une piscine devenue muette passait pour
+  // « tout le travail est fait » — un faux vert (#151).
+  | "coordinator_unreachable"
   | "error";
 
 export interface TurnDetail {
@@ -1183,6 +1188,11 @@ export async function runAgentLoop(
             // agent et par cycle pour un problème qui ne se manifeste pas.
             const MAX_EMPTY_RETRIES = 3;
             const EMPTY_WAIT_MS = 10_000;  // 10s between retries
+            // Un coordinator injoignable est retenté à la même cadence, mais mène
+            // à un exitReason d'ERREUR (pas "done") : ~30s de silence = mort, pas
+            // « travail fini » (#151).
+            const MAX_UNREACHABLE_RETRIES = 3;
+            let unreachableRetries = 0;
 
             logger.info(`Work-stealing loop starting (maxTurns=${maxTurns})`);
 
@@ -1239,6 +1249,24 @@ export async function runAgentLoop(
               logger.debug(`Work-stealing: attempting claim (turn ${turnsCount}/${maxTurns}, done=${tasksDone})`);
               const task = await claimNextTask(config.coordinatorUrl, config.agentId);
 
+              // Coordinator INJOIGNABLE ≠ piscine vide (#151). fetchActiveThreads
+              // ne rend jamais `null` pour un pool vide (c'est `[]`) ; ce cas
+              // signale un coordinator muet. Après N essais, on SORT en erreur —
+              // JAMAIS "done" (sinon un coordinator mort passe pour un run réussi,
+              // rapport vert). Le rapport devient rouge via orchestrator (≠"done").
+              if (task === COORDINATOR_UNREACHABLE) {
+                unreachableRetries++;
+                if (unreachableRetries > MAX_UNREACHABLE_RETRIES) {
+                  logger.error(`Work-stealing: coordinator injoignable après ${MAX_UNREACHABLE_RETRIES} tentatives — abandon (rapport rouge)`);
+                  exitReason = "coordinator_unreachable";
+                  break;
+                }
+                logger.warn(`Work-stealing: coordinator injoignable, attente (essai ${unreachableRetries}/${MAX_UNREACHABLE_RETRIES})...`);
+                await new Promise((r) => setTimeout(r, EMPTY_WAIT_MS));
+                await processInterrupts();
+                continue;
+              }
+
               if (!task) {
                 emptyRetries++;
                 if (emptyRetries > MAX_EMPTY_RETRIES) {
@@ -1254,6 +1282,7 @@ export async function runAgentLoop(
 
               // Reset retries on successful claim
               emptyRetries = 0;
+              unreachableRetries = 0;
               claimedThreadIds.add(task.id);
 
               logger.info(`Work-stealing: claimed "${task.description.slice(0, 80)}"`);

@@ -1,6 +1,13 @@
 // tests/unit/claim-dedup.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { claimNextTask } from '../../src/agent-loop/work-stealing.js';
+import { claimNextTask, COORDINATOR_UNREACHABLE, type Task } from '../../src/agent-loop/work-stealing.js';
+
+// claimNextTask rend Task | null | COORDINATOR_UNREACHABLE (#151). Ce garde
+// narrow vers un vrai Task pour l'accès aux propriétés dans les tests.
+function asTask(t: Task | null | typeof COORDINATOR_UNREACHABLE): Task {
+  if (t === null || t === COORDINATOR_UNREACHABLE) throw new Error(`attendu un Task, reçu ${String(t)}`);
+  return t;
+}
 
 // Régression #30 — un template de chasse aux bugs, 3 hunters, UN seul bug bien localisé : les
 // trois ont écrit ET commité un test de repro quasi identique. Le claim était
@@ -53,8 +60,8 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('t2');
-    expect(task?.file).toBe('src/csv.ts'); // le fichier était jeté au claim, il remonte maintenant
+    expect(asTask(task).id).toBe('t2');
+    expect(asTask(task).file).toBe('src/csv.ts'); // le fichier était jeté au claim, il remonte maintenant
   });
 
   it('un thread sans fichier cible reste claimable (pas d\'exclusion abusive)', async () => {
@@ -64,7 +71,7 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
     ]));
 
     const task = await claimNextTask('https://c', 'hunter-2');
-    expect(task?.id).toBe('t2');
+    expect(asTask(task).id).toBe('t2');
   });
 
   it('mes propres claims ne me bloquent pas moi-même', async () => {
@@ -74,7 +81,7 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
     ]));
 
     const task = await claimNextTask('https://c', 'hunter-2');
-    expect(task?.id).toBe('t2');
+    expect(asTask(task).id).toBe('t2');
   });
 
   it('le coordinator renvoie target_files en JSON stringifié (pas un tableau) — le garde-fou doit quand même bloquer', async () => {
@@ -104,7 +111,7 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('t2'); // t1 illisible n'exclut aucun fichier, ne bloque pas t2
+    expect(asTask(task).id).toBe('t2'); // t1 illisible n'exclut aucun fichier, ne bloque pas t2
   });
 
   it('remonte le travail DÉJÀ résolu sur le même fichier — de quoi marquer DUP au lieu de recommiter', async () => {
@@ -121,8 +128,8 @@ describe('claimNextTask — un seul agent par fichier (#30)', () => {
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('t2');
-    expect(task?.relatedDone?.join(' ')).toContain('receipt_date');
+    expect(asTask(task).id).toBe('t2');
+    expect(asTask(task).relatedDone?.join(' ')).toContain('receipt_date');
   });
 });
 
@@ -218,7 +225,7 @@ describe('claimNextTask — départage déterministe après double claim réussi
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('t9'); // a cédé t5 (t1 < t5), a enchaîné sur le candidat suivant
+    expect(asTask(task).id).toBe('t9'); // a cédé t5 (t1 < t5), a enchaîné sur le candidat suivant
     const unclaimed = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/unclaim-task'));
     expect(unclaimed).toHaveLength(1);
     expect(JSON.parse((unclaimed[0][1] as RequestInit).body as string).thread_id).toBe('t5');
@@ -251,9 +258,9 @@ describe('claimNextTask — départage déterministe après double claim réussi
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('t5'); // id plus petit : nous gardons, pas de cession
+    expect(asTask(task).id).toBe('t5'); // id plus petit : nous gardons, pas de cession
     // Discriminant : sur 058ee3f, claimNextTask retourne dès success===true
-    // sans jamais rappeler threads-active — task?.id==='t5' et 0 unclaim
+    // sans jamais rappeler threads-active — asTask(task).id==='t5' et 0 unclaim
     // seraient déjà vrais SANS le patch (aucun refetch post-claim n'existe).
     // Le seul signal qui ne peut être vrai qu'AVEC resolveFileConflict() en
     // jeu est ce second appel : le pré-patch en fait 1, le patché en fait 2.
@@ -311,7 +318,7 @@ describe("claimNextTask — une annonce de coordination n'est pas une tâche (#1
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('t2');
+    expect(asTask(task).id).toBe('t2');
   });
 
   it("les trois familles réelles du run A1 côte à côte : seul l'item semé est réclamé", async () => {
@@ -330,7 +337,7 @@ describe("claimNextTask — une annonce de coordination n'est pas une tâche (#1
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('w1');
+    expect(asTask(task).id).toBe('w1');
     const claimed = fetchMock.mock.calls
       .filter((c) => String(c[0]).endsWith('/api/claim-task'))
       .map((c) => JSON.parse((c[1] as RequestInit).body as string).thread_id);
@@ -346,7 +353,7 @@ describe("claimNextTask — une annonce de coordination n'est pas une tâche (#1
     ]));
 
     const task = await claimNextTask('https://c', 'hunter-2');
-    expect(task?.id).toBe('t3');
+    expect(asTask(task).id).toBe('t3');
   });
 
   it('timeout_seconds illisible dégrade aussi vers réclamable', async () => {
@@ -355,7 +362,7 @@ describe("claimNextTask — une annonce de coordination n'est pas une tâche (#1
     ]));
 
     const task = await claimNextTask('https://c', 'hunter-2');
-    expect(task?.id).toBe('t4');
+    expect(asTask(task).id).toBe('t4');
   });
 
   it('tolérance de forme : timeout_seconds en chaîne, target_files en TABLEAU déjà décodé', async () => {
@@ -370,7 +377,7 @@ describe("claimNextTask — une annonce de coordination n'est pas une tâche (#1
 
     const task = await claimNextTask('https://c', 'hunter-2');
 
-    expect(task?.id).toBe('w1');
+    expect(asTask(task).id).toBe('w1');
     const claimed = fetchMock.mock.calls
       .filter((c) => String(c[0]).endsWith('/api/claim-task'))
       .map((c) => JSON.parse((c[1] as RequestInit).body as string).thread_id);
@@ -383,6 +390,6 @@ describe("claimNextTask — une annonce de coordination n'est pas une tâche (#1
     ]));
 
     const task = await claimNextTask('https://c', 'hunter-2');
-    expect(task?.id).toBe('t5');
+    expect(asTask(task).id).toBe('t5');
   });
 });
