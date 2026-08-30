@@ -62,6 +62,25 @@ assert_allow "Read hors périmètre"      Read  "$REPO/src/x.ts"           -- "A
 out=$(printf '{"tool_name":"Write","tool_input":{}}' | bash "$GUARD" "AUDIT.md")
 [ -n "$out" ] && fail "Write sans chemin : sortie inattendue: $out"
 
+# --- FAIL-CLOSED (revue sécurité #177) ---
+# jq absent : la branche fail-closed n'utilise que des builtins (command/printf/
+# exit). On lance bash par chemin ABSOLU (sinon PATH vidé cache bash lui-même),
+# avec un PATH sans jq -> command -v jq échoue -> deny littéral (jamais allow).
+BASH_BIN=$(command -v bash)
+out=$(printf '{"tool_name":"Write","tool_input":{"file_path":"AUDIT.md"}}' | PATH="/nonexistent-xyz" "$BASH_BIN" "$GUARD" "AUDIT.md")
+case "$out" in *'"permissionDecision":"deny"'*) ;; *) fail "jq absent : attendu deny (fail-closed), reçu: ${out:-<vide>}" ;; esac
+
+# stdin vide (drain de pipe) -> deny (fail-closed), plus jamais allow silencieux
+out=$(printf '' | bash "$GUARD" "AUDIT.md")
+case "$out" in *'"permissionDecision":"deny"'*) ;; *) fail "stdin vide : attendu deny (fail-closed), reçu: ${out:-<vide>}" ;; esac
+
+# cible = symlink -> deny. ln -s ne fonctionne pas partout (Windows sans droits) :
+# on n'assère QUE si le symlink a réellement été créé (sinon cas non pertinent ici).
+if ln -s /etc/passwd "$REPO/LINK.md" 2>/dev/null && [ -L "$REPO/LINK.md" ]; then
+  out=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/LINK.md"}}' "$REPO" | bash "$GUARD" "LINK.md")
+  case "$out" in *'"permissionDecision":"deny"'*) ;; *) fail "cible symlink : attendu deny, reçu: ${out:-<vide>}" ;; esac
+fi
+
 # --- Nettoyage ---
 cd /
 rm -rf "$REPO"

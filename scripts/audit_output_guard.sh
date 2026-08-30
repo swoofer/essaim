@@ -20,8 +20,23 @@
 # chemins ABSOLUS. Un chemin hors dépôt, ou un `AUDIT.md/../src/x.ts`, ne peut donc
 # pas se faire passer pour un chemin autorisé.
 
+# FAIL-CLOSED si jq est absent : sans jq on ne peut PAS lire le chemin cible, donc
+# on ne peut pas décider — un guard de sécurité doit alors REFUSER (jamais
+# autoriser en silence). Le deny est littéral (pas via jq, qui manque). jq est
+# une dépendance connue (essaim doctor la vérifie) ; ce garde-fou couvre l'hôte
+# Windows/Git-Bash par défaut où jq n'est pas fourni. (#177, revue sécurité.)
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"audit-output (#177): jq introuvable, impossible de path-scoper — ecriture refusee (fail-closed). Installez jq (essaim doctor)."}}'
+  exit 0
+fi
+
 INPUT=$(cat 2>/dev/null)
-[ -z "$INPUT" ] && exit 0
+# stdin vide = on ne peut pas décider quel fichier -> refus (fail-closed). Avant,
+# `exit 0` (allow) transformait un drain de pipe en autorisation silencieuse.
+if [ -z "$INPUT" ]; then
+  printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"audit-output (#177): entree du hook vide, impossible de determiner le fichier — ecriture refusee (fail-closed)."}}'
+  exit 0
+fi
 
 TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
 case "$TOOL_NAME" in
@@ -79,6 +94,13 @@ deny() {
 
 if [ "$target_ok" -ne 0 ] || [ -z "$TARGET" ]; then
   deny "audit-output (#177) : chemin d'écriture non résoluble ou traversant (« $FILE_PATH ») — refusé."
+fi
+
+# La cible (feuille) est un lien symbolique DÉJÀ présent : resolve_physical ne
+# résout que le DOSSIER, pas la feuille — une écriture suivrait le lien hors
+# scope. On refuse ; un livrable d'audit légitime est un fichier régulier. (#177)
+if [ -L "$TARGET" ] || [ -L "$FILE_PATH" ]; then
+  deny "audit-output (#177) : la cible « $FILE_PATH » est un lien symbolique — refusé."
 fi
 
 # Les chemins autorisés arrivent en args : soit un par arg, soit tous dans un
