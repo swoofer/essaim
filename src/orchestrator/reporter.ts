@@ -30,7 +30,10 @@ export function formatCost(costUsd: number | undefined, hasTokens: boolean): str
   return `$${(costUsd ?? 0).toFixed(4)}`;
 }
 
-export function collectAgentResults(workspace: WorkspaceResult): AgentResult[] {
+export function collectAgentResults(
+  workspace: WorkspaceResult,
+  run: (cwd: string) => { code: number | null; output: string } = runTsc,
+): AgentResult[] {
   const results: AgentResult[] = [];
 
   for (const [agentId, wsPath] of workspace.paths) {
@@ -44,13 +47,19 @@ export function collectAgentResults(workspace: WorkspaceResult): AgentResult[] {
         ? safeExec(`git diff ${workspace.baseSha}`, wsPath)
         : safeExec("git diff HEAD", wsPath);
 
-    const compilationOk = workspace.type !== "none"
-      ? tscCompilationStatus(wsPath)
-      : undefined;
-    // tsc n'a pas pu tourner (npx/tsc introuvable) sur un workspace où on
+    // `npx tsc --noEmit` n'a de sens que sur un dépôt TypeScript. Sur un dépôt
+    // Go/Python/Rust il ne prouve RIEN (rien à typer) et coûte ~10 s/agent — le
+    // lancer y produisait une colonne trompeuse au lieu d'un franc N/A (#160). Le
+    // signal d'applicabilité est tsconfig.json dans le workspace de l'agent (même
+    // heuristique que scanner.ts) : sans lui, tsc ne saurait pas quoi compiler.
+    const isTypeScript = fs.existsSync(path.join(wsPath, "tsconfig.json"));
+    const shouldCheck = workspace.type !== "none" && isTypeScript;
+    const compilationOk = shouldCheck ? tscCompilationStatus(wsPath, run) : undefined;
+    // tsc n'a pas pu tourner (npx/tsc introuvable) sur un dépôt TS où on
     // l'attendait : ce n'est PAS « OK », c'est « non vérifié » — on le dit, sinon
-    // un rapport vert masquerait qu'aucune compilation n'a eu lieu (#152).
-    if (workspace.type !== "none" && compilationOk === undefined) {
+    // un rapport vert masquerait qu'aucune compilation n'a eu lieu (#152). Un
+    // dépôt non-TS N'est PAS « non vérifié » mais « non applicable » : pas de warn.
+    if (shouldCheck && compilationOk === undefined) {
       console.warn(`reporter: tsc injoignable dans ${wsPath} — compilation NON vérifiée (colonne N/A, pas OK)`);
     }
 
