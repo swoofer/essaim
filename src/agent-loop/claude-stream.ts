@@ -399,7 +399,10 @@ export function resolveCmdShimExe(cmdPath: string): string | undefined {
   const re = new RegExp(`"?([^"\\r\\n]*?${exeName}\\.exe)"?`, "gi");
   for (const m of text.matchAll(re)) {
     // %dp0% / %~dp0% / %~dp0 -> dossier du shim (le shim ajoute son propre "\").
-    const raw = m[1].trim().replace(/%~?dp0%?\\?/gi, shimDir + "\\");
+    // Puis backslash -> slash : Windows accepte les deux, et resolvePath ne traite
+    // `\` comme séparateur que sur win32 (sinon la résolution — et les tests —
+    // casse hors Windows sur un contenu de shim toujours en backslash).
+    const raw = m[1].trim().replace(/%~?dp0%?\\?/gi, shimDir + "/").replace(/\\/g, "/");
     const abs = resolvePath(raw);
     if (existsSync(abs)) return abs;
   }
