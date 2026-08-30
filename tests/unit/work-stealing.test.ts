@@ -229,6 +229,37 @@ describe("claimNextTask", () => {
     expect(task).toBe(COORDINATOR_UNREACHABLE);
   });
 
+  it("signale COORDINATOR_UNREACHABLE quand threads-active répond 200 mais corps NON-tableau (#151, faux vert)", async () => {
+    // Un coordinator mourant qui répond 200 + {"error":...} ne doit PAS passer
+    // pour une piscine vide (-> done/vert) : c'est de l'injoignabilité.
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/api/threads-active")) return { ok: true, json: async () => ({ error: "database is locked" }) };
+      return { ok: false };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const task = await claimNextTask("http://localhost:3100", "agent-1");
+
+    expect(task).toBe(COORDINATOR_UNREACHABLE);
+  });
+
+  it("signale COORDINATOR_UNREACHABLE quand la LECTURE marche mais TOUS les claims jettent (write-path #151)", async () => {
+    // threads-active livre un vrai candidat, mais claim-task est mort (fetch
+    // rejeté) : chemin d'écriture injoignable, pas « piscine vide ».
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/api/threads-active")) {
+        return { ok: true, json: async () => [{ id: "t-1", status: "open", claimed_by: null, subject: "Work" }] };
+      }
+      if (url.includes("/api/claim-task")) throw new Error("ECONNRESET"); // coordinatorPost -> throw
+      return { ok: false };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const task = await claimNextTask("http://localhost:3100", "agent-1");
+
+    expect(task).toBe(COORDINATOR_UNREACHABLE);
+  });
+
   it("returns null when all claims fail", async () => {
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/api/threads-active")) {

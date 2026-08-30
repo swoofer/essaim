@@ -1174,7 +1174,14 @@ export async function runAgentLoop(
           } else {
             // Work-stealing loop with grace period for late discoveries
             let tasksDone = 0;
-            let emptyRetries = 0;
+            // UN seul compteur de « pas de progrès » (pool vide OU coordinator
+            // injoignable), plus un flag : si l'injoignabilité est survenue AU
+            // MOINS UNE FOIS dans la fenêtre de réessai, on sort en ROUGE. Deux
+            // compteurs séparés créaient une COURSE — pour un coordinator qui
+            // flappe (alternance injoignable/vide), le premier à atteindre son
+            // seuil décidait rouge OU vert de façon non déterministe (#151).
+            let noProgressRetries = 0;
+            let sawUnreachable = false;
             // Laissé à 3, contre mon intuition — et c'est la mesure qui a
             // tranché. Le garde-fou isWorkItem() supprime une temporisation
             // ACCIDENTELLE : avant, un agent arrivé en execute avant ses pairs
@@ -1186,13 +1193,8 @@ export async function runAgentLoop(
             // (« 1 tasks done » x4), et le second cycle seul trouve le pool
             // vide. Porter le budget à 6 aurait ajouté 30 s d'attente par
             // agent et par cycle pour un problème qui ne se manifeste pas.
-            const MAX_EMPTY_RETRIES = 3;
+            const MAX_NO_PROGRESS_RETRIES = 3;
             const EMPTY_WAIT_MS = 10_000;  // 10s between retries
-            // Un coordinator injoignable est retenté à la même cadence, mais mène
-            // à un exitReason d'ERREUR (pas "done") : ~30s de silence = mort, pas
-            // « travail fini » (#151).
-            const MAX_UNREACHABLE_RETRIES = 3;
-            let unreachableRetries = 0;
 
             logger.info(`Work-stealing loop starting (maxTurns=${maxTurns})`);
 
@@ -1249,40 +1251,36 @@ export async function runAgentLoop(
               logger.debug(`Work-stealing: attempting claim (turn ${turnsCount}/${maxTurns}, done=${tasksDone})`);
               const task = await claimNextTask(config.coordinatorUrl, config.agentId);
 
-              // Coordinator INJOIGNABLE ≠ piscine vide (#151). fetchActiveThreads
-              // ne rend jamais `null` pour un pool vide (c'est `[]`) ; ce cas
-              // signale un coordinator muet. Après N essais, on SORT en erreur —
-              // JAMAIS "done" (sinon un coordinator mort passe pour un run réussi,
-              // rapport vert). Le rapport devient rouge via orchestrator (≠"done").
-              if (task === COORDINATOR_UNREACHABLE) {
-                unreachableRetries++;
-                if (unreachableRetries > MAX_UNREACHABLE_RETRIES) {
-                  logger.error(`Work-stealing: coordinator injoignable après ${MAX_UNREACHABLE_RETRIES} tentatives — abandon (rapport rouge)`);
-                  exitReason = "coordinator_unreachable";
+              // Pas de tâche : soit la piscine est vide (`null`), soit le
+              // coordinator est INJOIGNABLE (COORDINATOR_UNREACHABLE #151). On
+              // retente les deux à la même cadence, avec UN seul compteur — mais
+              // si l'injoignabilité est survenue au moins une fois dans la fenêtre,
+              // on sort en ROUGE ("coordinator_unreachable"), jamais "done" (un
+              // coordinator mort/flappant n'est pas un travail fini). Un pool
+              // constamment vide (jamais injoignable) sort en "done".
+              if (task === COORDINATOR_UNREACHABLE || !task) {
+                if (task === COORDINATOR_UNREACHABLE) sawUnreachable = true;
+                noProgressRetries++;
+                if (noProgressRetries > MAX_NO_PROGRESS_RETRIES) {
+                  if (sawUnreachable) {
+                    logger.error(`Work-stealing: coordinator injoignable pendant la fenêtre de réessai — abandon (rapport rouge)`);
+                    exitReason = "coordinator_unreachable";
+                  } else {
+                    logger.info(`Work-stealing: pool empty after ${MAX_NO_PROGRESS_RETRIES} retries — done`);
+                    poolExhaustedLastCycle = true;
+                  }
                   break;
                 }
-                logger.warn(`Work-stealing: coordinator injoignable, attente (essai ${unreachableRetries}/${MAX_UNREACHABLE_RETRIES})...`);
+                const why = task === COORDINATOR_UNREACHABLE ? "coordinator injoignable" : "pool vide";
+                logger.info(`Work-stealing: ${why}, attente (essai ${noProgressRetries}/${MAX_NO_PROGRESS_RETRIES})...`);
                 await new Promise((r) => setTimeout(r, EMPTY_WAIT_MS));
                 await processInterrupts();
                 continue;
               }
 
-              if (!task) {
-                emptyRetries++;
-                if (emptyRetries > MAX_EMPTY_RETRIES) {
-                  logger.info(`Work-stealing: pool empty after ${MAX_EMPTY_RETRIES} retries — done`);
-                  poolExhaustedLastCycle = true;
-                  break;
-                }
-                logger.info(`Work-stealing: pool empty, waiting (retry ${emptyRetries}/${MAX_EMPTY_RETRIES})...`);
-                await new Promise((r) => setTimeout(r, EMPTY_WAIT_MS));
-                await processInterrupts();
-                continue;
-              }
-
-              // Reset retries on successful claim
-              emptyRetries = 0;
-              unreachableRetries = 0;
+              // Reset on successful claim (progrès réel)
+              noProgressRetries = 0;
+              sawUnreachable = false;
               claimedThreadIds.add(task.id);
 
               logger.info(`Work-stealing: claimed "${task.description.slice(0, 80)}"`);

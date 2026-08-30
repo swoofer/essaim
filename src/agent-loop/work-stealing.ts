@@ -189,7 +189,16 @@ async function fetchActiveThreads(coordinatorUrl: string): Promise<Array<Record<
     });
     if (!resp.ok) { log.warn("fetchActiveThreads: threads-active failed", { status: resp.status }); return null; }
     const data = await resp.json();
-    return Array.isArray(data) ? data : [];
+    // Un 200 à corps NON-tableau (`{"error":"database is locked"}`, `null`,
+    // `{"threads":[…]}`…) signale un coordinator qui répond mais dysfonctionne :
+    // c'est de l'injoignabilité (-> null), PAS une piscine vide (-> []). Sinon
+    // un coordinator mourant renvoyant 200+erreur passait pour « pool drainé »,
+    // rapport vert (#151, faux vert résiduel).
+    if (!Array.isArray(data)) {
+      log.warn("fetchActiveThreads: 200 à corps non-tableau — traité comme injoignable", { sample: JSON.stringify(data).slice(0, 200) });
+      return null;
+    }
+    return data;
   } catch (err) {
     log.warn("fetchActiveThreads: coordinator unreachable", { error: (err as Error).message });
     return null;
@@ -326,6 +335,16 @@ export async function claimNextTask(
     }
   }
 
+  // Panne du chemin d'ÉCRITURE : la lecture (threads-active) marche et livre des
+  // candidats, mais chaque POST claim-task JETTE (500 / fetch rejeté). On compte
+  // les tentatives réellement lancées et celles qui ont jeté : si des candidats
+  // existaient et que TOUTES ont jeté (aucune réponse), c'est de l'injoignabilité,
+  // pas une piscine vide — sinon un coordinator lisible-mais-non-inscriptible
+  // rendait un faux vert, travail réel abandonné (#151). Un `success:false`
+  // (course perdue) PROUVE au contraire la joignabilité et ne compte pas.
+  let claimsAttempted = 0;
+  let claimsThrew = 0;
+
   // Try to claim each open, unclaimed thread
   for (const thread of threads) {
     if (thread.status !== "open") continue;
@@ -354,6 +373,7 @@ export async function claimNextTask(
     const threadId = thread.id as string;
     const subject = (thread.subject as string) || "?";
     try {
+      claimsAttempted++;
       const result = await coordinatorPost(`${coordinatorUrl}/api/claim-task`, {
         thread_id: threadId,
         agent_id: agentId,
@@ -396,12 +416,19 @@ export async function claimNextTask(
         busyFiles = computeBusyFiles(refreshed.filter((t) => t.status === "open"), agentId);
       }
     } catch (err) {
+      claimsThrew++;
       log.warn(`claim error: ${threadId}`, { error: (err as Error).message });
     }
   }
 
   if (skippedAnnounces > 0) {
     log.info(`claimNextTask: ${skippedAnnounces} annonce(s) de coordination écartée(s) — pas des items de travail`);
+  }
+  // Des candidats existaient mais TOUS les claims ont jeté (aucune réponse) :
+  // chemin d'écriture mort -> injoignable, pas « rien à réclamer ».
+  if (claimsAttempted > 0 && claimsThrew === claimsAttempted) {
+    log.warn(`claimNextTask: ${claimsThrew}/${claimsAttempted} claims ont jeté — coordinator injoignable en écriture`);
+    return COORDINATOR_UNREACHABLE;
   }
   log.debug("claimNextTask: nothing to claim");
   return null;
