@@ -256,3 +256,34 @@ describe('rapport : identité + copie dans le runDir (#164)', () => {
     expect(mdPath).toMatch(/report-\d+\.md$/);
   });
 });
+
+// #162 — le registre par tâche atteint le rapport : un refus du garde-fou de
+// falsifiabilité porte son MOTIF dans reports/<run_id>.md (DF5), au lieu d'un
+// log.warn volatil + un post dans un thread éphémère.
+describe('registre des tâches au rapport (#162)', () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('un refus ⇒ id, agent, verdict ET motif dans le rapport', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep162-'));
+    const agent: AgentResult = {
+      agent_id: 'a1', agent_name: 'Alpha', exit_code: 0, diff: '', stdout_length: 0,
+      task_records: [
+        { threadId: 't-42', verdict: 'refused', reason: 'aucun fichier de test modifié' },
+        { threadId: 't-43', verdict: 'done', reason: 'corrigé le null check' },
+      ],
+    };
+    const md = readFileSync(writeReport([runResult({}, [agent])], dir), 'utf8');
+    expect(md).toContain('Registre des tâches');
+    expect(md).toContain('t-42');                          // id
+    expect(md).toContain('Alpha');                         // agent
+    expect(md).toContain('refused');                       // verdict
+    expect(md).toContain('aucun fichier de test modifié'); // LE compteur : le MOTIF
+  });
+
+  it('aucun task_records ⇒ pas de section (pas de bruit)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'rep162b-'));
+    const md = readFileSync(writeReport([runResult()], dir), 'utf8');
+    expect(md).not.toContain('Registre des tâches');
+  });
+});

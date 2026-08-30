@@ -89,6 +89,7 @@ function makeLoopResult(agentId: string, exitReason: AgentLoopResult["exitReason
     agentId,
     exitReason,
     summary: "ok",
+    taskRecords: [],
     totalCostUsd: 0,
     turnsCount: 1,
     mqttMessagesProcessed: 0,

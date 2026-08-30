@@ -614,6 +614,7 @@ async function _runProjectBody(
       agentResults[i].cost_by_model = loopResult.costByModel;
       agentResults[i].turn_details = loopResult.turnDetails;
       agentResults[i].exit_reason = loopResult.exitReason;
+      agentResults[i].task_records = loopResult.taskRecords;
     }
   }
 

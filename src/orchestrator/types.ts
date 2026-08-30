@@ -1,7 +1,7 @@
 // src/types.ts
 import type { ChildProcess } from "child_process";
 import type { MiniProjectSecurity, SecurityRunLedger } from "../security/types.js";
-import type { TurnDetail, ExitReason } from "../agent-loop/agent-loop.js";
+import type { TurnDetail, ExitReason, TaskRecord } from "../agent-loop/agent-loop.js";
 
 export interface AgentConfig {
   id: string;
@@ -165,6 +165,10 @@ export interface AgentResult {
   // Why the loop stopped. exit_code alone cannot tell "died before spending
   // anything" from "spent, then died".
   exit_reason?: ExitReason;
+  // Registre par tâche réclamée (#162) : id, verdict (done/refused/aborted) et
+  // motif. Porte au rapport les refus du garde-fou, aujourd'hui seulement logués
+  // et postés dans un thread éphémère — ni l'un ni l'autre n'atteint le rapport.
+  task_records?: TaskRecord[];
 }
 
 export interface ProjectContext {

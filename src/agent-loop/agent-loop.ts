@@ -112,10 +112,22 @@ export interface TurnDetail {
   compactionPostTokens: number;
 }
 
+// Registre d'UNE tâche réclamée (#162) : chaque thread réclamé finit en done,
+// refused (garde-fou de falsifiabilité) ou aborted (pas de DONE:). Le `reason`
+// porte le résumé (done) ou le MOTIF du refus/abandon — pour que le rapport dise
+// POURQUOI, au lieu d'un log.warn volatil et d'un post dans un thread éphémère.
+export interface TaskRecord {
+  threadId: string;
+  verdict: "done" | "refused" | "aborted";
+  reason: string;
+}
+
 export interface AgentLoopResult {
   agentId: string;
   exitReason: ExitReason;
   summary: string;
+  // Une entrée par tâche réclamée : id, verdict, motif (#162).
+  taskRecords: TaskRecord[];
   totalCostUsd: number;
   turnsCount: number;
   mqttMessagesProcessed: number;
@@ -577,6 +589,9 @@ export async function runAgentLoop(
   // semis totalement perdu suffit à teindre le run en rouge. Le garde #151
   // (unreachableStreak) ne le voit pas — il ne surveille que le chemin de CLAIM.
   let seedWriteFailed = false;
+  // Registre par tâche (#162) : rempli aux points de règlement (settleDone) et
+  // d'abandon (pas de DONE:), remonté dans AgentLoopResult puis au rapport.
+  const taskRecords: TaskRecord[] = [];
   let summary = "";
   // ── Token + cost diagnostics ──────────────────────────────────────────
   const totalTokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
@@ -1416,10 +1431,12 @@ export async function runAgentLoop(
                   // test » sur des tâches reprises en boucle.
                   await postRefusal(config, task.id, verdict.reason);
                   await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
+                  taskRecords.push({ threadId: task.id, verdict: "refused", reason: verdict.reason });
                   return;
                 }
                 logger.info(`Work-stealing: completed${after} — "${taskSummary.slice(0, 80)}"`);
                 await completeTask(config.coordinatorUrl, task.id, config.agentId, taskSummary);
+                taskRecords.push({ threadId: task.id, verdict: "done", reason: taskSummary.slice(0, 140) });
                 // La base ne survit PAS à la complétion : elle n'existe que
                 // pour recoller les tentatives d'un thread INACHEVÉ. Sur refus,
                 // au contraire, on la garde — c'est tout l'objet du correctif.
@@ -1480,6 +1497,7 @@ export async function runAgentLoop(
                     logger.warn(`Work-stealing: aborting task after retry (no DONE:) — unclaiming thread=${task.id} subtype=${retryResp.subtype ?? "?"}`);
                     await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
                     claimedThreadIds.delete(task.id);
+                    taskRecords.push({ threadId: task.id, verdict: "aborted", reason: `pas de DONE: après reprise (${retryResp.subtype ?? "?"})` });
                   }
                 } else {
                   logger.error("Work-stealing: still rate limited after wait — stopping");
@@ -1506,6 +1524,7 @@ export async function runAgentLoop(
                 logger.warn(`Work-stealing: aborting task (no DONE: marker) — unclaiming thread=${task.id} subtype=${resp.subtype ?? "?"}`);
                 await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
                 claimedThreadIds.delete(task.id);
+                taskRecords.push({ threadId: task.id, verdict: "aborted", reason: `pas de DONE: (${resp.subtype ?? "?"})` });
               }
             }
             // Réconcilie l'injoignabilité à TOUTE sortie de boucle, pas seulement
@@ -1643,6 +1662,7 @@ export async function runAgentLoop(
     agentId: config.agentId,
     exitReason,
     summary,
+    taskRecords: taskRecords.slice(),
     totalCostUsd: totalCost,
     turnsCount,
     mqttMessagesProcessed,
