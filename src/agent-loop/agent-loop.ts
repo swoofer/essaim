@@ -1175,13 +1175,16 @@ export async function runAgentLoop(
             // Work-stealing loop with grace period for late discoveries
             let tasksDone = 0;
             // UN seul compteur de « pas de progrès » (pool vide OU coordinator
-            // injoignable), plus un flag : si l'injoignabilité est survenue AU
-            // MOINS UNE FOIS dans la fenêtre de réessai, on sort en ROUGE. Deux
-            // compteurs séparés créaient une COURSE — pour un coordinator qui
-            // flappe (alternance injoignable/vide), le premier à atteindre son
-            // seuil décidait rouge OU vert de façon non déterministe (#151).
+            // injoignable) décide QUAND abandonner ; un compteur d'injoignabilités
+            // dans la fenêtre décide du VERDICT. >= 2 injoignabilités => ROUGE
+            // ("coordinator_unreachable"), sinon un pool constamment vide => "done".
+            // Un seuil de 2 (et non 1) évite qu'UN blip transitoire en fin de drain
+            // ne bascule un run terminé en faux rouge, tout en attrapant un
+            // coordinator mort ou qui flappe. Deux compteurs séparés créaient une
+            // COURSE non déterministe rouge/vert ; ici un seul décide (#151).
+            const MIN_UNREACHABLE_FOR_RED = 2;
             let noProgressRetries = 0;
-            let sawUnreachable = false;
+            let unreachableStreak = 0;
             // Laissé à 3, contre mon intuition — et c'est la mesure qui a
             // tranché. Le garde-fou isWorkItem() supprime une temporisation
             // ACCIDENTELLE : avant, un agent arrivé en execute avant ses pairs
@@ -1259,11 +1262,11 @@ export async function runAgentLoop(
               // coordinator mort/flappant n'est pas un travail fini). Un pool
               // constamment vide (jamais injoignable) sort en "done".
               if (task === COORDINATOR_UNREACHABLE || !task) {
-                if (task === COORDINATOR_UNREACHABLE) sawUnreachable = true;
+                if (task === COORDINATOR_UNREACHABLE) unreachableStreak++;
                 noProgressRetries++;
                 if (noProgressRetries > MAX_NO_PROGRESS_RETRIES) {
-                  if (sawUnreachable) {
-                    logger.error(`Work-stealing: coordinator injoignable pendant la fenêtre de réessai — abandon (rapport rouge)`);
+                  if (unreachableStreak >= MIN_UNREACHABLE_FOR_RED) {
+                    logger.error(`Work-stealing: coordinator injoignable (${unreachableStreak}×) pendant la fenêtre de réessai — abandon (rapport rouge)`);
                     exitReason = "coordinator_unreachable";
                   } else {
                     logger.info(`Work-stealing: pool empty after ${MAX_NO_PROGRESS_RETRIES} retries — done`);
@@ -1280,7 +1283,7 @@ export async function runAgentLoop(
 
               // Reset on successful claim (progrès réel)
               noProgressRetries = 0;
-              sawUnreachable = false;
+              unreachableStreak = 0;
               claimedThreadIds.add(task.id);
 
               logger.info(`Work-stealing: claimed "${task.description.slice(0, 80)}"`);
@@ -1483,6 +1486,15 @@ export async function runAgentLoop(
                 await unclaimTask(config.coordinatorUrl, task.id, config.agentId);
                 claimedThreadIds.delete(task.id);
               }
+            }
+            // Réconcilie l'injoignabilité à TOUTE sortie de boucle, pas seulement
+            // au seuil : les sorties par budget (« plus le temps de réclamer ») et
+            // par MQTT-idle font un `break` nu qui laisserait exitReason="done".
+            // Si le coordinator a été injoignable >= 2× dans la fenêtre en cours,
+            // le run n'est PAS « fini » (faux vert) — il est rouge (#151).
+            if (unreachableStreak >= MIN_UNREACHABLE_FOR_RED && exitReason === "done") {
+              logger.error(`Work-stealing: coordinator injoignable (${unreachableStreak}×) à la sortie de boucle — rapport rouge`);
+              exitReason = "coordinator_unreachable";
             }
             logger.info(`Work-stealing: ${tasksDone} tasks done`);
             tasksDoneLastCycle += tasksDone;

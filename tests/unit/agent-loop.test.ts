@@ -721,6 +721,36 @@ describe("runAgentLoop — phased mode", () => {
     expect(result.exitReason).not.toBe("done");
   });
 
+  it("UN SEUL blip d'injoignabilité dans un drain propre → reste 'done' (pas de faux rouge, seuil ≥2, #151)", async () => {
+    vi.useFakeTimers();
+
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([
+      { id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+    mockPostDiscoveries.mockResolvedValue([
+      { id: "t-1", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" },
+    ]);
+
+    // Drain propre avec UN blip transitoire : vide, vide, injoignable(1×), vide…
+    // 1 injoignabilité < seuil 2 -> le run est réellement drainé -> "done", pas
+    // un faux rouge sur un simple hoquet du coordinator.
+    const seq: Array<null | "coordinator_unreachable"> = [null, null, "coordinator_unreachable", null];
+    let i = 0;
+    mockClaimNextTask.mockImplementation(async () => (i < seq.length ? seq[i++] : null));
+
+    const loopPromise = runAgentLoop(makePhasedConfig(), silentLogger);
+    for (let k = 0; k < 7; k++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    const result = await loopPromise;
+
+    expect(result.exitReason).toBe("done");
+  });
+
   it("claims and executes tasks in work-stealing loop", async () => {
     vi.useFakeTimers();
 
