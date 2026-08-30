@@ -61,7 +61,8 @@ describe("writeReport — le tableau ne promet plus un accord qu'il n'a pas mesu
     expect(md).toContain("| Threads ouverts | 4 |");
     expect(md).toContain("| Consensus (approuvé par tous) | 9 |");
     expect(md).toContain("| Auto-résolus (aucun agent concerné) | 0 |");
-    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
+    // Sans état final autoritaire, l'estimation SSE reste (seule source), relibellée (#154).
+    expect(md).toContain("| Sans consensus (estimation SSE : timeout/empoisonnés/abandonnés) | 4 |");
   });
 });
 
@@ -92,7 +93,9 @@ describe("writeReport — état final du coordinator (threads-summary) reste hor
     // 4 (threads_opened, la source SSE de runReel()), pas 9 (finalState.total).
     expect(md).toContain("| Threads ouverts | 4 |");
     expect(md).toContain("| Consensus (approuvé par tous) | 2 |");
-    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
+    // Avec l'état final autoritaire présent, l'estimation SSE « Sans consensus »
+    // est RETIRÉE : elle contredirait le footnote (empoisonnés/annulés) — #154.
+    expect(md).not.toContain("Sans consensus");
   });
 
   it("rend le statut 'poisoned' visible dans la ligne de note — jusqu'ici structurellement invisible au rapport", () => {
@@ -103,28 +106,26 @@ describe("writeReport — état final du coordinator (threads-summary) reste hor
     expect(md).toMatch(/6/);
   });
 
-  // Finding critique (round 1) : un calcul antérieur faisait
-  // `Math.max(0, finalState.resolved - consensus - autoResolved)`, mélangeant
-  // le tally run-scopé de threads_final avec des compteurs SSE NON scopés par
-  // run. Sur un coordinateur partagé, un thread_resolved d'un run CONCURRENT
-  // peut gonfler consensus/auto-résolus bien au-delà de finalState.resolved —
-  // reproduit ici en donnant à la base un total de seulement 3 threads pour
-  // CE run, contre un compteur SSE de consensus à 9. L'ancien calcul aurait
-  // donné 1 + 0 + 0 + 0 + max(0, 2 - 9 - 0) = 1 : un nombre plus petit et
-  // faux qui efface silencieusement les vrais threads sans consensus — le
-  // même bug que celui déjà corrigé dans metrics.ts (voir computeMetrics).
-  it("des compteurs SSE dépassant le total de la base n'effacent pas « Sans consensus »", () => {
+  // #154 — aucune paire de nombres incompatibles dans le même rapport. Quand
+  // l'état final autoritaire est là et dit « 0 empoisonné, 0 annulé », mais que
+  // l'estimation SSE (fenêtrée, contaminée par un coordinateur partagé) prétend
+  // « 4 sans consensus », les deux se contrediraient. La ligne SSE est donc
+  // RETIRÉE : seul le footnote autoritaire parle.
+  it("estimation SSE contradictoire vs footnote autoritaire : la ligne « Sans consensus » est retirée (#154)", () => {
     const base = runReel();
     base.coordinator_metrics.threads_resolved_consensus = 9;
     base.coordinator_metrics.threads_auto_resolved = 0;
-    base.coordinator_metrics.threads_without_consensus = 4; // estimation SSE réelle
+    base.coordinator_metrics.threads_without_consensus = 4; // estimation SSE contaminée
     base.coordinator_metrics.threads_final = { total: 3, open: 1, resolving: 0, resolved: 2, cancelled: 0, poisoned: 0 };
 
     dir = mkdtempSync(join(tmpdir(), "rep-outcomes-contam-"));
     const md = readFileSync(writeReport([base], dir), "utf8");
 
-    expect(md).toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 4 |");
-    expect(md).not.toContain("| Sans consensus (timeout, empoisonnés, abandonnés) | 1 |");
+    // Aucune ligne « Sans consensus » : pas de « 4 » qui contredise « poisoned 0 ».
+    expect(md).not.toContain("Sans consensus");
+    // Le footnote autoritaire donne le vrai décompte (0 empoisonné).
+    expect(md).toMatch(/faisant autorité/);
+    expect(md).toMatch(/0 empoisonné/);
   });
 
   // Finding critique (round 2) : "Threads ouverts" était substitué par
