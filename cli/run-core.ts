@@ -5,6 +5,8 @@ import { getCatalogRoots } from "./bce-resolver.js";
 import { runProject } from "../src/orchestrator/orchestrator.js";
 import { writeReport } from "../src/orchestrator/reporter.js";
 import { loadConfig } from "./config.js";
+import { runDoctor, formatDoctorReport } from "../src/orchestrator/doctor.js";
+import { realDoctorDeps } from "./doctor.js";
 import type { RunResult } from "../src/orchestrator/types.js";
 
 /**
@@ -89,6 +91,20 @@ Catalogues consultés : ${roots}`,
   // When none is set, runProject starts an in-process coordinator (Strategy A).
   loadConfig(); // ensure config warning is shown (side-effect only)
   const resolvedCoordinatorUrl = opts.coordinatorUrl ?? process.env.COORDINATOR_URL;
+
+  // #148 — préflight AVANT que le coordinator ne démarre. Une dépendance
+  // critique manquante (Claude Code, catalogue) doit produire un diagnostic
+  // lisible + une commande d'installation, pas un stack trace en plein run ni un
+  // « 0 findings » trompeur. On respecte un COORDINATOR_URL explicite pour le
+  // test des ports. ESSAIM_SKIP_DOCTOR=1 court-circuite (CI, cas limites).
+  if (process.env.ESSAIM_SKIP_DOCTOR !== "1") {
+    const deps = realDoctorDeps(projectPath);
+    const report = runDoctor({ ...deps, coordinatorUrl: resolvedCoordinatorUrl });
+    if (!report.ok) {
+      console.error(formatDoctorReport(report));
+      throw new Error("essaim doctor: une dépendance critique manque — corrigez les points ✗ ci-dessus (ou ESSAIM_SKIP_DOCTOR=1 pour forcer).");
+    }
+  }
 
   // Build project — pass projectPath so .essaim/templates/ overrides apply
   const project = buildProject(

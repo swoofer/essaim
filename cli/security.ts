@@ -114,19 +114,28 @@ export function createSecurityCommand(): Command {
     .action(async (opts: SecurityCliOpts) => {
       const projectPath = resolve(opts.project);
       const { security, triageOnly } = assembleSecurity(opts, projectPath);
-      const result = await executeRun({
-        template: "sentinelle",
-        project: opts.project,
-        agentCount: opts.agents ? parseInt(opts.agents, 10) : undefined,
-        timeout: opts.timeout ? parseInt(opts.timeout, 10) : undefined,
-        cleanup: opts.cleanup,
-        dryRun: opts.dryRun,
-        setParams: {},
-        coordinatorUrl: opts.coordinatorUrl,
-        catalogs: [],
-        security,
-        triageOnly,
-      });
+      // Comme cli/run.ts : les échecs de préflight (doctor, template inconnu,
+      // pas un dépôt git) sont des `throw` — on imprime e.message et on sort en
+      // 1, jamais un stack trace nu (l'anti-but même de #148).
+      let result;
+      try {
+        result = await executeRun({
+          template: "sentinelle",
+          project: opts.project,
+          agentCount: opts.agents ? parseInt(opts.agents, 10) : undefined,
+          timeout: opts.timeout ? parseInt(opts.timeout, 10) : undefined,
+          cleanup: opts.cleanup,
+          dryRun: opts.dryRun,
+          setParams: {},
+          coordinatorUrl: opts.coordinatorUrl,
+          catalogs: [],
+          security,
+          triageOnly,
+        });
+      } catch (e) {
+        console.error(e instanceof Error ? e.message : String(e));
+        process.exit(1);
+      }
       if (!result) process.exit(0); // --dry-run: executeRun returns undefined, nothing ran
       const code = result.security ? securityExitCode(result.security) : 0;
       process.exit(code);
