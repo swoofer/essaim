@@ -22,19 +22,32 @@ const READ_ONLY_BEHAVIOR = 'read-only-mode';
 // (#1b). Ici, read_only ne couvre donc QUE les lecteurs purs.
 const AUDIT_WRITE_BEHAVIOR = 'audit-output';
 
-function presetIsReadOnly(registry: Registry, preset: string): boolean {
+function presetBehaviors(registry: Registry, preset: string): string[] | null {
   try {
-    const behaviors = resolveBehaviors(
+    return resolveBehaviors(
       { name: 'x', preset, add: [], remove: [], params: {} } as never,
       registry,
     ).behaviors;
-    return behaviors.includes(READ_ONLY_BEHAVIOR) && !behaviors.includes(AUDIT_WRITE_BEHAVIOR);
   } catch {
     // Preset introuvable / registry incomplet : runPipeline jettera plus loin
-    // avec un message clair. Ici on ne DECIDE rien — on laisse read_only a false
-    // et le vrai chemin echoue, plutot que de relacher la contrainte en silence.
-    return false;
+    // avec un message clair. Ici on ne DECIDE rien — on laisse la contrainte a
+    // false et le vrai chemin echoue, plutot que de relacher en silence.
+    return null;
   }
+}
+
+function presetIsReadOnly(registry: Registry, preset: string): boolean {
+  const b = presetBehaviors(registry, preset);
+  return b !== null && b.includes(READ_ONLY_BEHAVIOR) && !b.includes(AUDIT_WRITE_BEHAVIOR);
+}
+
+// Preset audit-output = lecture seule SAUF les chemins d'audit. Le hook
+// PreToolUse (émis par le behavior) path-scope Write/Edit ; en plus, l'agent-loop
+// retire Bash (que le hook ne couvre pas). Distinct de read_only (lecteur pur).
+// (#177)
+function presetIsAuditOutput(registry: Registry, preset: string): boolean {
+  const b = presetBehaviors(registry, preset);
+  return b !== null && b.includes(READ_ONLY_BEHAVIOR) && b.includes(AUDIT_WRITE_BEHAVIOR);
 }
 
 // Import the orchestrator types for MiniProject compatibility
@@ -51,6 +64,7 @@ interface BceMiniProject {
     profile: 'codeur' | 'communicant';
     role?: string;
     read_only?: boolean;
+    audit_output?: boolean; // #177 : preset audit-output (Bash retiré, Write/Edit path-scopés par hook)
     modules?: string[]; // forwarded to coordinator registration (respondent matching)
     launch_delay?: number;
     // BCE-assembled outputs — consumed by orchestrator to write .claude/ files
@@ -191,6 +205,7 @@ export function buildProjectFromBce(
         profile: agentDef.profile,
         role: agentDef.idPrefix,
         read_only: presetIsReadOnly(registry, agentDef.preset),
+        audit_output: presetIsAuditOutput(registry, agentDef.preset),
         modules: registeredModules,
         launch_delay: agentDef.launch_delay,
         hooks: result.output.hooks,

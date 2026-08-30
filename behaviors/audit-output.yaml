@@ -8,6 +8,24 @@ params:
     required: false
     description: "Exact paths (relative to project root) the agent may write to — typically audit reports or plan documents. Anything not in this list is refused."
 
+# Le prompt (section 091) DIT à l'agent de n'écrire que `paths` ; ce hook
+# l'IMPOSE. Sous --dangerously-skip-permissions l'allowlist d'outils est
+# indicative — le hook PreToolUse est le seul verrou par-chemin (#177). Il
+# autorise Write/Edit/NotebookEdit uniquement sur `paths`, refuse ailleurs.
+# `paths` (string[]) est sérialisé en UN arg espacé ; le guard word-split.
+# (Bash est retiré de l'outillage audit-output côté agent-loop, pas ici : le
+# matcher PreToolUse câblé par essaim ne cible qu'Edit|Write|NotebookEdit.)
+hooks:
+  pre-tool-use:
+    script: audit_output_guard.sh
+    args:
+      - "{{#each params.paths}}{{this}} {{/each}}"
+    blocking: false
+    # order élevé -> le guard s'exécute EN DERNIER dans le hook pre-tool-use
+    # assemblé : son JSON de décision est la sortie finale sur stdout, non suivi
+    # par un autre hook (activity/check-interrupt) qui pourrait la brouiller.
+    order: 60
+
 sections:
   "091-audit-output":
     prompt: |
