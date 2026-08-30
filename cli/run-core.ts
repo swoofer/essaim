@@ -1,4 +1,5 @@
 import { resolve } from "path";
+import { rmSync } from "fs";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { buildProject, listTemplates } from "../src/orchestrator/template-engine.js";
 import { getCatalogRoots } from "./bce-resolver.js";
@@ -146,6 +147,14 @@ Catalogues consultés : ${roots}`,
     maxQuotaPct: opts.maxQuotaPct,
     coordinatorUrl: resolvedCoordinatorUrl,
   });
-  writeReport([result], "reports");
+  // Rapport ancré sur le dépôt CIBLE (-p), pas le cwd (#158).
+  writeReport([result], resolve(projectPath, "reports"));
+  // --cleanup supprime aussi le runDir (worktrees déjà retirés, branches gardées
+  // par cleanupWorkspaces). Fait ICI, APRÈS le rapport : writeReport a copié le
+  // rapport dans le runDir (#164), mais reports/ en garde l'exemplaire — le
+  // runDir entier peut donc partir sans perdre le livrable ni le rapport (#158).
+  if (opts.cleanup && result.identity?.run_dir) {
+    try { rmSync(result.identity.run_dir, { recursive: true, force: true }); } catch { /* déjà parti / course de teardown */ }
+  }
   return result;
 }

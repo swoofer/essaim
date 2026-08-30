@@ -212,11 +212,13 @@ describe("createWorkspaces — isolation entre deux runs successifs", () => {
 
     cleanupWorkspaces(ws1);
 
-    // 4. le nettoyage LIT la map au lieu de recalculer le nom. Sans l'étape 4,
-    //    `git branch -D` viserait `mini-project-agent-chasseur-1` — inexistante
-    //    depuis que le runId entre dans le nom — échouerait dans le `try {}
-    //    catch {}` vide, et la branche du run 1 survivrait au nettoyage.
-    expect(localBranches()).not.toContain(ws1.branches.get("agent-chasseur-1"));
+    // 4. #158 — le nettoyage retire le WORKTREE de ws1 mais GARDE sa branche :
+    //    c'est le livrable de l'agent (le rapport « Récupérer » propose un
+    //    `git cherry-pick` dessus, #163). Seul le worktree part ; la branche du
+    //    run 1 survit, et celle du run 2 (jamais nettoyé) aussi.
+    expect(fs.existsSync(worktree1)).toBe(false); // worktree retiré
+    expect(localBranches()).toContain(ws1.branches.get("agent-chasseur-1")!); // branche GARDÉE
+    expect(localBranches()).toContain(ws2.branches.get("agent-chasseur-1")!);
   });
 });
 
