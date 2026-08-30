@@ -115,7 +115,15 @@ export function writeReport(results: RunResult[], outputDir: string): string {
     md += `| Threads ouverts | ${cm.threads_opened} |\n`;
     md += `| Consensus (approuvé par tous) | ${cm.threads_resolved_consensus} |\n`;
     md += `| Auto-résolus (aucun agent concerné) | ${cm.threads_auto_resolved} |\n`;
-    md += `| Sans consensus (timeout, empoisonnés, abandonnés) | ${cm.threads_without_consensus} |\n`;
+    // « Sans consensus » est une ESTIMATION SSE (fenêtrée). Quand l'état final
+    // autoritaire (finalState) est là, il donne le vrai décompte empoisonnés/
+    // annulés/résolus dans le footnote : afficher EN PLUS l'estimation SSE créait
+    // une paire de nombres qui se contredisent dans le même rapport (« Sans
+    // consensus : 3 » vs « empoisonnés : 0, annulés : 0 »). On ne la montre donc
+    // que faute d'autorité — sinon le footnote parle seul (#154).
+    if (!finalState) {
+      md += `| Sans consensus (estimation SSE : timeout/empoisonnés/abandonnés) | ${cm.threads_without_consensus} |\n`;
+    }
     md += `| Messages | ${cm.messages_exchanged} |\n`;
     md += `| Introspections | ${cm.introspections_triggered} |\n`;
     md += `| Hot files | ${cm.hot_files.length} |\n`;
