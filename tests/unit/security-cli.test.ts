@@ -66,7 +66,7 @@ describe("securityExitCode (mirrors Strix)", () => {
     return {
       engine: "strix", status: "no_vulns",
       findingsBySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-      ingested: 0, verified: 0, reopened: 0, falsePositives: 0, degraded: false,
+      ingested: 0, ingestFailed: 0, verified: 0, reopened: 0, falsePositives: 0, degraded: false,
       durationMs: 1, license: "Apache-2.0", outOfScopeDropped: 0, suppressed: 0, ...over,
     };
   }
