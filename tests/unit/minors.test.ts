@@ -1,9 +1,10 @@
 // tests/unit/minors.test.ts — minors différés du pilote
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { uniqueReportBase, tscCompilationStatus } from '../../src/orchestrator/reporter.js';
+import { uniqueReportBase, tscCompilationStatus, collectAgentResults } from '../../src/orchestrator/reporter.js';
+import type { WorkspaceResult } from '../../src/orchestrator/types.js';
 
 // #152 — colonne Compilation TRI-ÉTAT, fondée sur le code de sortie de tsc et non
 // sur includes("error") (qui rendait un faux OK quand tsc était injoignable).
@@ -104,5 +105,35 @@ agents:
     count: beaucoup
 `);
     expect(() => loadTemplates(p)).toThrow(/count/);
+  });
+});
+
+// #160 — `npx tsc --noEmit` seulement sur dépôt TS. Un dépôt Go/Python n'a rien à
+// typer : tsc n'y prouve rien et coûte ~10 s/agent. Compteur : dépôt Go ⇒ N/A,
+// et tsc n'est JAMAIS lancé.
+describe('collectAgentResults — tsc seulement sur dépôt TS (#160)', () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function workspaceOf(wsPath: string): WorkspaceResult {
+    // `shared` (pas `worktree`) pour éviter tout `git diff` : on isole la porte tsc.
+    return { type: 'shared', basePath: wsPath, paths: new Map([['a1', wsPath]]), branches: new Map() };
+  }
+
+  it('dépôt NON-TS (pas de tsconfig) ⇒ compilation N/A et tsc JAMAIS lancé', () => {
+    dir = mkdtempSync(join(tmpdir(), 'nots-'));
+    const run = vi.fn(() => ({ code: 0 as number | null, output: '' }));
+    const results = collectAgentResults(workspaceOf(dir), run);
+    expect(run).not.toHaveBeenCalled();                 // LE compteur : pas de tsc sur un dépôt Go
+    expect(results[0].compilation_ok).toBeUndefined();  // colonne N/A, pas OK/FAIL
+  });
+
+  it('dépôt TS (tsconfig présent) ⇒ tsc lancé, statut honoré', () => {
+    dir = mkdtempSync(join(tmpdir(), 'ts-'));
+    writeFileSync(join(dir, 'tsconfig.json'), '{}');
+    const run = vi.fn(() => ({ code: 0 as number | null, output: '' }));
+    const results = collectAgentResults(workspaceOf(dir), run);
+    expect(run).toHaveBeenCalledWith(dir);
+    expect(results[0].compilation_ok).toBe(true);
   });
 });
