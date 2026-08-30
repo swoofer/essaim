@@ -76,10 +76,15 @@ export function launchSolo(args: string[], cwd: string, timeoutMin: number, deps
     return;
   }
 
-  const timer = setTimeout(() => {
-    console.error(`\nTimeout: ${timeoutMin} minutes exceeded. Killing agent.`);
-    child.kill();
-  }, timeoutMin * 60 * 1000);
+  // timeoutMin <= 0 => pas de limite (le .action valide déjà NaN/négatif). Sans
+  // ce garde, `-t 0` posait setTimeout(kill, 0) et tuait l'agent au spawn (#150).
+  const timer: NodeJS.Timeout | undefined =
+    timeoutMin > 0
+      ? setTimeout(() => {
+          console.error(`\nTimeout: ${timeoutMin} minutes exceeded. Killing agent.`);
+          child.kill();
+        }, timeoutMin * 60 * 1000)
+      : undefined;
 
   const onSignal = deps.onSignal ?? ((s, cb) => { process.on(s, cb); });
   onSignal("SIGINT", () => child.kill("SIGINT"));
@@ -89,9 +94,12 @@ export function launchSolo(args: string[], cwd: string, timeoutMin: number, deps
     clearTimeout(timer);
     fail(err.message); // ex. ENOENT : claude absent du PATH
   });
-  child.on("exit", (code) => {
+  child.on("exit", (code, signal) => {
     clearTimeout(timer);
-    deps.exit(code ?? 0);
+    // Un enfant TUÉ (timeout, SIGINT/SIGTERM) émet code=null + un signal : ne
+    // JAMAIS le rapporter comme 0 (faux vert — l'anti-but même de J1). 124 =
+    // convention « timed out / killed ».
+    deps.exit(signal ? 124 : (code ?? 0));
   });
 }
 
@@ -164,17 +172,25 @@ export function createSoloCommand(): Command {
           read_only,
         );
 
+        // Valider le timeout AVANT de lancer : un NaN/négatif poserait un timer
+        // qui tue l'agent au spawn (#150). 0 = pas de limite.
+        const timeoutMin = parseInt(opts.timeout, 10);
+        if (Number.isNaN(timeoutMin) || timeoutMin < 0) {
+          console.error(`Error: --timeout doit être un entier ≥ 0 (0 = pas de limite), reçu « ${opts.timeout} »`);
+          process.exit(1);
+        }
+
         // Diagnostics sur STDERR : stdout est réservé à la sortie de l'agent, donc
         // « 0 octet de prompt sur stdout » quand claude est absent (#150). On
         // n'imprime que la LONGUEUR du prompt, jamais son contenu.
         console.error(`\nSolo mode: ${template}`);
         console.error(`  Project:  ${projectPath}`);
-        console.error(`  Timeout:  ${opts.timeout} minutes`);
+        console.error(`  Timeout:  ${timeoutMin === 0 ? "aucune limite" : `${timeoutMin} minutes`}`);
         console.error(`  Prompt:   ${prompt.length} chars`);
         console.error(`  Tools:    ${args[args.indexOf("--allowedTools") + 1]}`);
         console.error(`\nLaunching Claude Code...\n`);
 
-        launchSolo(args, projectPath, parseInt(opts.timeout, 10), {
+        launchSolo(args, projectPath, timeoutMin, {
           spawn,
           resolveClaudeBin, // honore CLAUDE_BIN
           exit: (code) => process.exit(code),
