@@ -3,6 +3,7 @@ import { listTemplates } from "../src/orchestrator/template-engine.js";
 import { resolve } from "path";
 import { collect, parseSetParams, parseSetFileParams, buildParamTypeMap } from "./params.js";
 import { executeRun } from "./run-core.js";
+import { countDiffLines } from "../src/orchestrator/reporter.js";
 import type { RunResult } from "../src/orchestrator/types.js";
 
 /**
@@ -33,7 +34,18 @@ import type { RunResult } from "../src/orchestrator/types.js";
  */
 export function runExitCode(result: RunResult | undefined): 0 | 1 {
   if (!result || result.agent_results.length === 0) return 0;
-  return result.agent_results.every((a) => a.exit_code !== 0) ? 1 : 0;
+  // Tous les agents ont fini en erreur.
+  if (result.agent_results.every((a) => a.exit_code !== 0)) return 1;
+  // RIEN n'a eu lieu : 0 thread résolu ET 0 ligne de diff MESURÉE -> échec, pas
+  // un faux vert (#153 ; « il ne te dit pas vert quand rien n'a eu lieu »). On
+  // exige que le diff ait été MESURÉ (worktree) : sans mesure (run in-place),
+  // l'absence de diff ne prouve pas l'absence de travail, donc on ne conclut pas.
+  const m = result.coordinator_metrics;
+  const resolved = m.threads_final?.resolved ?? (m.threads_resolved_consensus + m.threads_auto_resolved);
+  const measured = result.agent_results.filter((a) => a.diff_measured);
+  const measuredDiffLines = measured.reduce((sum, a) => sum + countDiffLines(a.diff), 0);
+  if (resolved === 0 && measured.length > 0 && measuredDiffLines === 0) return 1;
+  return 0;
 }
 
 export function createRunCommand(): Command {
@@ -130,8 +142,11 @@ export function createRunCommand(): Command {
         }
         const code = runExitCode(result);
         if (code !== 0) {
+          const allFailed = (result?.agent_results ?? []).every((a) => a.exit_code !== 0);
           console.error(
-            `Aucun agent n'a terminé proprement : les ${result?.agent_results.length ?? 0} agents ont un exit_code non nul — voir la colonne Raison du rapport (error, process_died, mais aussi max_turns ou yielded).`,
+            allFailed
+              ? `Aucun agent n'a terminé proprement : les ${result?.agent_results.length ?? 0} agents ont un exit_code non nul — voir la colonne Raison du rapport (error, process_died, mais aussi max_turns ou yielded).`
+              : `Rien n'a eu lieu : 0 thread résolu et 0 ligne de diff — le run n'a produit aucun résultat mesurable (#153). Voir le rapport.`,
           );
         }
         // Force exit to release the in-process coordinator's HTTP server
