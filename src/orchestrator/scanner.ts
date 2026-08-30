@@ -111,7 +111,14 @@ export function scanProject(projectPath: string): ProjectContext {
     execSync("git rev-parse --is-inside-work-tree", { cwd: absPath, stdio: "pipe" });
     hasGit = true;
     const status = execSync("git status --porcelain", { cwd: absPath, encoding: "utf-8", stdio: "pipe" });
-    isClean = status.trim().length === 0;
+    // Ignore les artefacts qu'essaim écrit LUI-MÊME dans le dépôt cible (#158) :
+    // runs/ (worktrees) et reports/ non suivis ne sont PAS du travail de
+    // l'utilisateur. Sans ce filtre, le 2e run voyait le dépôt « sale » à cause
+    // du run précédent et affichait un faux « uncommitted changes / dirty state »
+    // (trompeur : les worktrees snapshotent HEAD, jamais l'arbre de travail).
+    const ESSAIM_ARTIFACT = /^..\s+"?(runs|reports)\//;
+    const meaningful = status.split("\n").filter((l) => l.trim() && !ESSAIM_ARTIFACT.test(l));
+    isClean = meaningful.length === 0;
   } catch {}
   const sourceFiles = listSourceFiles(absPath, sourceDirs, lang.extensions, 50);
   const modules = findModules(absPath, sourceDirs);
