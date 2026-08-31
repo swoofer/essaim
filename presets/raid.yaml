@@ -20,10 +20,10 @@ params:
       nulles/undefined non gérées, problèmes de concurrence, conditions
       limites dans les boucles, et gestion d'exceptions incorrecte.
 
-      🎯 SCOPE STRICT — cherche UNIQUEMENT dans `tests/sandbox/src/`. Le
-      reste du dépôt (server/, client/, bce/, cli/, dashboard/) est
-      HORS-SUJET. Si tu lis ailleurs que tests/sandbox/, tu gaspilles ton
-      budget de tours.
+      🎯 SCOPE STRICT — cherche UNIQUEMENT dans les répertoires source du
+      projet (listés sous « Contexte du projet »). Le reste (tests,
+      dépendances, config, docs, artefacts de build) est HORS-SUJET. Si tu
+      lis ailleurs, tu gaspilles ton budget de tours.
     # Sonnet + think — plus décisif sur "quand stopper l'exploration" et
     # produit des discoveries mieux ciblées que Haiku pour ce type de chasse aux bugs.
     effort: mid
@@ -39,10 +39,10 @@ params:
       que le bug existe. Inclus un commentaire décrivant le comportement
       attendu vs le comportement actuel.
 
-      🎯 SCOPE STRICT — tu ne lis et ne modifies QUE les fichiers sous
-      `tests/sandbox/` (pour comprendre le bug) et `tests/unit/` (pour
-      y écrire le test). Le reste du dépôt (server/, client/, bce/,
-      cli/, dashboard/) est HORS-SUJET. Ne spawne AUCUN sous-agent.
+      🎯 SCOPE STRICT — tu ne lis QUE les répertoires source du projet (pour
+      comprendre le bug) et tu n'écris le test QUE dans les répertoires de
+      test — tous listés sous « Contexte du projet ». Le reste est HORS-SUJET.
+      Ne spawne AUCUN sous-agent.
     # Sonnet (mid) est suffisant pour écrire un test failing — précédemment
     # à "high" (Opus), l'agent dépensait son budget en exploration avant
     # d'atteindre DONE. Sonnet + scope strict ci-dessus = moins d'excursions.
