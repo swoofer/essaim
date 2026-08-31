@@ -114,7 +114,13 @@ function findModules(projectPath: string, sourceDirs: string[]): string[] {
       if (entry.isDirectory() && !entry.name.startsWith(".")) modules.push(entry.name);
     }
   }
-  return modules;
+  // DÉDUP obligatoire (#159) : la descente monorepo rend UN source_dir par
+  // paquet (packages/*/src), donc un sous-dossier partagé (components/, utils/)
+  // apparaît une fois PAR paquet. `count: per-module` (migrate-phase2) fabrique
+  // alors deux agents `migrator-components` avec le MÊME id → collision de PK
+  // coordinator + maps id-keyées écrasées + faux « Pre-registration incomplete ».
+  // Couvre aussi le cas pré-existant multi-root (src/ + lib/ avec sous-dossiers homonymes).
+  return [...new Set(modules)];
 }
 
 function computeApplicableTemplates(ctx: Omit<ProjectContext, "applicable_templates">): string[] {

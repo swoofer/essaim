@@ -134,4 +134,15 @@ describe("scanner — exclusion par segment + descente monorepo (#159)", () => {
     expect(dirs).toContain("packages/pkg-a/src");
     expect(dirs).toContain("packages/pkg-b/src");
   });
+
+  it("modules DÉDUPLIQUÉS sur un monorepo (sous-dossier partagé) — sinon collision d'IDs", () => {
+    // Deux paquets ayant chacun un `components/` : sans dédup, context.modules
+    // aurait deux « components » → per-module fabrique deux agents au même id.
+    const dir = makeProject({
+      "packages/pkg-a/src/components/a.ts": "export const a = 1;\n",
+      "packages/pkg-b/src/components/b.ts": "export const b = 2;\n",
+    });
+    const modules = scanProject(dir).modules;
+    expect(modules.filter(m => m === "components")).toHaveLength(1);
+  });
 });
