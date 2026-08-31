@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/swoofer/essaim/compare/v0.17.0...v0.17.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **scanner:** exclusion par segment (+ \) et descente monorepo ([#159](https://github.com/swoofer/essaim/issues/159)) ([#203](https://github.com/swoofer/essaim/issues/203)) ([3d7d8ce](https://github.com/swoofer/essaim/commit/3d7d8ceee05894266d753b518777c11c7302eea3))
+
 ## [0.17.0](https://github.com/swoofer/essaim/compare/v0.16.0...v0.17.0) (2026-08-31)
 
 
