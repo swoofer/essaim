@@ -7,7 +7,6 @@ import { createScanCommand } from "./scan.js";
 import { createSecurityCommand } from "./security.js";
 import { createInitCommand } from "./init.js";
 import { createListCommand } from "./list.js";
-import { createSelfUpdateCommand } from "./self-update.js";
 import { createDoctorCommand } from "./doctor.js";
 import { getVersion } from "./version.js";
 
@@ -24,7 +23,6 @@ program.addCommand(createScanCommand());
 program.addCommand(createSecurityCommand());
 program.addCommand(createInitCommand());
 program.addCommand(createListCommand());
-program.addCommand(createSelfUpdateCommand());
 program.addCommand(createDoctorCommand());
 
 program.parse();

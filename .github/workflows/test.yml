@@ -59,16 +59,13 @@ jobs:
           fi
           echo "OK — aucune commande CLI morte."
 
-  # Windows est à la fois la plateforme de développement de ce dépôt et une
-  # cible livrée (release-binaries.yml publie essaim-<version>-win32-x64.tar.gz),
-  # et pourtant rien ne l'exerçait ici : les deux jobs étaient sur ubuntu-latest.
-  # C'est ce trou qui a laissé passer le résolveur de plateforme de
-  # cli/self-update.ts, qui servait l'artefact Linux aux utilisateurs Windows.
+  # Windows est la plateforme de développement de ce dépôt et une cible npm
+  # supportée, et pourtant rien ne l'exerçait ici : les deux jobs étaient sur
+  # ubuntu-latest. On teste donc la matrice ubuntu + windows.
   test:
     strategy:
-      # Même raison que dans release-binaries.yml : sans ceci, l'échec d'UNE
-      # jambe annule l'autre, et on perd l'information qui compte — la
-      # régression est-elle globale ou spécifique à Windows ?
+      # Sans ceci, l'échec d'UNE jambe annule l'autre, et on perd l'information
+      # qui compte — la régression est-elle globale ou spécifique à Windows ?
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -85,9 +82,8 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      # Meme drapeau que release-binaries.yml : la jambe qui VERIFIE s'installe
-      # comme la jambe qui LIVRE, sinon un vert ici ne dit plus rien de la
-      # release. `pnpm.onlyBuiltDependencies` (package.json) est une
+      # La jambe qui VERIFIE s'installe comme la publication npm, sinon un vert
+      # ici ne dit plus rien de la release. `pnpm.onlyBuiltDependencies` (package.json) est une
       # autorisation permanente de compiler `better-sqlite3` — transitif via
       # mcp-coordinator — et c'est cette compilation qui a fait tomber la 0.12.0
       # sur Windows, faute de Visual Studio. Elle est inoffensive AUJOURD'HUI

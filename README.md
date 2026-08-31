@@ -222,7 +222,7 @@ Model selection is phase-aware: each phase requests an effort level, the orchest
 
 ## CLI
 
-essaim ships a CLI binary. All commands:
+essaim is a CLI, installed via npm (`npm install -g essaim`). All commands:
 
 | Command | Description |
 |---------|-------------|
@@ -233,7 +233,6 @@ essaim ships a CLI binary. All commands:
 | `essaim security [-p path] [--engine list] [--scan-mode mode] [--scope-mode mode] [--diff-base ref] [--authorize] [--secrets-file path] [--scan-timeout min] [--no-require-findings] [--triage-only] [--agents N] [--timeout min] [--cleanup] [--dry-run] [--coordinator-url url]` | Scan for security findings, seed the coordinator, and let the swarm fix them (auto-fix on branches). Runs the `sentinelle` template; engines are out-of-process adapters (v1: Strix). |
 | `essaim init [path] [--url url] [--name name] [--modules list] [--security]` | Install hooks + MCP config on a project. `--security` also scaffolds the security config + `.gitignore`. |
 | `essaim list` | List the templates the CLI ships with |
-| `essaim self-update` | Update the native binary to the latest release (macOS/Linux). On Windows it refuses and prints the manual route — `npm install -g essaim@latest`, or the `win32-x64` tarball — because Windows locks the running executable. |
 
 ### Examples
 
