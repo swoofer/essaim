@@ -112,6 +112,9 @@ export function createSecurityCommand(): Command {
     .option("--dry-run", "Preview without launching")
     .option("--coordinator-url <url>", "Coordinator URL (loopback only in v1)")
     .action(async (opts: SecurityCliOpts) => {
+      // #170 — essaim security est EXPÉRIMENTAL (v1, un seul moteur). Le dire une
+      // fois au lancement : les findings demandent une revue humaine.
+      console.error("⚠️  essaim security est EXPÉRIMENTAL (v1, moteur Strix) — relis les findings avant d'agir dessus.");
       const projectPath = resolve(opts.project);
       const { security, triageOnly } = assembleSecurity(opts, projectPath);
       // Comme cli/run.ts : les échecs de préflight (doctor, template inconnu,

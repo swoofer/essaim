@@ -40,6 +40,23 @@ describe("runSecurityScan", () => {
     expect(out.degraded).toBe(true);
   });
 
+  it("moteur indisponible (healthCheck KO) → error/degraded, run() JAMAIS appelé, pas « 0 findings » (#170)", async () => {
+    let runCalled = false;
+    const down: EngineAdapter = {
+      capabilities: { id: "strix" as EngineId, displayName: "strix", modes: ["sast"], requiresRunningTarget: false, supportsDiffScope: true, transport: "process", license: "MIT" },
+      async healthCheck() { return { ok: false, detail: "Strix CLI not found — install with: pip install strix-agent" }; },
+      async run() { runCalled = true; return { engine: "strix" as EngineId, status: "no_vulns", findings: [], startedAt: "", finishedAt: "", durationMs: 0 }; },
+    };
+    const reg = createRegistry();
+    reg.register(down);
+    const out = await runSecurityScan(reg, ["strix"] as EngineId[], scope, new AbortController().signal);
+    expect(runCalled).toBe(false);                       // le scan n'a PAS tourné (sinon « 0 findings » faux clean)
+    expect(out.degraded).toBe(true);                     // degraded → exit rouge, pas un clean
+    expect(out.results[0].status).toBe("error");
+    expect(out.results[0].error?.message).toContain("pip install strix-agent");
+    expect(out.findings).toHaveLength(0);
+  });
+
   it("degraded=true and no throw when an adapter's run() itself rejects", async () => {
     const reg = createRegistry();
     const throwing = adapter("strix", {});
