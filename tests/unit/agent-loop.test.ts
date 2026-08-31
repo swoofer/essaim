@@ -816,6 +816,37 @@ describe("runAgentLoop — phased mode", () => {
     expect(result.exitReason).not.toBe("done"); // faux vert banni (#184)
   });
 
+  it("honore l'override model de phase-execute (--set phase-execute.model=X) — le send de la tâche l'utilise (#169)", async () => {
+    vi.useFakeTimers();
+    const config = makePhasedConfig({
+      phases: [
+        { name: "discover", prompt: "Scan", toolsMode: "read_only", loop: false },
+        { name: "execute", prompt: "Fix: {{params.current_task}}", toolsMode: "full", loop: true, model: "custom-exec-model" },
+      ],
+    });
+    mockSend.mockResolvedValueOnce({
+      content: "DISCOVERY:\nsrc/a.ts | 10 | Bug A | major",
+      toolCalls: [], costUsd: 0.01, durationMs: 200, sessionId: "s1",
+    });
+    mockParseDiscoveries.mockReturnValue([{ id: "", description: "Bug A", file: "src/a.ts", line: 10, severity: "major" }]);
+    mockPostDiscoveries.mockResolvedValue([{ id: "t-1", description: "Bug A", file: "src/a.ts" }]);
+    let claimCall = 0;
+    mockClaimNextTask.mockImplementation(async () => {
+      claimCall++;
+      return claimCall === 1 ? { id: "t-1", description: "Bug A", file: "src/a.ts", severity: undefined } : null;
+    });
+    mockSend.mockResolvedValueOnce({ content: "DONE: fixed", toolCalls: [], costUsd: 0.02, durationMs: 300, sessionId: "s1" });
+
+    const loop = runAgentLoop(config, silentLogger);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(10_000);
+    await loop;
+
+    // Le send de la tâche execute doit porter le model SURCHARGÉ, pas le profil
+    // brut d'effort — sinon `--set phase-execute.model=X` est un levier mort.
+    const execCall = mockSend.mock.calls.find((c) => (c[1] as { model?: string } | undefined)?.model === "custom-exec-model");
+    expect(execCall, "un send de tâche avec model=custom-exec-model").toBeDefined();
+  });
+
   it("claims and executes tasks in work-stealing loop", async () => {
     vi.useFakeTimers();
 
