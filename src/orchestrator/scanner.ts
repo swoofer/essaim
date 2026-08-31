@@ -40,11 +40,46 @@ export function detectLanguage(projectPath: string): LangDetection {
   return { language: "unknown", test_command: "echo 'no test command detected'", extensions: [] };
 }
 
+function isDir(full: string): boolean {
+  try { return fs.statSync(full).isDirectory(); } catch { return false; }
+}
+
 function findDirs(projectPath: string, candidates: string[]): string[] {
-  return candidates.filter(d => {
-    const full = path.join(projectPath, d);
-    return fs.existsSync(full) && fs.statSync(full).isDirectory();
-  });
+  const direct = candidates.filter(d => isDir(path.join(projectPath, d)));
+  if (direct.length > 0) return direct;
+  // #159 — descente d'UN niveau pour les monorepos (pnpm/yarn/turbo : packages/*,
+  // apps/*, libs/*). Le src/ vit dans les paquets, pas à la racine — sans ça un
+  // monorepo pnpm rendait source_dirs VIDE et l'agent ne voyait aucun code.
+  const nested: string[] = [];
+  for (const w of ["packages", "apps", "libs"]) {
+    const wroot = path.join(projectPath, w);
+    if (!isDir(wroot)) continue;
+    let pkgs: fs.Dirent[] = [];
+    try { pkgs = fs.readdirSync(wroot, { withFileTypes: true }); } catch { continue; }
+    for (const pkg of pkgs) {
+      if (!pkg.isDirectory() || pkg.name.startsWith(".")) continue;
+      for (const c of candidates) {
+        const rel = path.join(w, pkg.name, c);
+        if (isDir(path.join(projectPath, rel))) nested.push(rel);
+      }
+    }
+  }
+  return nested;
+}
+
+/**
+ * Un chemin de SUPPORT DE TEST (à écarter du source montré aux agents), par
+ * SEGMENT et non par substring (#159). `rel.includes("test")` écartait
+ * `latest.ts` (la·test) et `inspector.ts` (in·spec·tor) — du code de production
+ * rendu invisible. On écarte si un SEGMENT de répertoire est test/tests/spec/
+ * __tests__, ou si le BASENAME est un test (séparateur exigé : `.test.`,
+ * `_test.`, `-spec.`, `test_…` — jamais « test » collé dans un mot).
+ */
+function isTestPath(rel: string): boolean {
+  const segs = rel.replace(/\\/g, "/").split("/");
+  const base = segs.pop() ?? "";
+  if (segs.some(s => s === "test" || s === "tests" || s === "spec" || s === "__tests__")) return true;
+  return /[._-](test|spec)s?\.[^.]+$/.test(base) || /^test[._-]/.test(base);
 }
 
 function listSourceFiles(projectPath: string, sourceDirs: string[], extensions: string[], max: number): string[] {
@@ -58,7 +93,7 @@ function listSourceFiles(projectPath: string, sourceDirs: string[], extensions: 
         if (entry.isDirectory()) walk(full);
         else if (extensions.length === 0 || extensions.some(ext => entry.name.endsWith(ext))) {
           const rel = path.relative(projectPath, full);
-          if (!rel.includes("test") && !rel.includes("spec") && !rel.includes("_test.")) {
+          if (!isTestPath(rel)) {
             try { files.push({ path: rel, mtime: fs.statSync(full).mtimeMs }); } catch {}
           }
         }
