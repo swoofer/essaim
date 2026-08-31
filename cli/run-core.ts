@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import { rmSync } from "fs";
 import { resolveEffort, EFFORT_PROFILES, type EffortLevel } from "../src/agent-loop/effort.js";
+import { ensureEssaimGitignore } from "../src/orchestrator/gitignore.js";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { buildProject, listTemplates } from "../src/orchestrator/template-engine.js";
 import { getCatalogRoots } from "./bce-resolver.js";
@@ -163,6 +164,9 @@ Catalogues consultés : ${roots}`,
     return undefined;
   }
 
+  // Garde le dépôt cible propre : gitignore runs/reports/.claude/.mcp.json AVANT
+  // qu'ils apparaissent (#174). Après le dry-run (qui n'écrit rien).
+  ensureEssaimGitignore(projectPath);
   const result = await runProject(project, "with_coordinator", opts.cleanup, {
     maxQuotaPct: opts.maxQuotaPct,
     coordinatorUrl: resolvedCoordinatorUrl,
