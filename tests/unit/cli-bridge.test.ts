@@ -84,3 +84,25 @@ describe("buildSoloPrompt", () => {
   });
 });
 
+
+describe("scope paramétrique sur source_dirs/test_dirs (#156)", () => {
+  const goContext = {
+    path: "/tmp/go", language: "go", test_command: "go test ./...",
+    modules: ["pkg", "cmd"], source_files: ["pkg/x.go"],
+    source_dirs: ["pkg", "cmd"], test_dirs: ["test"],
+  };
+
+  for (const preset of ["raid", "swarm", "melee"]) {
+    it(`${preset} contre un dépôt non-TS : 0 littéral essaim, répertoires réels présents`, () => {
+      const project = buildProjectFromBce(preset, goContext);
+      const allText = project.agents
+        .flatMap((a) => [a.prompt, ...(a.phases ?? []).map((p) => p.prompt)])
+        .join("\n");
+      for (const lit of ["tests/sandbox", "bce/", "dashboard/", "server/", "client/"]) {
+        expect(allText, `${preset} contient encore le littéral essaim ${lit}`).not.toContain(lit);
+      }
+      // le contexte porte les répertoires RÉELS du dépôt cible
+      expect(allText).toContain("pkg");
+    });
+  }
+});

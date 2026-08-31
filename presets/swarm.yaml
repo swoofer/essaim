@@ -20,10 +20,10 @@ params:
       fonctions trop longues, les violations de principes SOLID, et
       le code mort.
 
-      🎯 SCOPE STRICT — cherche UNIQUEMENT dans le code source sous
-      `src/` (et `lib/` s'il existe). Le reste du dépôt (tests/, docs/,
-      bce/, cli/, dashboard/, bin/) est HORS-SUJET. Si tu lis ailleurs
-      que `src/`/`lib/`, tu gaspilles ton budget de tours.
+      🎯 SCOPE STRICT — cherche UNIQUEMENT dans les répertoires source du
+      projet (listés sous « Contexte du projet »). Le reste (tests,
+      dépendances, config, docs, artefacts de build) est HORS-SUJET. Si tu
+      lis ailleurs, tu gaspilles ton budget de tours.
     effort: low
   phase-review:
     review_mission: >
@@ -36,9 +36,9 @@ params:
       Effectue le refactoring identifié. Vérifie que les tests passent
       après chaque modification. Ne change pas le comportement externe.
 
-      🎯 SCOPE STRICT — tu ne modifies QUE le fichier cible mentionné
-      dans la tâche et le code source associé sous `src/`. Le reste du
-      dépôt (tests/, docs/, bce/, cli/, dashboard/, bin/) est HORS-SUJET.
+      🎯 SCOPE STRICT — tu ne modifies QUE le fichier cible mentionné dans la
+      tâche et le code source associé, sous les répertoires source du projet
+      (« Contexte du projet »). Le reste est HORS-SUJET.
       Ne spawne AUCUN sous-agent.
     # Sonnet (mid) est suffisant pour un refactoring ciblé — à "high"
     # (Opus), l'agent dépensait son budget en exploration avant d'atteindre

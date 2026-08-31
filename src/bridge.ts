@@ -79,7 +79,7 @@ const AGENT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
 
 export function buildProjectFromBce(
   templateId: string,
-  context: { path: string; language: string; test_command: string; modules: string[]; source_files: string[] },
+  context: { path: string; language: string; test_command: string; modules: string[]; source_files: string[]; source_dirs?: string[]; test_dirs?: string[] },
   options?: { agentCount?: number; setParams?: Record<string, Record<string, unknown>>; catalogs?: string[] },
   projectPath?: string,
 ): BceMiniProject {
@@ -153,6 +153,11 @@ export function buildProjectFromBce(
           language: context.language,
           test_command: context.test_command,
           modules: context.modules,
+          // #156 — répertoires source/test réels du dépôt CIBLE (scanner) : les
+          // presets raid/swarm/melee y réfèrent au lieu de coder en dur des
+          // chemins essaim (tests/sandbox/, bce/, dashboard/…).
+          source_dirs: context.source_dirs ?? [],
+          test_dirs: context.test_dirs ?? [],
         },
         ...(agentDef.params ?? {}),
         ...perModuleParams,

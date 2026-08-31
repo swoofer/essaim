@@ -15,6 +15,14 @@ params:
     type: "string[]"
     required: false
     description: "Project modules"
+  source_dirs:
+    type: "string[]"
+    required: false
+    description: "Répertoires de code source du projet (calculés par le scanner)"
+  test_dirs:
+    type: "string[]"
+    required: false
+    description: "Répertoires de tests du projet (calculés par le scanner)"
 
 sections:
   "000-identity":
@@ -23,3 +31,5 @@ sections:
       - Langage: {{params.language}}
       - Commande de test: {{params.test_command}}
       - Modules: {{params.modules}}
+      - Répertoires source: {{params.source_dirs}}
+      - Répertoires de test: {{params.test_dirs}}
