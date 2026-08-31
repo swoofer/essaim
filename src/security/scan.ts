@@ -28,7 +28,23 @@ export async function runSecurityScan(
   signal: AbortSignal,
 ): Promise<ScanResult> {
   const adapters = registry.resolve(engineIds); // throws on unknown engine (fail-closed config error)
-  const settled = await Promise.allSettled(adapters.map((a) => a.run(scope, signal)));
+  const settled = await Promise.allSettled(adapters.map(async (a): Promise<EngineRunResult> => {
+    // #170 — SANTÉ AVANT SCAN : un moteur absent (Strix non installé, Docker
+    // éteint) doit dire « pip install strix-agent », JAMAIS rapporter « 0
+    // findings » (un faux clean). On sonde healthCheck ; si KO on remonte le
+    // detail en erreur SANS lancer run → degraded → exit rouge + message actionnable.
+    const health = await a.healthCheck().catch((e) => ({ ok: false, detail: (e as Error).message }));
+    if (!health.ok) {
+      const id = a.capabilities.id;
+      log.error(`security: moteur ${id} indisponible — ${health.detail}`);
+      return {
+        engine: id, status: "error", findings: [],
+        startedAt: "", finishedAt: "", durationMs: 0,
+        error: { kind: "unavailable", message: health.detail, retriable: false },
+      };
+    }
+    return a.run(scope, signal);
+  }));
 
   const results: EngineRunResult[] = [];
   const findings: Finding[] = [];
