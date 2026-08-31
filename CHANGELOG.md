@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.0](https://github.com/swoofer/essaim/compare/v0.16.0...v0.17.0) (2026-08-31)
+
+
+### Features
+
+* **falsifiability:** isTestFile dérivé du langage + refus si le lanceur ne démarre pas ([#157](https://github.com/swoofer/essaim/issues/157)) ([#202](https://github.com/swoofer/essaim/issues/202)) ([52a6370](https://github.com/swoofer/essaim/commit/52a6370719d7b1d184853a12c1401ed79013d8ca))
+* **orchestrator:** runs/reports ancrés sur -p ; --cleanup garde les branches ([#158](https://github.com/swoofer/essaim/issues/158)) ([#201](https://github.com/swoofer/essaim/issues/201)) ([52ec1eb](https://github.com/swoofer/essaim/commit/52ec1eb855301960bc84e67745148cd9ce45a07d))
+* **reporter:** section « Récupérer » + suppression de la recette destructrice ([#163](https://github.com/swoofer/essaim/issues/163)) ([#199](https://github.com/swoofer/essaim/issues/199)) ([24f5575](https://github.com/swoofer/essaim/commit/24f55755bc74f4db0f3bba71210987bddcee12d3))
+
 ## [0.16.0](https://github.com/swoofer/essaim/compare/v0.15.0...v0.16.0) (2026-08-30)
 
 
