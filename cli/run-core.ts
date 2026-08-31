@@ -1,5 +1,6 @@
 import { resolve } from "path";
 import { rmSync } from "fs";
+import { resolveEffort, EFFORT_PROFILES, type EffortLevel } from "../src/agent-loop/effort.js";
 import { scanProject } from "../src/orchestrator/scanner.js";
 import { buildProject, listTemplates } from "../src/orchestrator/template-engine.js";
 import { getCatalogRoots } from "./bce-resolver.js";
@@ -42,6 +43,19 @@ export interface ExecuteRunOptions {
  * instead of calling process.exit, so callers (pipeline) can record the outcome.
  * Returns the RunResult, or undefined for a dry run.
  */
+/**
+ * Résumé d'UNE phase pour le dry-run (#168) : modèle, effort et plafond de tours
+ * effectifs. Le modèle/tours viennent du profil d'effort (resolveEffort +
+ * EFFORT_PROFILES), un override `model` de phase gagnant s'il existe — la même
+ * dérivation que la boucle réelle, pour que la prévision colle à l'exécution.
+ */
+export function phaseSummary(ph: { name: string; toolsMode: "read_only" | "full" | "none"; loop: boolean; effort?: string; model?: string }): string {
+  const level = resolveEffort((ph.effort ?? "auto") as EffortLevel, { toolsMode: ph.toolsMode, loop: ph.loop });
+  const prof = EFFORT_PROFILES[level];
+  const model = ph.model && ph.model !== "" ? ph.model : prof.model;
+  return `phase ${ph.name}: effort=${level}, model=${model}, thinking=${prof.thinking}, maxTurns=${prof.maxTurns}`;
+}
+
 export async function executeRun(opts: ExecuteRunOptions): Promise<RunResult | undefined> {
   // Resolve projectPath before listing/validating templates so that
   // project-local .essaim/templates/ entries (new ids, not just catalog
@@ -134,6 +148,12 @@ Catalogues consultés : ${roots}`,
     for (const agent of project.agents) {
       console.log(`  ${agent.id.padEnd(25)} ${agent.name} (${agent.profile})`);
       console.log(`  ${"".padEnd(25)} Prompt: ${agent.prompt.length} chars`);
+      // #168 — modèle, effort et plafond de tours PAR PHASE : le dry-run doit dire
+      // ce qui va tourner (opus/20 sur execute, haiku sur discover…), pas juste
+      // « il y a des phases ». Sinon l'utilisateur ne peut pas prévoir le coût.
+      for (const ph of agent.phases ?? []) {
+        console.log(`  ${"".padEnd(25)} ${phaseSummary(ph)}`);
+      }
     }
     console.log(`\nWorkspace:  ${project.workspace.type}`);
     console.log(
