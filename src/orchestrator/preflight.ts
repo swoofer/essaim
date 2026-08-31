@@ -60,12 +60,16 @@ export async function preflightQuotaCheck(opts: PreflightOptions): Promise<Prefl
   }
 
   if (resp.status === 503) {
-    let detail = "quota unavailable";
+    let detail = "quota indisponible sur cette plateforme";
     try {
       const body = await resp.json() as { reason?: string };
-      if (body?.reason) detail = `quota unavailable: ${body.reason}`;
+      if (body?.reason) detail = `quota indisponible : ${body.reason}`;
     } catch { /* ignore */ }
-    log.warn(`pre-flight: ${detail} — proceeding without guardrail`);
+    // #173 — une LIGNE TEXTE lisible, pas un log.warn JSON. Ce 503 est le cas
+    // fréquent sous Windows (le jeton d'abonnement n'y est souvent pas lisible) :
+    // au démarrage, `{"level":40,"msg":"…"}` est du bruit. Fail-open : on continue
+    // sans le garde-fou de quota.
+    console.error(`⚠️  ${detail} — le run continue sans le garde-fou de quota.`);
     return { canProceed: true, reason: detail };
   }
 
