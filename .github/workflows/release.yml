@@ -66,22 +66,3 @@ jobs:
         if: ${{ steps.release.outputs.release_created || inputs.publish_only == 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  # Chained native-binaries publish on every release-please cut. A tag push from
-  # release-please's GITHUB_TOKEN does NOT trigger release-binaries.yml's
-  # `push: tags` event (GitHub anti-recursive workflow policy). Calling
-  # release-binaries.yml as a reusable workflow runs it in the same overall
-  # run as `release`, so no token gymnastics are needed.
-  #
-  # Gated on `release_created` so this is a no-op on every push that
-  # ONLY moves the release-please tracking PR — we only build+upload when
-  # there's a real release.
-  binaries:
-    needs: release
-    if: ${{ needs.release.outputs.release_created == 'true' }}
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release-binaries.yml
-    with:
-      tag: ${{ needs.release.outputs.tag_name }}
-    secrets: inherit
