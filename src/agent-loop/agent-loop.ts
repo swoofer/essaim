@@ -1334,7 +1334,20 @@ export async function runAgentLoop(
               );
               const severity = parseSeverity(task.description);
               const upgraded = upgradeEffort(baseLevel, { severity });
-              const execProfile = EFFORT_PROFILES[upgraded];
+              // #169 — HONORER les overrides model/thinking de phase-execute. Le
+              // levier documenté ne marchait que sur discover/review (via
+              // phaseEffortProfile) ; execute prenait le profil BRUT, donc
+              // `--set phase-execute.model=X` était ignoré sur la phase la plus
+              // chère. Le maxTurns reste piloté par le profil/sévérité (cf. note
+              // ci-dessus), seuls model/thinking sont surchargés.
+              const baseProfile = EFFORT_PROFILES[upgraded];
+              const execProfile = {
+                ...baseProfile,
+                model: phase.model && phase.model !== "" ? phase.model : baseProfile.model,
+                thinking: phase.thinking && phase.thinking !== "" && isThinkingLevel(phase.thinking)
+                  ? phase.thinking
+                  : baseProfile.thinking,
+              };
               if (upgraded !== baseLevel) {
                 logger.info(`Effort upgrade: ${baseLevel} → ${upgraded} (severity=${severity})`);
               } else {
