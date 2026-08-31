@@ -43,9 +43,40 @@ export interface FalsifiabilityVerdict {
   sourceFiles: string[];
 }
 
-/** Un chemin de test au sens de vitest.config.ts : tests/ **.test.ts */
-export function isTestFile(path: string): boolean {
-  return /(^|\/)tests\/.*\.test\.(ts|js)$/.test(path.replace(/\\/g, "/"));
+/**
+ * Un chemin de test, selon le LANGAGE du dépôt (#157). Codé en dur sur vitest
+ * `tests/**.test.ts`, il ne rendait `true` que sur essaim lui-même : sur un
+ * dépôt Go/Python, TOUS les fichiers de test que l'agent écrivait tombaient en
+ * « source », et le garde refusait « aucun fichier de test modifié » sur du vrai
+ * travail — essaim ne marchait donc VRAIMENT que sur essaim. Dérivé du langage,
+ * comme test_command l'est déjà (agent-loop.ts:testCommandFor). Défaut TS :
+ * rétro-compatible pour l'appelant historique.
+ */
+export function isTestFile(path: string, language = "typescript"): boolean {
+  const p = path.replace(/\\/g, "/");
+  switch (language) {
+    case "go":
+      return /(^|\/)[^/]+_test\.go$/.test(p);
+    case "python":
+      return /(^|\/)(test_[^/]+|[^/]+_test)\.py$/.test(p) || /(^|\/)tests?\/.*\.py$/.test(p);
+    case "rust":
+      // Seulement les tests d'intégration : les #[test] inline vivent DANS le
+      // source (.rs de src/) et ne sont pas détectables par nom — limite assumée.
+      return /(^|\/)tests\/.*\.rs$/.test(p);
+    case "java":
+      // ANCRÉ sur src/test/ (ou test/ legacy) : un basename `*Test.java` seul
+      // matchait des classes de DOMAINE de production (LabTest, SplitTest, ABTest)
+      // sous src/main/ → corriger un bug dedans passait pour « test ajouté » et
+      // le garde ACCEPTAIT sans lancer un seul test (faux vert). Les tests JUnit
+      // vivent sous src/test/ par convention Maven/Gradle.
+      return /(^|\/)(src\/test|test)\/.*\.java$/.test(p);
+    default: // typescript / javascript (vitest/jest) — `*.test.*`/`*.spec.*` partout
+      // Séparateur POINT (sûr) ; plus le `.e2e-spec`/`.e2e-test` de NestJS (tiret).
+      // On n'ouvre PAS `-spec` en général : `openapi-spec.ts`/`api-spec.ts` sont
+      // de la production, pas des tests.
+      return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p)
+        || /\.e2e-(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p);
+  }
 }
 
 /**
@@ -234,6 +265,7 @@ export async function verifyFailingTest(
   testCommand: { cmd: string; args: string[] },
   baseSha?: string,
   baseUntracked?: string[],
+  language = "typescript",
 ): Promise<FalsifiabilityVerdict> {
   // CONTRAT : ne jette JAMAIS. La docstring le promet depuis toujours et
   // l'appelant ne l'entoure d'aucun try — une exception ici remonte au catch
@@ -241,7 +273,7 @@ export async function verifyFailingTest(
   // contrôle. Mesuré : 900 fichiers non suivis sous dist/ suffisaient à faire
   // sortir `spawn` en ENAMETOOLONG et à tuer l'agent.
   try {
-    return await runVerification(deps, testCommand, baseSha, baseUntracked);
+    return await runVerification(deps, testCommand, baseSha, baseUntracked, language);
   } catch (err) {
     return {
       falsifiable: true,
@@ -257,6 +289,7 @@ async function runVerification(
   testCommand: { cmd: string; args: string[] },
   baseSha?: string,
   baseUntracked?: string[],
+  language = "typescript",
 ): Promise<FalsifiabilityVerdict> {
   // `--untracked-files=all` est obligatoire : sans lui, git REPLIE un
   // répertoire entièrement non suivi en une seule entrée (`?? tests/`) et le
@@ -304,8 +337,8 @@ async function runVerification(
     ];
   }
 
-  const testFiles = changed.filter(isTestFile);
-  const sourceFiles = changed.filter((f) => !isTestFile(f));
+  const testFiles = changed.filter((f) => isTestFile(f, language));
+  const sourceFiles = changed.filter((f) => !isTestFile(f, language));
 
   if (testFiles.length === 0) {
     return { falsifiable: false, reason: "aucun fichier de test modifié — rien ne prouve le défaut", testFiles, sourceFiles };
@@ -324,6 +357,19 @@ async function runVerification(
   // produisait un faux ACCEPT sur un test dont le verdict correct était
   // « ne prouve rien ».
   const baseline = await deps.exec(testCommand.cmd, [...testCommand.args, ...testFiles]);
+  if (baseline.code === -1) {
+    // Le lanceur ne DÉMARRE pas (binaire introuvable, spawn error, tué par
+    // signal) : on ne peut RIEN prouver. Refus EXPLICITE, PAS fail-open (#157) —
+    // sur un dépôt sans lanceur, l'ancien `falsifiable: true` (« contrôle sauté »)
+    // acceptait en silence TOUT DONE sans preuve. Le préflight le dit une fois au
+    // lancement ; ici on refuse par tâche au cas où il aurait été sauté.
+    return {
+      falsifiable: false,
+      reason: `le lanceur de tests ne démarre pas (${testCommand.cmd} introuvable ou non exécutable) — impossible de prouver le défaut`,
+      testFiles,
+      sourceFiles,
+    };
+  }
   if (baseline.code !== 0) {
     return {
       falsifiable: true,

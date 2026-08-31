@@ -1418,7 +1418,7 @@ export async function runAgentLoop(
                 const taskSummary = extractDoneSummary(content, "Done");
                 const verdict =
                   phase.requireFailingTest && !FALSE_POSITIVE_PATTERN.test(taskSummary)
-                    ? await verifyFailingTest(falsifiabilityDeps, testCommandFor(config.workspacePath), taskBase?.sha, taskBase?.untracked)
+                    ? await verifyFailingTest(falsifiabilityDeps, testCommandFor(config.workspacePath), taskBase?.sha, taskBase?.untracked, detectLanguage(config.workspacePath).language)
                     : null;
                 if (verdict && !verdict.falsifiable) {
                   logger.warn(`Work-stealing: DONE refusé — ${verdict.reason}`, {
