@@ -37,6 +37,29 @@ describe("isTestFile", () => {
     expect(isTestFile("src/security/ingest.ts")).toBe(false);
     expect(isTestFile("tests/fixtures/data.json")).toBe(false);
   });
+
+  // #157 — dérivé du langage : sans ça, essaim ne marchait VRAIMENT que sur
+  // essaim (le seul dépôt où le pattern vitest figé rendait true). Table de
+  // chemins réels par langage.
+  it("classe les tests selon le langage (#157)", () => {
+    // Go — *_test.go
+    expect(isTestFile("pkg/foo_test.go", "go")).toBe(true);
+    expect(isTestFile("pkg/foo.go", "go")).toBe(false);
+    // Python — test_*.py / *_test.py / tests/**
+    expect(isTestFile("tests/test_foo.py", "python")).toBe(true);
+    expect(isTestFile("app/foo_test.py", "python")).toBe(true);
+    expect(isTestFile("app/foo.py", "python")).toBe(false);
+    // Rust — tests/*.rs (les #[test] inline dans le source ne sont pas détectables par nom)
+    expect(isTestFile("tests/integration.rs", "rust")).toBe(true);
+    expect(isTestFile("src/lib.rs", "rust")).toBe(false);
+    // Java — *Test.java / src/test/**
+    expect(isTestFile("src/test/java/FooTest.java", "java")).toBe(true);
+    expect(isTestFile("src/main/java/Foo.java", "java")).toBe(false);
+    // TS/JS (défaut) — *.test.* / *.spec.* partout, plus seulement tests/
+    expect(isTestFile("src/a.test.ts", "typescript")).toBe(true);
+    expect(isTestFile("src/a.spec.tsx", "typescript")).toBe(true);
+    expect(isTestFile("src/a.ts", "typescript")).toBe(false);
+  });
 });
 
 describe("parseChangedFiles", () => {
@@ -116,6 +139,21 @@ describe("verifyFailingTest", () => {
     });
     await verifyFailingTest(deps, TEST_CMD);
     expect(calls.some((c) => c.startsWith("git stash pop"))).toBe(true);
+  });
+
+  it("REFUSE (pas fail-open) quand le lanceur ne DÉMARRE pas — code -1, binaire absent (#157)", async () => {
+    // Le fail-open acceptait TOUT DONE sur un dépôt sans lanceur (binaire
+    // introuvable → spawn error → code -1). Désormais : refus EXPLICITE. Distinct
+    // du cas « le lanceur tourne mais rend rouge » (code>0), qui reste fail-open.
+    const { deps, calls } = fakeExec({
+      "git status": { code: 0, stdout: " M src/a.ts\n M tests/unit/x.test.ts\n" },
+      "pnpm exec": { code: -1, stdout: "spawn ENOENT" },
+    });
+    const v = await verifyFailingTest(deps, TEST_CMD);
+    expect(v.falsifiable).toBe(false); // PAS le fail-open true
+    expect(v.reason).toContain("ne démarre pas");
+    // Refus AVANT de toucher au worktree — rien n'est remisé.
+    expect(calls.some((c) => c.startsWith("git stash push"))).toBe(false);
   });
 });
 
