@@ -60,11 +60,22 @@ export function isTestFile(path: string, language = "typescript"): boolean {
     case "python":
       return /(^|\/)(test_[^/]+|[^/]+_test)\.py$/.test(p) || /(^|\/)tests?\/.*\.py$/.test(p);
     case "rust":
+      // Seulement les tests d'intégration : les #[test] inline vivent DANS le
+      // source (.rs de src/) et ne sont pas détectables par nom — limite assumée.
       return /(^|\/)tests\/.*\.rs$/.test(p);
     case "java":
-      return /(^|\/)[^/]*Tests?\.java$/.test(p) || /(^|\/)src\/test\/.*\.java$/.test(p);
-    default: // typescript / javascript (vitest/jest) — `*.test.ts`/`*.spec.ts` partout
-      return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p);
+      // ANCRÉ sur src/test/ (ou test/ legacy) : un basename `*Test.java` seul
+      // matchait des classes de DOMAINE de production (LabTest, SplitTest, ABTest)
+      // sous src/main/ → corriger un bug dedans passait pour « test ajouté » et
+      // le garde ACCEPTAIT sans lancer un seul test (faux vert). Les tests JUnit
+      // vivent sous src/test/ par convention Maven/Gradle.
+      return /(^|\/)(src\/test|test)\/.*\.java$/.test(p);
+    default: // typescript / javascript (vitest/jest) — `*.test.*`/`*.spec.*` partout
+      // Séparateur POINT (sûr) ; plus le `.e2e-spec`/`.e2e-test` de NestJS (tiret).
+      // On n'ouvre PAS `-spec` en général : `openapi-spec.ts`/`api-spec.ts` sont
+      // de la production, pas des tests.
+      return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p)
+        || /\.e2e-(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p);
   }
 }
 

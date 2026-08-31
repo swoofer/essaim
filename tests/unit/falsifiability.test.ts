@@ -52,13 +52,18 @@ describe("isTestFile", () => {
     // Rust — tests/*.rs (les #[test] inline dans le source ne sont pas détectables par nom)
     expect(isTestFile("tests/integration.rs", "rust")).toBe(true);
     expect(isTestFile("src/lib.rs", "rust")).toBe(false);
-    // Java — *Test.java / src/test/**
+    // Java — ANCRÉ sur src/test/, PAS un basename *Test : une classe de DOMAINE
+    // de production finissant par Test (LabTest…) reste SOURCE, sinon faux vert.
     expect(isTestFile("src/test/java/FooTest.java", "java")).toBe(true);
     expect(isTestFile("src/main/java/Foo.java", "java")).toBe(false);
-    // TS/JS (défaut) — *.test.* / *.spec.* partout, plus seulement tests/
+    expect(isTestFile("src/main/java/com/clinic/domain/LabTest.java", "java")).toBe(false);
+    // TS/JS (défaut) — *.test.* / *.spec.* partout, plus le .e2e-spec de NestJS…
     expect(isTestFile("src/a.test.ts", "typescript")).toBe(true);
     expect(isTestFile("src/a.spec.tsx", "typescript")).toBe(true);
+    expect(isTestFile("test/app.e2e-spec.ts", "typescript")).toBe(true);
     expect(isTestFile("src/a.ts", "typescript")).toBe(false);
+    // …mais on n'ouvre PAS `-spec` en général : un fichier de production reste source.
+    expect(isTestFile("src/openapi-spec.ts", "typescript")).toBe(false);
   });
 });
 
