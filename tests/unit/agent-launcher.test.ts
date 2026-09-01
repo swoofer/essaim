@@ -6,6 +6,11 @@ vi.mock("../../src/agent-loop/claude-stream.js", () => ({
   resolveClaudeBin: vi.fn(() => "/resolved/path/to/claude"),
 }));
 
+// ── Mock the loop itself so launchAgentLoop's config is inspectable ─────
+vi.mock("../../src/agent-loop/agent-loop.js", () => ({
+  runAgentLoop: vi.fn(() => Promise.resolve({ exitReason: "done" })),
+}));
+
 function makeMockChild() {
   const stdout = new Readable({ read() {} });
   const stderr = new Readable({ read() {} });
@@ -28,7 +33,8 @@ vi.mock("child_process", () => ({
   }),
 }));
 
-import { waitForProcess, launchAgent } from "../../src/orchestrator/agent-launcher.js";
+import { waitForProcess, launchAgent, launchAgentLoop } from "../../src/orchestrator/agent-launcher.js";
+import { runAgentLoop } from "../../src/agent-loop/agent-loop.js";
 import type { AgentConfig } from "../../src/orchestrator/types.js";
 
 describe("waitForProcess", () => {
@@ -86,5 +92,32 @@ describe("launchAgent", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
     const [bin] = (spawn as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(bin).toBe("/resolved/path/to/claude");
+  });
+});
+
+describe("launchAgentLoop", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // #167 — le plafond dollar (--max-budget-usd de l'option CLI) doit traverser
+  // launchAgentLoop jusqu'au config remis à runAgentLoop. Sans la ligne
+  // maxBudgetUsd: opts.maxBudgetUsd, il tombe à undefined et l'agent dépense sans borne.
+  it("forwards maxBudgetUsd into the agent-loop config", async () => {
+    const agent: AgentConfig = { id: "a1", name: "Agent One", prompt: "do work" } as AgentConfig;
+
+    await launchAgentLoop(agent, "/workspace", "http://localhost:3100", null, undefined, {
+      maxBudgetUsd: 0.05,
+    });
+
+    const config = (runAgentLoop as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(config.maxBudgetUsd).toBe(0.05);
+  });
+
+  it("leaves maxBudgetUsd undefined when the option is absent (no accidental cap)", async () => {
+    const agent: AgentConfig = { id: "a1", name: "Agent One", prompt: "do work" } as AgentConfig;
+
+    await launchAgentLoop(agent, "/workspace", "http://localhost:3100", null);
+
+    const config = (runAgentLoop as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(config.maxBudgetUsd).toBeUndefined();
   });
 });
