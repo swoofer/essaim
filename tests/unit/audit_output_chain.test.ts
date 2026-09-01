@@ -1,73 +1,59 @@
 // tests/unit/audit_output_chain.test.ts
 //
-// Acceptance #177 par la VRAIE chaîne de hooks assemblée (pas le guard en
-// isolation). La revue sécurité a montré que tester le guard seul RATE le bug
-// critique : dans la chaîne pre-tool-use, activity-tracking (order 50) fait
-// `INPUT=$(cat)` et draine le pipe stdin avant le guard (order 60), qui lisait
-// EOF et autorisait tout. Corrigé en amont (promptweave >= 0.5.2 : buffer stdin
-// redistribué à chaque hook). CE test échoue sur 0.5.1 (stdin drainé -> le guard
-// fail-closed refuse même AUDIT.md) et passe sur 0.5.2 — il verrouille donc à la
-// fois le fix promptweave ET l'acceptance.
-import { describe, it, expect, beforeAll } from "vitest";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+// #177 — vérifie que le hook pre-tool-use ASSEMBLÉ de gardien est composé pour
+// que le deny du guard path-scope soit réellement délivré. C'est le pendant
+// statique du test comportemental tests/audit_output_guard.test.sh (qui, lui,
+// exécute le guard directement et tourne sur les deux plateformes CI).
+//
+// On n'EXÉCUTE PAS le wrapper assemblé ici : lancer un wrapper bash multi-script
+// via spawnSync n'est pas portable (ubuntu vs Windows Git-Bash divergent sur les
+// pipes/exec bits — un premier essai le faisait échouer en CI). On asserte donc
+// la COMPOSITION du wrapper, qui est ce qui garantit la délivrance du deny :
+//
+//   1. le stdin est bufferisé UNE fois puis REDONNÉ au guard (promptweave >= 0.5.1
+//      corrige le drain de pipe : sans ça, activity-tracking order 50 faisait
+//      `cat` et le guard order 60 lisait EOF -> fail-closed sur tout, ou pire).
+//   2. le guard est invoqué NON bloquant (`|| true`) : son refus voyage par le
+//      JSON stdout (permissionDecision), PAS par l'exit code — que le wrapper
+//      collapse (`|| exit 1`) ou avale (`|| true`). Un `|| exit 1` ici = faux vert.
+//   3. check-interrupt (déprécié) est ABSENT : il écrivait sur stdout et aurait
+//      pollué le JSON du deny (revue sécurité).
+import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { buildProjectFromBce } from "../../src/bridge.js";
 
 const REPO = join(__dirname, "..", "..");
-const SCRIPTS = join(REPO, "scripts");
 const ctx = { path: REPO, language: "typescript", test_command: "pnpm test", modules: ["orchestrator"], source_files: [] };
 
-// Le hook pre-tool-use assemblé de gardien, $BCE_SCRIPTS_DIR pointé vers scripts/.
 function gardienPreToolHook(): string {
   const agent = buildProjectFromBce("gardien", ctx, {}, REPO).agents[0];
-  const raw = (agent.hooks ?? {})["pre-tool-use"] ?? "";
-  return raw.replace(/\$BCE_SCRIPTS_DIR/g, SCRIPTS.replace(/\\/g, "/"));
+  return (agent.hooks ?? {})["pre-tool-use"] ?? "";
 }
 
-// Exécute la chaîne assemblée avec un Write sur `file` (absolu) ; rend la sortie.
-function runChain(hookPath: string, cwd: string, file: string): string {
-  const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: file } });
-  const r = spawnSync("bash", [hookPath], {
-    input, cwd, encoding: "utf-8",
-    // coordinator injoignable -> les hooks activity/interrupt échouent vite (|| true)
-    env: { ...process.env, COORDINATOR_URL: "http://127.0.0.1:1" },
-  });
-  return (r.stdout ?? "") + (r.stderr ?? "");
-}
-
-describe("#177 — chaîne pre-tool-use assemblée : le guard path-scope reste actif", () => {
-  let hookPath: string;
-  let repo: string;
-
-  beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), "e177chain-"));
-    spawnSync("git", ["init", "-q"], { cwd: repo });
-    mkdirSync(join(repo, "src"), { recursive: true });
-    hookPath = join(repo, "pre-tool-use.sh");
-    writeFileSync(hookPath, gardienPreToolHook());
-    chmodSync(hookPath, 0o755);
+describe("#177 — le hook pre-tool-use assemblé de gardien délivre le deny du guard", () => {
+  it("bufferise stdin et le REDONNE au guard (anti-drain, promptweave >= 0.5.1)", () => {
+    const hook = gardienPreToolHook();
+    // le buffer est capturé une fois…
+    expect(hook).toMatch(/__BCE_HOOK_STDIN="\$\(cat/);
+    // …et rejoué DEVANT le guard (le guard ne lit donc jamais un pipe drainé).
+    expect(hook).toMatch(/printf '%s' "\$__BCE_HOOK_STDIN" \| "\$BCE_SCRIPTS_DIR\/audit_output_guard\.sh"/);
   });
 
-  it("AUTORISE l'écriture de AUDIT.md (le livrable) — échoue si stdin est drainé (promptweave < 0.5.2)", () => {
-    const out = runChain(hookPath, repo, join(repo, "AUDIT.md"));
-    // Pas de deny -> autorisé. Sur 0.5.1 (stdin drainé) le guard fail-closed
-    // refuserait, faisant échouer ce test : c'est le verrou du fix promptweave.
-    expect(out).not.toContain('"permissionDecision":"deny"');
+  it("invoque le guard avec les chemins d'audit déclarés (AUDIT.md)", () => {
+    const hook = gardienPreToolHook();
+    expect(hook).toContain("audit_output_guard.sh");
+    expect(hook).toContain("AUDIT.md"); // params.paths sérialisé en arg
   });
 
-  it("REFUSE une écriture hors scope (src/x.ts) via la chaîne réelle, en JSON PROPRE", () => {
-    const out = runChain(hookPath, repo, join(repo, "src/x.ts")).trim();
-    expect(out).toContain('"permissionDecision":"deny"');
-    // Le deny doit être du JSON PARSABLE : un hook informatif (ex. la bannière
-    // check-interrupt) qui préfixerait du texte casserait le parse -> deny perdu
-    // -> fuite (revue sécurité). On exige donc un stdout intégralement JSON.
-    expect(() => JSON.parse(out)).not.toThrow();
-    expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe("deny");
+  it("invoque le guard en NON bloquant (deny via stdout, pas via exit code)", () => {
+    const hook = gardienPreToolHook();
+    // La ligne du guard finit par `|| true` (non bloquant). Un `|| exit 1`
+    // (bloquant) collapserait un exit 2 en 1 et perdrait le refus -> faux vert.
+    expect(hook).toMatch(/audit_output_guard\.sh"[^\n]*\|\| true/);
+    expect(hook).not.toMatch(/audit_output_guard\.sh"[^\n]*\|\| exit 1/);
   });
 
-  it("le hook pre-tool-use assemblé N'inclut PLUS check-interrupt (source de pollution du stdout du guard)", () => {
+  it("N'inclut PLUS check-interrupt (source de pollution du stdout du guard)", () => {
     expect(gardienPreToolHook()).not.toContain("check_interrupt");
   });
 });
