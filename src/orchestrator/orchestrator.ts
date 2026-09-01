@@ -767,7 +767,25 @@ export function writeClaudeHooksDir(params: {
   writtenFiles.push(envPath);
 
   const settings: Record<string, unknown> = { ...existingSettings };
-  const hooksConfig: Record<string, unknown[]> = {};
+  // #172 — fusionner par événement, ne PAS écraser toute la clé `hooks`. Les
+  // hooks de l'utilisateur (ou d'un autre outil) survivent ; seules les entrées
+  // essaim d'un `init` précédent sont remplacées, ce qui garde init idempotent.
+  // ponytail: marqueur = la commande source `.coordinator-env` ; un hook tiers
+  // ne référence jamais ce fichier. Upgrade path si un jour c'est ambigu :
+  // estamper une clé maison sur l'entrée (ex. hookEntry._essaim = true).
+  const priorHooks: Record<string, unknown[]> =
+    existingSettings.hooks && typeof existingSettings.hooks === "object" && !Array.isArray(existingSettings.hooks)
+      ? { ...(existingSettings.hooks as Record<string, unknown[]>) }
+      : {};
+  const isEssaimEntry = (entry: unknown): boolean => {
+    const inner = (entry as { hooks?: Array<{ command?: unknown }> })?.hooks;
+    return Array.isArray(inner) && inner.some((h) => typeof h?.command === "string" && h.command.includes(".coordinator-env"));
+  };
+  const mergedHooks: Record<string, unknown[]> = {};
+  for (const [event, entries] of Object.entries(priorHooks)) {
+    const kept = Array.isArray(entries) ? entries.filter((e) => !isEssaimEntry(e)) : [];
+    if (kept.length) mergedHooks[event] = kept;
+  }
   for (const [lifecycle, hookPath] of Object.entries(writtenHookFiles)) {
     const eventName = CLAUDE_HOOK_EVENT_MAP[lifecycle];
     if (!eventName) continue;
@@ -781,10 +799,15 @@ export function writeClaudeHooksDir(params: {
     if (eventName === "PostToolUse" || eventName === "PreToolUse") {
       hookEntry.matcher = POST_TOOL_USE_MATCHER;
     }
-    hooksConfig[eventName] = [hookEntry];
+    (mergedHooks[eventName] ??= []).push(hookEntry);
   }
-  settings.hooks = hooksConfig;
+  settings.hooks = mergedHooks;
   const settingsPath = path.join(claudeDir, "settings.json");
+  // Sauvegarde avant écrasement : si la fusion se trompe, l'utilisateur récupère
+  // ses hooks dans settings.json.bak. Best-effort — jamais fatal (#172).
+  if (fs.existsSync(settingsPath)) {
+    try { fs.copyFileSync(settingsPath, settingsPath + ".bak"); } catch { /* backup best-effort */ }
+  }
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   writtenFiles.push(settingsPath);
 

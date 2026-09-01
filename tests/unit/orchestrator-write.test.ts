@@ -144,6 +144,55 @@ describe("writeClaudeHooksDir", () => {
     expect(settings.hooks.IgnoreMe).toBeUndefined();
     expect(settings.hooks.SessionStart).toBeDefined();
   });
+
+  // #172 — un `essaim init` par-dessus une settings.json qui a déjà des hooks
+  // utilisateur ne doit PAS les effacer. On fusionne par événement (les hooks
+  // essaim, repérés par la ligne `source .coordinator-env`, sont remplacés ;
+  // le reste survit) et on sauvegarde l'ancien fichier en .bak.
+  it("merges essaim hooks with a pre-existing user hook instead of clobbering, and backs up the old file (#172)", () => {
+    const claudeDir = path.join(TMP_ROOT, "merge-user-hooks", ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const userSettings = {
+      editor: { tabSize: 2 },
+      hooks: {
+        // événement qu'essaim n'écrit jamais → doit rester intact
+        UserPromptSubmit: [{ hooks: [{ type: "command", command: "my-prompt-guard.sh" }] }],
+        // événement partagé avec essaim → l'utilisateur ET essaim doivent coexister
+        PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "my-bash-audit.sh" }] }],
+      },
+    };
+    const settingsPath = path.join(claudeDir, "settings.json");
+    fs.writeFileSync(settingsPath, JSON.stringify(userSettings, null, 2));
+
+    writeClaudeHooksDir({ claudeDir, hooks: BCE_HOOKS, envVars: BCE_ENV_VARS, existingSettings: userSettings });
+
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    const cmds = (event: string): string[] =>
+      (settings.hooks[event] ?? []).flatMap((e: { hooks: { command: string }[] }) => e.hooks.map((h) => h.command));
+    expect(settings.editor).toEqual({ tabSize: 2 });
+    expect(cmds("UserPromptSubmit")).toContain("my-prompt-guard.sh");
+    expect(cmds("PostToolUse").some((c) => c.includes("my-bash-audit.sh"))).toBe(true);
+    expect(cmds("PostToolUse").some((c) => c.includes(".coordinator-env"))).toBe(true);
+    expect(settings.hooks.SessionStart).toBeDefined();
+    expect(fs.existsSync(settingsPath + ".bak")).toBe(true);
+    expect(JSON.parse(fs.readFileSync(settingsPath + ".bak", "utf-8"))).toEqual(userSettings);
+  });
+
+  it("re-running init does not duplicate essaim's own hook entry (#172 idempotent)", () => {
+    const claudeDir = path.join(TMP_ROOT, "idempotent-hooks", ".claude");
+    writeClaudeHooksDir({ claudeDir, hooks: BCE_HOOKS, envVars: BCE_ENV_VARS });
+    const settingsPath = path.join(claudeDir, "settings.json");
+    const first = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    writeClaudeHooksDir({ claudeDir, hooks: BCE_HOOKS, envVars: BCE_ENV_VARS, existingSettings: first });
+    const second = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    const essaimCount = (event: string): number =>
+      (second.hooks[event] ?? []).filter((e: { hooks: { command: string }[] }) =>
+        e.hooks.some((h) => typeof h.command === "string" && h.command.includes(".coordinator-env")),
+      ).length;
+    expect(essaimCount("SessionStart")).toBe(1);
+    expect(essaimCount("PostToolUse")).toBe(1);
+    expect(essaimCount("Stop")).toBe(1);
+  });
 });
 
 function makeAgent(partial: Partial<AgentConfig> & Pick<AgentConfig, "id" | "name" | "profile">): AgentConfig {
