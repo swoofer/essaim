@@ -55,7 +55,7 @@ To change what an agent says, edit the YAML. `--dry-run` previews the assembled 
 
 **Phases** come from an optional `phase:` field on a behavior. `discover` (read-only, no loop) → `review` (no tools, dedups into NEW/DUPLICATE/ENRICHES) → `execute` (full tools, work-stealing loop). A preset with no phased behavior runs one-shot.
 
-**Effort** (`src/agent-loop/effort.ts`) maps a level to model + thinking keyword + maxTurns: low=haiku/none/15, mid=sonnet/think/8, high=opus/think-hard/20, max=opus/ultrathink/60. `critical:` discoveries auto-promote low→mid.
+**Effort** (`src/agent-loop/effort.ts`) maps a level to model + thinking keyword + maxTurns: low=haiku/none/15, mid=sonnet/think/16, high=opus/think-hard/20, max=opus/ultrathink/60. `critical:` discoveries auto-promote low→mid.
 
 ## Security subsystem
 
