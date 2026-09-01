@@ -118,6 +118,38 @@ describe("postDiscoveries", () => {
 
     vi.unstubAllGlobals();
   });
+
+  // Revue adverse : en PROD le coordinator est derrière un reverse proxy. Un 502
+  // (ou 504) peut être émis APRÈS que l'INSERT non-idempotent a committé → on ne
+  // retente PAS, sinon thread doublon.
+  it("ne retente PAS un 502 — un reverse proxy peut l'émettre après l'INSERT committé (#191 revue)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => ({ ok: false, status: 502, text: async () => "bad gateway" }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result).toHaveLength(0);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  // undici lève un AggregateError (code sur cause.errors[]) quand l'hôte résout
+  // vers plusieurs adresses (localhost → ::1 + 127.0.0.1) — le retry doit le voir.
+  it("retente une erreur réseau AggregateError (localhost multi-adresses) (#191 revue)", async () => {
+    let calls = 0;
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) { const e = new Error("fetch failed") as Error & { cause?: unknown }; e.cause = { errors: [{ code: "ECONNREFUSED" }, { code: "ECONNREFUSED" }] }; throw e; }
+      return { ok: true, json: async () => ({ thread_id: "t-agg", status: "open" }) };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result[0].id).toBe("t-agg");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
 });
 
 // claimNextTask rend désormais Task | null | COORDINATOR_UNREACHABLE (#151) :

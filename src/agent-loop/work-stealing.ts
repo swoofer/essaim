@@ -129,16 +129,36 @@ class HttpError extends Error {
 // On retente, MAIS uniquement les cas où le serveur n'a PROUVABLEMENT rien écrit —
 // /api/announce fait un INSERT inconditionnel sans dédup (consultation.ts), donc
 // retenter un POST qui a pu aboutir créerait un thread doublon. Sûrs à retenter :
-//   - statuts d'infra rejetés AVANT tout traitement applicatif : 408/429/502/503/504 ;
+//   - 408/429/503 : rejet AVANT tout traitement (client lent, rate-limit, ou
+//     proxy « no healthy upstream » / app en arrêt) ;
 //   - erreurs réseau PRÉ-connexion : la requête n'a jamais atteint le serveur.
-// Volontairement PAS retentés : les timeouts ambigus post-envoi et les 5xx
-// applicatifs (500) — la requête a pu être traitée, on préfère un rouge honnête
-// (échec sûr) à un doublon. L'idempotence de /api/announce reste un chantier
-// coordinator séparé.
-const RETRYABLE_HTTP = new Set([408, 429, 502, 503, 504]);
-const RETRYABLE_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
+// Volontairement PAS retentés — la requête a PU être traitée, on préfère un rouge
+// honnête (échec sûr) à un doublon :
+//   - 500 applicatif (l'INSERT a pu committer avant l'erreur) ;
+//   - 502/504 : en PROD le coordinator est derrière un reverse proxy (Caddy) ;
+//     ces statuts signifient « l'upstream a pu recevoir et traiter » puis tomber
+//     (502) ou traîner (504) — le proxy ré-étiquette en 502 une coupure qui, en
+//     direct, serait un ECONNRESET (lui exclu). Les inclure rouvrirait le doublon.
+//   - UND_ERR_CONNECT_TIMEOUT et autres timeouts post-envoi (ambigus + ~10 s
+//     d'attente undici × 3, séquentiel sur N findings = latence ×3).
+// L'idempotence de /api/announce reste un chantier coordinator séparé.
+const RETRYABLE_HTTP = new Set([408, 429, 503]);
+const RETRYABLE_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
 const MAX_POST_ATTEMPTS = 3;
 const POST_BACKOFF_MS = 150;
+
+// undici enveloppe l'erreur système sous `.cause`, mais lève un AggregateError
+// (code sur `.cause.errors[i].code`) quand l'hôte résout vers plusieurs adresses
+// (localhost → ::1 + 127.0.0.1). On lit les deux formes ; sinon un blip local
+// sur `localhost` ne serait jamais retenté. (Le coordinator in-process utilise
+// 127.0.0.1 — mono-adresse — donc la forme simple suffit là, mais une URL
+// `localhost` fournie à la main tomberait sur l'AggregateError.)
+function networkErrorCode(err: unknown): string | undefined {
+  const cause = (err as { cause?: { code?: string; errors?: Array<{ code?: string }> } })?.cause;
+  if (cause?.code) return cause.code;
+  if (Array.isArray(cause?.errors)) return cause.errors.find((e) => e?.code)?.code;
+  return undefined;
+}
 
 async function coordinatorPost(url: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   let lastErr: Error = new Error(`Cannot reach coordinator at ${url}`);
@@ -147,7 +167,7 @@ async function coordinatorPost(url: string, body: Record<string, unknown>): Prom
     try {
       resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
     } catch (err) {
-      const code = (err as { cause?: { code?: string } })?.cause?.code;
+      const code = networkErrorCode(err);
       lastErr = new Error(`Cannot reach coordinator at ${url}: ${(err as Error).message}`);
       if (code && RETRYABLE_NET.has(code) && attempt < MAX_POST_ATTEMPTS) {
         await new Promise((r) => setTimeout(r, POST_BACKOFF_MS * attempt));
