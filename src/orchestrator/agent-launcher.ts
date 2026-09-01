@@ -174,6 +174,7 @@ export async function launchAgentLoop(
     prompt: fullPrompt,
     allowedTools: buildAgentLoopAllowedTools(agent),
     readOnly: agent.read_only,
+    auditOutput: agent.audit_output, // #177 : retire Bash (le hook path-scope Write/Edit)
     model: agent.model,
     phases: agent.phases,
     maxTurns: 50,

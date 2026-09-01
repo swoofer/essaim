@@ -39,6 +39,13 @@ export interface AgentLoopConfig {
   // one-shot passe alors disallowedForMode("read_only") pour bloquer dur toute
   // ecriture (Write/Edit/NotebookEdit/Bash). Cable depuis agent.read_only.
   readOnly?: boolean;
+  // Presets audit-output (gardien, phare) : lecture seule SAUF les chemins
+  // d'audit. Un hook PreToolUse path-scope les Write/Edit ; mais le hook ne
+  // couvre pas Bash (son matcher ne cible qu'Edit|Write|NotebookEdit). On retire
+  // donc Bash + nested ici, sinon `bash -c 'echo > src/x'` contournerait le
+  // path-scope. Write/Edit RESTENT (le hook les scope). Câblé depuis
+  // agent.audit_output. (#177, suite DF4 de #1.)
+  auditOutput?: boolean;
   // Max times the phased sequence (discover → review → execute) is re-run
   // when execute exits with an empty pool while real work was done.
   // Default 1 (no re-discover). Raise this for raids that need extra pool refills.
@@ -346,6 +353,21 @@ const WRITE_USER_TOOLS: readonly string[] = ["Write", "Edit", "NotebookEdit"];
 // in the outer turn count. We always block it — the work-stealing task itself
 // is already an agent, nested agents just explode the budget.
 const NESTED_AGENT_TOOLS: readonly string[] = ["Task", "Agent"];
+
+// audit-output : on NE bloque PAS Write/Edit/NotebookEdit (le hook PreToolUse les
+// path-scope sur les chemins d'audit — son matcher est Edit|Write|NotebookEdit).
+// On bloque Bash (écrit où il veut) ET MultiEdit (que le hook ne couvre PAS : ni
+// dans le matcher PreToolUse, ni dans le case du hook — et sous
+// --dangerously-skip-permissions l'allowlist est du théâtre, donc le modèle
+// pourrait l'appeler pour écrire hors scope ; redondant avec Edit, le retirer ne
+// coûte rien) et les nested agents. (#177, gap MultiEdit fermé à la revue.)
+const DISALLOWED_FOR_AUDIT_OUTPUT: readonly string[] = ["Bash", "MultiEdit", ...NESTED_AGENT_TOOLS];
+
+/** Outils bloqués pour un preset audit-output : Bash + nested (PAS Write/Edit,
+ *  path-scopés par le hook PreToolUse). Exporté pour le test. (#177) */
+export function disallowedForAuditOutput(): string[] {
+  return [...DISALLOWED_FOR_AUDIT_OUTPUT];
+}
 
 // Bloqué sur TOUS les envois, y compris ceux qui contournent le wrapper `send`
 // (la session d'interruption). Une entrée ajoutée ici s'applique aux deux sites ;
@@ -770,6 +792,7 @@ export async function runAgentLoop(
     // bloque dur ; le poser ici couvre TOUS les envois d'un coup. Les phases
     // (phased mode) passent deja leur propre disallow, superset compatible.
     if (config.readOnly) for (const tool of disallowedForMode("read_only")) blocked.add(tool);
+    if (config.auditOutput) for (const tool of DISALLOWED_FOR_AUDIT_OUTPUT) blocked.add(tool);
     const resp = await claude.send(content, { ...opts, disallowedTools: [...blocked] });
 
     totalCost += resp.costUsd;
@@ -918,6 +941,7 @@ export async function runAgentLoop(
     const interruptBlocked = [
       ...ALWAYS_BLOCKED,
       ...(config.readOnly ? disallowedForMode("read_only") : []),
+      ...(config.auditOutput ? DISALLOWED_FOR_AUDIT_OUTPUT : []),
     ];
     await interruptClaude.send(formatted, { maxTurns: 1, disallowedTools: interruptBlocked });
     return true;

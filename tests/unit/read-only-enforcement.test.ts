@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildProjectFromBce, buildSolo } from "../../src/bridge.js";
 import { buildAllowedTools } from "../../src/orchestrator/agent-launcher.js";
-import { disallowedForMode } from "../../src/agent-loop/agent-loop.js";
+import { disallowedForMode, disallowedForAuditOutput } from "../../src/agent-loop/agent-loop.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -136,5 +136,37 @@ describe("DF4 — un agent read-only ne peut pas ecrire l'arbre de travail", () 
     const blocked = disallowedForMode("full");
     expect(blocked).not.toContain("Write");
     expect(blocked).not.toContain("Bash");
+  });
+
+  // #177 — presets audit-output (gardien, phare) : lecture seule SAUF les chemins
+  // d'audit. Le hook PreToolUse path-scope Write/Edit ; Bash (que le hook ne
+  // couvre pas) est retire cote agent-loop. C'est l'autre moitie du trou de #1.
+  describe("#177 — audit-output : Bash retire, Write/Edit path-scopes par hook", () => {
+    it("WIRING : gardien est audit_output (et PAS read_only)", () => {
+      const g = buildProjectFromBce("gardien", ctx, {}, REPO).agents[0];
+      expect(g.audit_output).toBe(true);
+      expect(g.read_only).toBe(false); // sinon regression #34 (perd AUDIT.md)
+    });
+
+    it("ENFORCEMENT : le disallow audit-output retire Bash + nested, GARDE Write/Edit", () => {
+      const blocked = disallowedForAuditOutput();
+      expect(blocked, "Bash doit etre bloque (vecteur d'ecriture hors hook)").toContain("Bash");
+      expect(blocked).toContain("Task");
+      expect(blocked).toContain("Agent");
+      // MultiEdit doit etre bloque : le hook path-scope ne le couvre PAS (ni son
+      // matcher Edit|Write|NotebookEdit, ni son case) et sous skip-permissions
+      // l'allowlist est du theatre, donc sans ce blocage il ecrirait hors scope.
+      expect(blocked, "MultiEdit doit etre bloque (non couvert par le hook)").toContain("MultiEdit");
+      // Write/Edit RESTENT : ce sont les livrables d'audit, path-scopes par le hook.
+      expect(blocked).not.toContain("Write");
+      expect(blocked).not.toContain("Edit");
+    });
+
+    it("HOOK : gardien emet un pre-tool-use qui invoque le guard path-scope avec ses chemins", () => {
+      const g = buildProjectFromBce("gardien", ctx, {}, REPO).agents[0];
+      const pre = (g.hooks ?? {})["pre-tool-use"] ?? "";
+      expect(pre).toContain("audit_output_guard.sh");
+      expect(pre).toContain("AUDIT.md"); // le chemin declare est passe en arg
+    });
   });
 });

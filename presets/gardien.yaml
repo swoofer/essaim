@@ -6,7 +6,6 @@ behaviors:
   - user-brief
   - coordinator-rules
   - announce-before-write
-  - check-interrupt
   - activity-tracking
   - shared-workspace
   - read-only-mode

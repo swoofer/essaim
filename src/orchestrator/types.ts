@@ -13,6 +13,9 @@ export interface AgentConfig {
   model?: string;
   modules?: string[];      // modules this agent works on (for coordination)
   read_only?: boolean;
+  // Preset audit-output (read-only SAUF chemins d'audit) : hook PreToolUse
+  // path-scope Write/Edit, et Bash est retiré côté agent-loop. (#177)
+  audit_output?: boolean;
   launch_delay?: number; // Seconds to wait before launching (overrides stagger for group launching)
   // BCE pipeline outputs — required for coordinated runs, populated by buildProjectFromBce
   hooks: Record<string, string>; // lifecycle → assembled shell script
