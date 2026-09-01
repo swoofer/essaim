@@ -75,4 +75,4 @@ It holds **the path to reset**, not a boolean. Before creating worktrees it runs
 
 ## Logging
 
-Pino JSON to stdout. Component loggers: `orchestrator`, `agent-loop`, `phase-scheduler`, `work-stealing`, `effort`, `quota`, `tokens`. `LOG_LEVEL=debug`, pretty via `NODE_ENV=development`. Per-run token report lands in `reports/YYYY-MM-DD-<run-id>.md` (gitignored).
+Pino JSON to stdout. Component loggers: `orchestrator`, `agent-loop`, `phase-scheduler`, `work-stealing`, `effort`, `quota`, `tokens`. `LOG_LEVEL=debug`, pretty via `NODE_ENV=development`. Per-run token report lands in `reports/report-<run-id>.md` (run-id = `<template>-<8-hex>`; gitignored).
