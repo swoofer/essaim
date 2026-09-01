@@ -98,3 +98,42 @@ jobs:
       - run: pnpm test
 
       - run: pnpm build
+
+  # DF2 (généralité) — essaim doit marcher sur un dépôt qui n'est PAS essaim,
+  # dans un langage qui n'est PAS TypeScript, lancé depuis un cwd externe. Ce
+  # job échouait avant les chantiers 11-14 (#156 scope paramétrique, #157
+  # isTestFile par langage, #158 runs/reports ancrés sur -p, #160 tsc TS-only).
+  third-party:
+    name: Dépôt tiers (Python), cwd externe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      - name: scan + run --dry-run sur un dépôt Python jetable, depuis un cwd externe
+        run: |
+          set -euo pipefail
+          # dépôt Python jetable (marqueur pyproject.toml pour la détection)
+          REPO="$(mktemp -d)"
+          git init -q "$REPO"
+          printf '[project]\nname = "calc"\nversion = "0.1.0"\n' > "$REPO/pyproject.toml"
+          mkdir -p "$REPO/src"
+          printf 'def add(a, b):\n    return a + b\n' > "$REPO/src/calc.py"
+          printf 'def test_add():\n    assert True\n' > "$REPO/src/calc_test.py"
+          git -C "$REPO" add .
+          git -C "$REPO" -c user.email=ci@ci -c user.name=ci commit -qm init
+          # cwd EXTERNE : ni le dépôt cible, ni essaim
+          CWD="$(mktemp -d)"; cd "$CWD"
+          ESSAIM="$GITHUB_WORKSPACE/dist/cli/index.js"
+          # le scanner détecte Python (pas de langage figé)
+          node "$ESSAIM" scan "$REPO" > /tmp/scan.out
+          grep -qi python /tmp/scan.out
+          # dry-run raid : assemble prompts + plan sans lancer d'agent ni coordinator
+          ESSAIM_SKIP_DOCTOR=1 node "$ESSAIM" run raid -p "$REPO" --dry-run
+          # DF2 : AUCUN dossier créé dans le cwd externe (#158)
+          if [ -n "$(ls -A "$CWD")" ]; then echo "::error::cwd sali: $(ls -A "$CWD")"; exit 1; fi
