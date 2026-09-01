@@ -61,8 +61,7 @@ essaim ships the orchestrator (agent-loop, preset runner, phase scheduler) and t
 ### Prerequisites
 
 - Node.js >= 22
-- `claude` CLI on PATH (install from [claude.ai/code](https://claude.ai/code))
-- `ANTHROPIC_API_KEY` environment variable set
+- `claude` CLI on PATH (install from [claude.ai/code](https://claude.ai/code)), signed in — essaim drives your existing Claude subscription, no API key needed
 
 ### Install
 
@@ -213,7 +212,7 @@ Model selection is phase-aware: each phase requests an effort level, the orchest
 | Level | Model | Thinking | maxTurns | Cost | Use case |
 |-------|-------|----------|---------:|------|----------|
 | `low` | `claude-haiku-4-5` | none | 15 | $ | Coordination chatter, trivial review |
-| `mid` | `claude-sonnet-4-6` | `think` | 8 | $$ | Discover, standard execute, dispatched work |
+| `mid` | `claude-sonnet-4-6` | `think` | 16 | $$ | Discover, standard execute, dispatched work |
 | `high` | `claude-opus-4-6` | `think-hard` | 20 | $$$ | Complex execute with thinking headroom |
 | `max` | `claude-opus-4-6` | `ultrathink` | 60 | $$$$ | Architecture debates, deep reasoning |
 | `auto` | resolved by context | — | — | — | `read_only`/no-tools -> low; loop -> high; else mid |
@@ -226,7 +225,7 @@ essaim is a CLI, installed via npm (`npm install -g essaim`). All commands:
 
 | Command | Description |
 |---------|-------------|
-| `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--set-file k=path] [--dry-run] [--base-ref ref] [--coordinator-url url] [--max-quota-pct pct] [--cleanup]` | Launch coordinated agents using a template. `--dry-run` previews the assembled prompts + agent plan without launching. `--set-file behavior.param=path` reads the param value verbatim from a file (no shell quoting, wins over `--set` on conflict). |
+| `essaim run <template> [-p path] [--agents N] [--timeout min] [--set k=v] [--set-file k=path] [--dry-run] [--base-ref ref] [--coordinator-url url] [--max-quota-pct pct] [--max-budget-usd usd] [--cleanup]` | Launch coordinated agents using a template. `--dry-run` previews the assembled prompts + agent plan without launching. `--set-file behavior.param=path` reads the param value verbatim from a file (no shell quoting, wins over `--set` on conflict). `--max-budget-usd` sets a hard dollar ceiling per agent (forwarded to `claude --max-budget-usd`); an agent that reaches it exits with reason `budget_exceeded`. |
 | `essaim pipeline -f <file> [--coordinator-url url] [--max-quota-pct pct] [--dry-run]` | Run a sequence of template runs across per-step repos, strictly sequential, stop on first failure. See [Pipelines](#pipelines). |
 | `essaim solo <template> [-p path] [--timeout min] [--set k=v] [--set-file k=path]` | Launch a single agent without orchestration |
 | `essaim scan <path>` | Auto-detect project language, structure, test framework |
@@ -242,7 +241,7 @@ essaim run raid -p ~/my-project --dry-run           # preview assembled prompts,
 essaim run raid -p ~/my-project --agents 3          # bug hunt
 essaim run swarm -p ~/my-project --agents 4         # refactoring
 essaim solo gardien -p ~/my-project                 # read-only audit
-essaim run raid -p ~/my-project --set bug-hunting.modules='["src/auth"]'
+essaim run raid -p ~/my-project --modules src/auth  # scope the hunt to one module
 ```
 
 ---
@@ -339,16 +338,16 @@ A catalog you **name** and that does not exist is a hard error, never a silent n
 
 ## Anthropic Quota Pre-flight
 
-`run` and `solo` check your Anthropic workspace quota before launching N agents, to avoid 429 storms mid-session.
+`run` (and `pipeline` / `security`) check your Anthropic workspace quota before launching N agents, to avoid 429 storms mid-session.
 
 ```bash
 essaim run raid -p ~/my-app --agents 4 --max-quota-pct 90
 # Aborts if workspace utilization >= 90%
 ```
 
-- Reads usage from the Anthropic API using the key in the environment.
+- Reads usage from the coordinator's `/api/quota` endpoint — the coordinator, not essaim, sources the quota.
 - Threshold via `--max-quota-pct` flag or `MAX_QUOTA_PCT` env var (default `95`).
-- Back-off when the usage endpoint itself returns 429.
+- Fails open (launches anyway) if the endpoint is unreachable or returns non-200, so a quota outage never blocks a run.
 
 essaim emits the resulting `token_usage` and `quota_update` events to the coordinator; the dashboard widget is rendered by mcp-coordinator.
 
@@ -356,7 +355,7 @@ essaim emits the resulting `token_usage` and `quota_update` events to the coordi
 
 ## Token Observability
 
-Every agent turn is logged via the `tokens` component logger (`input_tokens`, `output_tokens`, `cache_read`, `cache_creation`, `thinking`, model, turn index). A per-run `reports/YYYY-MM-DD-<run-id>.md` aggregates totals by agent / phase / effort, and surfaces `deduped: N` from `phase-review`. Live gauges live in the mcp-coordinator dashboard.
+Every agent turn is logged via the `tokens` component logger (`input_tokens`, `output_tokens`, `cache_read`, `cache_creation`, `thinking`, model, turn index). A per-run `reports/report-<run-id>.md` (the run-id is `<template>-<8-hex>`, e.g. `reports/report-raid-a1b2c3d4.md`) aggregates totals by agent / phase / effort, and surfaces `deduped: N` from `phase-review`. Live gauges live in the mcp-coordinator dashboard.
 
 ---
 
@@ -386,7 +385,7 @@ Any other value, including the old `=1`, is refused with an error naming both th
 
 You rarely need this. `git worktree add` snapshots from a git ref, so worktrees are unaffected by a dirty base — without the opt-in essaim just logs a warning and carries on.
 
-Resolution priority: CLI flag → env var → `config.json` → default. If the coordinator has JWT auth on, `essaim init` provisions a token into `.coordinator-env` and essaim attaches it to every MCP HTTP and MQTT request automatically.
+Resolution priority: CLI flag → env var → `config.json` → default. If the coordinator has JWT auth on, set `COORDINATOR_TOKEN` in the environment; the generated `.mcp.json` references it as `${COORDINATOR_TOKEN}` (so the secret never lands on disk) and essaim attaches it to every MCP HTTP and MQTT request automatically.
 
 ---
 

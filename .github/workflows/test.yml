@@ -59,6 +59,35 @@ jobs:
           fi
           echo "OK — aucune commande CLI morte."
 
+      # Purge doc (#171). Dix affirmations périmées ou fausses, bannies des deux
+      # seuls docs user-facing (README.md + docs/index.html). Elles ont réellement
+      # existé : ANTHROPIC_API_KEY en prérequis faisait SORTIR l'utilisateur de son
+      # abonnement vers la facturation API — une ligne de doc qui coûtait de l'argent.
+      # Chaque motif = 0 occurrence. Portée limitée à ces deux fichiers : CHANGELOG,
+      # plans et specs gardent leurs mentions historiques légitimes (v0.9, Docker du
+      # sandbox Strix, etc.). Ce workflow s'exclut lui-même comme les étapes voisines.
+      # Deux motifs visent la cellule d'effort mid (valeur réelle = 16 tours, pas 8) :
+      # `| 8 | $$` pour la table README, `<td>8</td>` pour la table HTML — spécifiques
+      # à la ligne mid (coût $$ / seule cellule à un chiffre de la table).
+      - name: Refuser les affirmations doc périmées (#171)
+        run: |
+          if git grep -In -E \
+            -e 'ANTHROPIC_API_KEY' \
+            -e 'provisions a token' \
+            -e 'usage from the Anthropic API' \
+            -e 'Back-off when the usage endpoint' \
+            -e '`run` and `solo`' \
+            -e 'Runs locally with Docker' \
+            -e 'bug-hunting\.modules' \
+            -e 'v0\.9\.x' \
+            -e 'v0\.9\+' \
+            -e '\| 8 \| \$\$' \
+            -e '<td>8</td>' \
+            -- README.md docs/index.html > /tmp/stale-doc 2>/dev/null; then
+            echo "::error::Affirmations doc périmées réapparues (#171) :"; cat /tmp/stale-doc; exit 1
+          fi
+          echo "OK — aucune affirmation doc périmée."
+
   # Windows est la plateforme de développement de ce dépôt et une cible npm
   # supportée, et pourtant rien ne l'exerçait ici : les deux jobs étaient sur
   # ubuntu-latest. On teste donc la matrice ubuntu + windows.
