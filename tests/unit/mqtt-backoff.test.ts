@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 // Fake mqtt client — just enough surface for the listener.
 class FakeClient extends EventEmitter {
   ended = false;
+  options = { reconnectPeriod: 5000 }; // mqtt.js relit reconnectPeriod entre deux tentatives (#33)
   subscribe = vi.fn((_topics: unknown, cb: (e?: Error) => void) => cb());
   end = vi.fn((_force?: boolean) => { this.ended = true; });
 }
@@ -91,5 +92,27 @@ describe('mqtt-listener — backoff et abandon (#33)', () => {
     await expect(promise).rejects.toThrow('initial refusal');
     expect(fake.end).toHaveBeenCalled();
     expect(listener.connected).toBe(false);
+  });
+});
+
+// #33 — backoff exponentiel plafonné entre deux tentatives, plutôt qu'un
+// intervalle fixe qui martèle un ingress refusant l'upgrade WS.
+describe('mqtt-listener — backoff exponentiel plafonné (#33)', () => {
+  it('double le délai à chaque reconnexion, plafonné à 30s', () => {
+    const listener = createMqttListener({ url: 'ws://c/mqtt', agentId: 'a1', agentModules: [] });
+    listener.connect().catch(() => {});
+    const periods: number[] = [];
+    for (let i = 0; i < 4; i++) { fake.emit('reconnect'); periods.push(fake.options.reconnectPeriod); }
+    // 5s×2^1=10s, ×2^2=20s, ×2^3=40s→cap 30s, ×2^4=80s→cap 30s
+    expect(periods).toEqual([10_000, 20_000, 30_000, 30_000]);
+  });
+
+  it('une connexion réussie remet le délai de base (5s)', () => {
+    const listener = createMqttListener({ url: 'ws://c/mqtt', agentId: 'a1', agentModules: [] });
+    listener.connect().catch(() => {});
+    fake.emit('reconnect'); fake.emit('reconnect'); // délai monté à 20s
+    expect(fake.options.reconnectPeriod).toBe(20_000);
+    fake.emit('connect');
+    expect(fake.options.reconnectPeriod).toBe(5_000); // repart de zéro
   });
 });

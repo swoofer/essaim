@@ -234,6 +234,10 @@ export function buildInterrupt(
 // rather than spin. Giving up is announced once, loudly.
 const RECONNECT_PERIOD_MS = 5_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+// #33 — backoff EXPONENTIEL plafonné entre deux tentatives (5s→10s→20s, cap 30s)
+// plutôt qu'un intervalle fixe : ne pas marteler un ingress (Tailscale/Envoy) qui
+// refuse l'upgrade WS. Le cap 30s garde giveUp() atteignable dans un temps borné.
+const MAX_RECONNECT_PERIOD_MS = 30_000;
 
 export function createMqttListener(options: MqttListenerOptions): MqttListener {
   const { url, agentId, coordinatorUrl } = options;
@@ -407,6 +411,7 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
           hasConnected = true;
           isConnected = true;
           reconnectAttempts = 0; // a successful connect earns a fresh budget
+          if (client?.options) client.options.reconnectPeriod = RECONNECT_PERIOD_MS; // #33 — repart du backoff de base
           void catchUpOpenConsultations();
           const org = orgFromToken(coordinatorToken());
           const topics = topicsForOrg(org);
@@ -455,6 +460,16 @@ export function createMqttListener(options: MqttListenerOptions): MqttListener {
           isConnected = false;
           if (++reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
             giveUp(`${MAX_RECONNECT_ATTEMPTS} reconnect attempts failed`);
+            return;
+          }
+          // #33 — backoff exponentiel plafonné : la PROCHAINE tentative attend
+          // 2× plus longtemps (5s, 10s, 20s… cap 30s). mqtt.js relit
+          // reconnectPeriod entre deux tentatives.
+          if (client?.options) {
+            client.options.reconnectPeriod = Math.min(
+              RECONNECT_PERIOD_MS * 2 ** reconnectAttempts,
+              MAX_RECONNECT_PERIOD_MS,
+            );
           }
         });
       });
