@@ -123,18 +123,50 @@ class HttpError extends Error {
   }
 }
 
+// #191 — un blip transitoire (coordinator qui redémarre, 503/429 momentané)
+// teignait un run réussi en ROUGE : coordinatorPost jetait sur TOUT non-ok, et
+// les 3 sites de semis lisent `posted===0` comme « write-path mort » (#184).
+// On retente, MAIS uniquement les cas où le serveur n'a PROUVABLEMENT rien écrit —
+// /api/announce fait un INSERT inconditionnel sans dédup (consultation.ts), donc
+// retenter un POST qui a pu aboutir créerait un thread doublon. Sûrs à retenter :
+//   - statuts d'infra rejetés AVANT tout traitement applicatif : 408/429/502/503/504 ;
+//   - erreurs réseau PRÉ-connexion : la requête n'a jamais atteint le serveur.
+// Volontairement PAS retentés : les timeouts ambigus post-envoi et les 5xx
+// applicatifs (500) — la requête a pu être traitée, on préfère un rouge honnête
+// (échec sûr) à un doublon. L'idempotence de /api/announce reste un chantier
+// coordinator séparé.
+const RETRYABLE_HTTP = new Set([408, 429, 502, 503, 504]);
+const RETRYABLE_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
+const MAX_POST_ATTEMPTS = 3;
+const POST_BACKOFF_MS = 150;
+
 async function coordinatorPost(url: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  let resp: Response;
-  try {
-    resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
-  } catch (err) {
-    throw new Error(`Cannot reach coordinator at ${url}: ${(err as Error).message}`);
+  let lastErr: Error = new Error(`Cannot reach coordinator at ${url}`);
+  for (let attempt = 1; attempt <= MAX_POST_ATTEMPTS; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+    } catch (err) {
+      const code = (err as { cause?: { code?: string } })?.cause?.code;
+      lastErr = new Error(`Cannot reach coordinator at ${url}: ${(err as Error).message}`);
+      if (code && RETRYABLE_NET.has(code) && attempt < MAX_POST_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, POST_BACKOFF_MS * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+    if (!resp.ok) {
+      const bodyText = await resp.text().catch(() => "");
+      lastErr = new HttpError(resp.status, url, bodyText);
+      if (RETRYABLE_HTTP.has(resp.status) && attempt < MAX_POST_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, POST_BACKOFF_MS * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+    return (await resp.json()) as Record<string, unknown>;
   }
-  if (!resp.ok) {
-    const bodyText = await resp.text().catch(() => "");
-    throw new HttpError(resp.status, url, bodyText);
-  }
-  return (await resp.json()) as Record<string, unknown>;
+  throw lastErr; // épuisé les tentatives sur un cas retentable
 }
 
 /**
