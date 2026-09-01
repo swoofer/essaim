@@ -57,6 +57,99 @@ describe("postDiscoveries", () => {
 
     vi.unstubAllGlobals();
   });
+
+  // #191 — un 503 transitoire au semis teignait un run réussi en rouge. On
+  // retente ; le run reste vert.
+  it("retente un 503 transitoire et récupère — pas de faux rouge (#191)", async () => {
+    let calls = 0;
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) return { ok: false, status: 503, text: async () => "unavailable" };
+      return { ok: true, json: async () => ({ thread_id: "t-ok", status: "open" }) };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts", severity: "high" }]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("t-ok");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
+
+  // Le cas réel : le coordinator redémarre, connexion refusée, PUIS revient.
+  it("retente une erreur réseau pré-connexion (coordinator qui redémarre) et récupère (#191)", async () => {
+    let calls = 0;
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) { const e = new Error("fetch failed") as Error & { cause?: unknown }; e.cause = { code: "ECONNREFUSED" }; throw e; }
+      return { ok: true, json: async () => ({ thread_id: "t-net", status: "open" }) };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result[0].id).toBe("t-net");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
+
+  // Sûreté anti-doublon : /api/announce n'est PAS idempotent (INSERT sans dédup).
+  // Un 500 a PU écrire ; on ne retente donc PAS — une seule tentative, rouge honnête.
+  it("ne retente PAS un 500 — évite un thread doublon sur announce non-idempotent (#191)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => ({ ok: false, status: 500, text: async () => "boom" }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result).toHaveLength(0);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  // Un coordinator réellement mort reste rapporté rouge (échec sûr), sans boucle infinie.
+  it("abandonne après un nombre borné de tentatives sur un 503 persistant (#191)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => ({ ok: false, status: 503, text: async () => "down" }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result).toHaveLength(0);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+
+    vi.unstubAllGlobals();
+  });
+
+  // Revue adverse : en PROD le coordinator est derrière un reverse proxy. Un 502
+  // (ou 504) peut être émis APRÈS que l'INSERT non-idempotent a committé → on ne
+  // retente PAS, sinon thread doublon.
+  it("ne retente PAS un 502 — un reverse proxy peut l'émettre après l'INSERT committé (#191 revue)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => ({ ok: false, status: 502, text: async () => "bad gateway" }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result).toHaveLength(0);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  // undici lève un AggregateError (code sur cause.errors[]) quand l'hôte résout
+  // vers plusieurs adresses (localhost → ::1 + 127.0.0.1) — le retry doit le voir.
+  it("retente une erreur réseau AggregateError (localhost multi-adresses) (#191 revue)", async () => {
+    let calls = 0;
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) { const e = new Error("fetch failed") as Error & { cause?: unknown }; e.cause = { errors: [{ code: "ECONNREFUSED" }, { code: "ECONNREFUSED" }] }; throw e; }
+      return { ok: true, json: async () => ({ thread_id: "t-agg", status: "open" }) };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const result = await postDiscoveries("http://c", "a1", [{ id: "", description: "x", file: "a.ts" }]);
+    expect(result[0].id).toBe("t-agg");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
 });
 
 // claimNextTask rend désormais Task | null | COORDINATOR_UNREACHABLE (#151) :

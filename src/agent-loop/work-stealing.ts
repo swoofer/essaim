@@ -123,18 +123,70 @@ class HttpError extends Error {
   }
 }
 
+// #191 — un blip transitoire (coordinator qui redémarre, 503/429 momentané)
+// teignait un run réussi en ROUGE : coordinatorPost jetait sur TOUT non-ok, et
+// les 3 sites de semis lisent `posted===0` comme « write-path mort » (#184).
+// On retente, MAIS uniquement les cas où le serveur n'a PROUVABLEMENT rien écrit —
+// /api/announce fait un INSERT inconditionnel sans dédup (consultation.ts), donc
+// retenter un POST qui a pu aboutir créerait un thread doublon. Sûrs à retenter :
+//   - 408/429/503 : rejet AVANT tout traitement (client lent, rate-limit, ou
+//     proxy « no healthy upstream » / app en arrêt) ;
+//   - erreurs réseau PRÉ-connexion : la requête n'a jamais atteint le serveur.
+// Volontairement PAS retentés — la requête a PU être traitée, on préfère un rouge
+// honnête (échec sûr) à un doublon :
+//   - 500 applicatif (l'INSERT a pu committer avant l'erreur) ;
+//   - 502/504 : en PROD le coordinator est derrière un reverse proxy (Caddy) ;
+//     ces statuts signifient « l'upstream a pu recevoir et traiter » puis tomber
+//     (502) ou traîner (504) — le proxy ré-étiquette en 502 une coupure qui, en
+//     direct, serait un ECONNRESET (lui exclu). Les inclure rouvrirait le doublon.
+//   - UND_ERR_CONNECT_TIMEOUT et autres timeouts post-envoi (ambigus + ~10 s
+//     d'attente undici × 3, séquentiel sur N findings = latence ×3).
+// L'idempotence de /api/announce reste un chantier coordinator séparé.
+const RETRYABLE_HTTP = new Set([408, 429, 503]);
+const RETRYABLE_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
+const MAX_POST_ATTEMPTS = 3;
+const POST_BACKOFF_MS = 150;
+
+// undici enveloppe l'erreur système sous `.cause`, mais lève un AggregateError
+// (code sur `.cause.errors[i].code`) quand l'hôte résout vers plusieurs adresses
+// (localhost → ::1 + 127.0.0.1). On lit les deux formes ; sinon un blip local
+// sur `localhost` ne serait jamais retenté. (Le coordinator in-process utilise
+// 127.0.0.1 — mono-adresse — donc la forme simple suffit là, mais une URL
+// `localhost` fournie à la main tomberait sur l'AggregateError.)
+function networkErrorCode(err: unknown): string | undefined {
+  const cause = (err as { cause?: { code?: string; errors?: Array<{ code?: string }> } })?.cause;
+  if (cause?.code) return cause.code;
+  if (Array.isArray(cause?.errors)) return cause.errors.find((e) => e?.code)?.code;
+  return undefined;
+}
+
 async function coordinatorPost(url: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  let resp: Response;
-  try {
-    resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
-  } catch (err) {
-    throw new Error(`Cannot reach coordinator at ${url}: ${(err as Error).message}`);
+  let lastErr: Error = new Error(`Cannot reach coordinator at ${url}`);
+  for (let attempt = 1; attempt <= MAX_POST_ATTEMPTS; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+    } catch (err) {
+      const code = networkErrorCode(err);
+      lastErr = new Error(`Cannot reach coordinator at ${url}: ${(err as Error).message}`);
+      if (code && RETRYABLE_NET.has(code) && attempt < MAX_POST_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, POST_BACKOFF_MS * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+    if (!resp.ok) {
+      const bodyText = await resp.text().catch(() => "");
+      lastErr = new HttpError(resp.status, url, bodyText);
+      if (RETRYABLE_HTTP.has(resp.status) && attempt < MAX_POST_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, POST_BACKOFF_MS * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+    return (await resp.json()) as Record<string, unknown>;
   }
-  if (!resp.ok) {
-    const bodyText = await resp.text().catch(() => "");
-    throw new HttpError(resp.status, url, bodyText);
-  }
-  return (await resp.json()) as Record<string, unknown>;
+  throw lastErr; // épuisé les tentatives sur un cas retentable
 }
 
 /**
