@@ -193,6 +193,33 @@ describe("writeClaudeHooksDir", () => {
     expect(essaimCount("PostToolUse")).toBe(1);
     expect(essaimCount("Stop")).toBe(1);
   });
+
+  // #172 (revue adverse) — le marqueur ne doit PAS être un substring nu
+  // `.coordinator-env` : un hook utilisateur qui source lui-même l'env, ou une
+  // commande qui mentionne un chemin voisin, doit survivre.
+  it("does not clobber a user hook that merely references .coordinator-env (#172 tight marker)", () => {
+    const claudeDir = path.join(TMP_ROOT, "tight-marker", ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const userSettings = {
+      hooks: {
+        // source l'env essaim pour SON propre setup — n'est PAS une entrée essaim
+        SessionStart: [{ hooks: [{ type: "command", command: "source .claude/.coordinator-env && my-extra-setup.sh" }] }],
+        // sur-correspondance de substring : un chemin qui préfixe .coordinator-env
+        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "guard --log .coordinator-env-audit.log" }] }],
+      },
+    };
+    fs.writeFileSync(path.join(claudeDir, "settings.json"), JSON.stringify(userSettings, null, 2));
+
+    writeClaudeHooksDir({ claudeDir, hooks: BCE_HOOKS, envVars: BCE_ENV_VARS, existingSettings: userSettings });
+
+    const settings = JSON.parse(fs.readFileSync(path.join(claudeDir, "settings.json"), "utf-8"));
+    const cmds = (event: string): string[] =>
+      (settings.hooks[event] ?? []).flatMap((e: { hooks: { command: string }[] }) => e.hooks.map((h) => h.command));
+    expect(cmds("SessionStart").some((c) => c.includes("my-extra-setup.sh"))).toBe(true);
+    expect(cmds("PreToolUse")).toContain("guard --log .coordinator-env-audit.log");
+    // l'entrée essaim (vraie forme source+bash+/hooks/) s'ajoute quand même à côté
+    expect(cmds("SessionStart").some((c) => c.includes("hooks"))).toBe(true);
+  });
 });
 
 function makeAgent(partial: Partial<AgentConfig> & Pick<AgentConfig, "id" | "name" | "profile">): AgentConfig {

@@ -777,9 +777,15 @@ export function writeClaudeHooksDir(params: {
     existingSettings.hooks && typeof existingSettings.hooks === "object" && !Array.isArray(existingSettings.hooks)
       ? { ...(existingSettings.hooks as Record<string, unknown[]>) }
       : {};
+  // Une entrée écrite par essaim a une forme FIXE : `… source …/.coordinator-env …
+  // && bash …/hooks/<lifecycle>.sh …`. On matche cette forme entière, pas un
+  // simple substring `.coordinator-env` : sinon un hook utilisateur qui source
+  // lui-même l'env, ou une commande qui mentionne un chemin voisin
+  // (`.coordinator-env-audit.log`), serait supprimé à tort (#172, revue adverse).
+  const ESSAIM_HOOK_CMD = /source\b[^&]*\.coordinator-env\b[^&]*&&\s*bash\b[^&]*[/\\]hooks[/\\][^&]*\.sh/;
   const isEssaimEntry = (entry: unknown): boolean => {
     const inner = (entry as { hooks?: Array<{ command?: unknown }> })?.hooks;
-    return Array.isArray(inner) && inner.some((h) => typeof h?.command === "string" && h.command.includes(".coordinator-env"));
+    return Array.isArray(inner) && inner.some((h) => typeof h?.command === "string" && ESSAIM_HOOK_CMD.test(h.command));
   };
   const mergedHooks: Record<string, unknown[]> = {};
   for (const [event, entries] of Object.entries(priorHooks)) {
@@ -803,8 +809,11 @@ export function writeClaudeHooksDir(params: {
   }
   settings.hooks = mergedHooks;
   const settingsPath = path.join(claudeDir, "settings.json");
-  // Sauvegarde avant écrasement : si la fusion se trompe, l'utilisateur récupère
-  // ses hooks dans settings.json.bak. Best-effort — jamais fatal (#172).
+  // Instantané de l'état PRÉ-init dans settings.json.bak avant écrasement, au cas
+  // où la fusion se tromperait. ponytail: mono-génération (réécrit à chaque init) —
+  // suffisant maintenant que le marqueur ESSAIM_HOOK_CMD rend la perte de hook
+  // utilisateur inatteignable ; passer à un .bak horodaté si le besoin apparaît.
+  // Best-effort — jamais fatal (#172).
   if (fs.existsSync(settingsPath)) {
     try { fs.copyFileSync(settingsPath, settingsPath + ".bak"); } catch { /* backup best-effort */ }
   }
