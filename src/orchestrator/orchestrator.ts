@@ -118,6 +118,8 @@ export interface RunProjectOptions {
    * in-process and the URL is set to http://localhost:<PORT>.
    */
   coordinatorUrl?: string;
+  /** Hard per-agent dollar ceiling, forwarded to `claude --max-budget-usd` (#167). */
+  maxBudgetUsd?: number;
 }
 
 export async function runProject(
@@ -406,6 +408,7 @@ async function _runProjectBody(
         deadlineMs,
         abortSignal: agentLoopAbort.signal,
         maxQuotaPct: agentLoopMaxQuotaPct,
+        maxBudgetUsd: runOpts.maxBudgetUsd,
       });
       agentLoopPromises.set(agent.id, loopPromise);
       return null; // no ChildProcess to track

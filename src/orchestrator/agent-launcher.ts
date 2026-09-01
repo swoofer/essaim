@@ -145,6 +145,10 @@ export interface LaunchAgentLoopOptions {
   // work-stealing tasks. Typically matches the orchestrator's pre-flight
   // threshold so the agent mirrors the raid-level policy.
   maxQuotaPct?: number;
+  // Hard dollar ceiling forwarded to `claude --max-budget-usd`. When the agent
+  // hits it, the CLI ends with result subtype error_max_budget_usd, which the
+  // loop maps to ExitReason=budget_exceeded (#167).
+  maxBudgetUsd?: number;
 }
 
 export async function launchAgentLoop(
@@ -185,6 +189,7 @@ export async function launchAgentLoop(
     deadlineMs: opts.deadlineMs,
     abortSignal: opts.abortSignal,
     maxQuotaPct: opts.maxQuotaPct,
+    maxBudgetUsd: opts.maxBudgetUsd,
     env: {
       COORDINATOR_URL: coordinatorUrl,
       COORDINATOR_AGENT_ID: agent.id,

@@ -31,6 +31,8 @@ export interface ExecuteRunOptions {
   coordinatorUrl?: string;
   baseRef?: string;
   maxQuotaPct?: number;
+  /** Hard per-agent dollar ceiling, forwarded to `claude --max-budget-usd` (#167). */
+  maxBudgetUsd?: number;
   /** Catalogues externes (--catalog, répétable). */
   catalogs?: string[];
   security?: import("../src/security/types.js").MiniProjectSecurity;
@@ -170,6 +172,7 @@ Catalogues consultés : ${roots}`,
   const result = await runProject(project, "with_coordinator", opts.cleanup, {
     maxQuotaPct: opts.maxQuotaPct,
     coordinatorUrl: resolvedCoordinatorUrl,
+    maxBudgetUsd: opts.maxBudgetUsd,
   });
   // Rapport ancré sur le dépôt CIBLE (-p), pas le cwd (#158).
   writeReport([result], resolve(projectPath, "reports"));

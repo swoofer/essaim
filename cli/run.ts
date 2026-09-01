@@ -68,6 +68,7 @@ export function createRunCommand(): Command {
     )
     .option("--base-ref <ref>", "Git ref for worktree snapshot (tag, branch, sha) — use for sandbox testing against a fixed codebase")
     .option("--max-quota-pct <pct>", "Abort pre-flight if Anthropic quota utilization is at/above this % (default 95, also reads MAX_QUOTA_PCT env)")
+    .option("--max-budget-usd <usd>", "Hard dollar ceiling per agent, forwarded to `claude --max-budget-usd`. An agent that reaches it exits with reason budget_exceeded.")
     .action(
       async (
         template: string | undefined,
@@ -84,6 +85,7 @@ export function createRunCommand(): Command {
           coordinatorUrl?: string;
           baseRef?: string;
           maxQuotaPct?: string;
+          maxBudgetUsd?: string;
           catalog: string[];
         },
       ) => {
@@ -130,6 +132,7 @@ export function createRunCommand(): Command {
             coordinatorUrl: opts.coordinatorUrl ?? opts.url,
             baseRef: opts.baseRef,
             maxQuotaPct: opts.maxQuotaPct ? Number(opts.maxQuotaPct) : undefined,
+            maxBudgetUsd: opts.maxBudgetUsd ? Number(opts.maxBudgetUsd) : undefined,
             catalogs: opts.catalog,
           });
         } catch (e) {

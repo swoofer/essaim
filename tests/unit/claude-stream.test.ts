@@ -199,6 +199,10 @@ describe("buildArgs", () => {
     expect(args).toContain("Read,Write");
     expect(args).toContain("--session-id");
     expect(args).toContain("abc-123");
+    // #167 — le plafond dollar doit atteindre le CLI claude ; sans la ligne
+    // args.push("--max-budget-usd", …) de buildClaudeArgs, ces deux-là tombent.
+    expect(args).toContain("--max-budget-usd");
+    expect(args).toContain("5");
     expect(args).toContain("--dangerously-skip-permissions");
   });
 
