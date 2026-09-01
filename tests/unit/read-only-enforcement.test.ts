@@ -153,6 +153,10 @@ describe("DF4 — un agent read-only ne peut pas ecrire l'arbre de travail", () 
       expect(blocked, "Bash doit etre bloque (vecteur d'ecriture hors hook)").toContain("Bash");
       expect(blocked).toContain("Task");
       expect(blocked).toContain("Agent");
+      // MultiEdit doit etre bloque : le hook path-scope ne le couvre PAS (ni son
+      // matcher Edit|Write|NotebookEdit, ni son case) et sous skip-permissions
+      // l'allowlist est du theatre, donc sans ce blocage il ecrirait hors scope.
+      expect(blocked, "MultiEdit doit etre bloque (non couvert par le hook)").toContain("MultiEdit");
       // Write/Edit RESTENT : ce sont les livrables d'audit, path-scopes par le hook.
       expect(blocked).not.toContain("Write");
       expect(blocked).not.toContain("Edit");

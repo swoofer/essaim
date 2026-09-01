@@ -354,10 +354,14 @@ const WRITE_USER_TOOLS: readonly string[] = ["Write", "Edit", "NotebookEdit"];
 // is already an agent, nested agents just explode the budget.
 const NESTED_AGENT_TOOLS: readonly string[] = ["Task", "Agent"];
 
-// audit-output : on NE bloque PAS Write/Edit (le hook PreToolUse les path-scope
-// sur les chemins d'audit) ; on bloque Bash (vecteur d'écriture que le hook ne
-// couvre pas) et les nested agents. (#177)
-const DISALLOWED_FOR_AUDIT_OUTPUT: readonly string[] = ["Bash", ...NESTED_AGENT_TOOLS];
+// audit-output : on NE bloque PAS Write/Edit/NotebookEdit (le hook PreToolUse les
+// path-scope sur les chemins d'audit — son matcher est Edit|Write|NotebookEdit).
+// On bloque Bash (écrit où il veut) ET MultiEdit (que le hook ne couvre PAS : ni
+// dans le matcher PreToolUse, ni dans le case du hook — et sous
+// --dangerously-skip-permissions l'allowlist est du théâtre, donc le modèle
+// pourrait l'appeler pour écrire hors scope ; redondant avec Edit, le retirer ne
+// coûte rien) et les nested agents. (#177, gap MultiEdit fermé à la revue.)
+const DISALLOWED_FOR_AUDIT_OUTPUT: readonly string[] = ["Bash", "MultiEdit", ...NESTED_AGENT_TOOLS];
 
 /** Outils bloqués pour un preset audit-output : Bash + nested (PAS Write/Edit,
  *  path-scopés par le hook PreToolUse). Exporté pour le test. (#177) */
