@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.18.0](https://github.com/swoofer/essaim/compare/v0.17.1...v0.18.0) (2026-09-01)
+
+
+### Features
+
+* **run:** --dry-run imprime modèle, effort et plafond de tours par phase ([#168](https://github.com/swoofer/essaim/issues/168)) ([#209](https://github.com/swoofer/essaim/issues/209)) ([7b29dac](https://github.com/swoofer/essaim/commit/7b29dac77d7107389cea530510cf4fac1d16f76f))
+* **run:** gitignorer les artefacts essaim — git status propre après un run ([#174](https://github.com/swoofer/essaim/issues/174)) ([#211](https://github.com/swoofer/essaim/issues/211)) ([b5b9fc1](https://github.com/swoofer/essaim/commit/b5b9fc1e5fe4e9a9a42a0e2f59c1de9c47883da8))
+* **run:** option --max-budget-usd — plafond dollar par agent ([#167](https://github.com/swoofer/essaim/issues/167)) ([#215](https://github.com/swoofer/essaim/issues/215)) ([78ec0e5](https://github.com/swoofer/essaim/commit/78ec0e510f3863e60135a998de518764f2aad05d))
+
+
+### Bug Fixes
+
+* **agent-loop:** honorer les overrides model/thinking de phase-execute ([#169](https://github.com/swoofer/essaim/issues/169)) ([#208](https://github.com/swoofer/essaim/issues/208)) ([1177686](https://github.com/swoofer/essaim/commit/1177686b42a82d0bff1616a1bbc0f140eb65c406))
+* **init:** fusionner les hooks par événement au lieu d'écraser + .bak ([#172](https://github.com/swoofer/essaim/issues/172)) ([#216](https://github.com/swoofer/essaim/issues/216)) ([402b3ee](https://github.com/swoofer/essaim/commit/402b3eea4345fd2a15fe7b1d3da750116b218122))
+* **mqtt:** backoff exponentiel plafonné sur le reconnect ([#33](https://github.com/swoofer/essaim/issues/33)) ([#213](https://github.com/swoofer/essaim/issues/213)) ([d644a7c](https://github.com/swoofer/essaim/commit/d644a7cd1438ada539bddec340e6625da8bfedd4))
+* **preflight:** « quota indisponible » en ligne texte, pas un log.warn JSON ([#173](https://github.com/swoofer/essaim/issues/173)) ([#207](https://github.com/swoofer/essaim/issues/207)) ([b8002cf](https://github.com/swoofer/essaim/commit/b8002cf37357038ae689947fe5eb4d75321742cd))
+* **presets:** scopes raid/swarm/melee paramétriques sur source_dirs/test_dirs ([#156](https://github.com/swoofer/essaim/issues/156)) ([#212](https://github.com/swoofer/essaim/issues/212)) ([aa56d40](https://github.com/swoofer/essaim/commit/aa56d402df5d688be8b596903a66aed0ff870b47))
+* **security:** healthCheck avant le scan + « expérimental » au lancement ([#170](https://github.com/swoofer/essaim/issues/170)) ([#205](https://github.com/swoofer/essaim/issues/205)) ([01423b0](https://github.com/swoofer/essaim/commit/01423b0639f81cc57894dfcfe38c1ed585fcc527))
+* **work-stealing:** retenter les blips transitoires au semis, sans risque de doublon ([#191](https://github.com/swoofer/essaim/issues/191)) ([#218](https://github.com/swoofer/essaim/issues/218)) ([5d84e7f](https://github.com/swoofer/essaim/commit/5d84e7f5fecdd8b17f40619fdc2d03598f2c54b5))
+
+
+### Documentation
+
+* **claude:** effort mid = 16 tours, pas 8 (résidu [#171](https://github.com/swoofer/essaim/issues/171)) ([#219](https://github.com/swoofer/essaim/issues/219)) ([c042323](https://github.com/swoofer/essaim/commit/c042323b4187c6c682f6af8348e7c3444c745245))
+* purge de dix affirmations périmées + garde CI ([#171](https://github.com/swoofer/essaim/issues/171)) ([#217](https://github.com/swoofer/essaim/issues/217)) ([f5f6e46](https://github.com/swoofer/essaim/commit/f5f6e460d6ddbc9ba9b2f8ab966c2c4c1e6c7199))
+
 ## [0.17.1](https://github.com/swoofer/essaim/compare/v0.17.0...v0.17.1) (2026-08-31)
 
 
