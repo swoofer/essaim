@@ -231,6 +231,17 @@ export function buildArgs(opts: ClaudeStreamOptions, prompt: string, resume: boo
     "--output-format", "stream-json",
     "--verbose",
   ];
+  // Isolé de l'environnement utilisateur (~/.claude). Ses plugins, skills,
+  // agents, hooks SessionStart et MCP globaux gonflaient chaque envoi, et le
+  // contenu variable de ces hooks forçait la réécriture du cache : mesuré 18,6k
+  // tokens réécrits par envoi contre 4,5k isolé, −69 % sur le premier appel.
+  // Les réglages du projet — dont les hooks qu'essaim écrit dans le worktree —
+  // restent chargés, et --strict-mcp-config ne garde que --mcp-config.
+  // ESSAIM_INHERIT_USER_SETTINGS=1 rend l'héritage, pour une auth ou un proxy
+  // Claude configuré dans ~/.claude/settings.json.
+  if (process.env.ESSAIM_INHERIT_USER_SETTINGS !== "1") {
+    args.push("--setting-sources", "project,local", "--strict-mcp-config");
+  }
   if (resume && opts.sessionId) {
     args.push("--resume", opts.sessionId);
   }

@@ -370,6 +370,7 @@ Every agent turn is logged via the `tokens` component logger (`input_tokens`, `o
 | `MAX_QUOTA_PCT` | `95` (overrides the pre-flight default) |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 | `ESSAIM_RESET_BASE` | `/tmp/essaim-sandbox` — **destructive**, see below |
+| `ESSAIM_INHERIT_USER_SETTINGS` | `1` — let spawned `claude` load your `~/.claude` plugins, hooks and MCP servers (off by default: they bloat every send and break prompt caching) |
 
 ### `ESSAIM_RESET_BASE` — destructive, and it names its own target
 
