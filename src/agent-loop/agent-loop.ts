@@ -1,5 +1,5 @@
 import { createClaudeStream, type ClaudeStreamClient, type AssistantResponse, type SendOptions, type TokenUsage, type CompactionInfo, BudgetExceededError, AbortError } from "./claude-stream.js";
-import { createMqttListener, type MqttListener, type MqttInterrupt, type InterruptType } from "./mqtt-listener.js";
+import { createMqttListener, type MqttListener } from "./mqtt-listener.js";
 import {
   createCoordinationProtocol,
   type CoordinationProtocol,
@@ -312,16 +312,6 @@ export function extractDoneSummary(content: string, fallback: string): string {
   return content.slice(last.index + last[0].length).replace(/^[*_`\s]+/, "").trim() || fallback;
 }
 
-// Interrupt types that are handled silently (state update only, no LLM call)
-const SILENT_INTERRUPT_TYPES: Set<InterruptType> = new Set([
-  "consultation_claimed",
-  "consultation_completed",
-  "consultation_resolved",
-  "consultation_resolving",
-  "agent_online",
-  "agent_offline",
-]);
-
 // ── Per-phase tool restriction ─────────────────────────────────────────
 // Tools mode drives which user-facing tools the agent can call during a phase.
 // MCP tools (prefix "mcp__") pass through unconditionally since coordination
@@ -391,20 +381,7 @@ Règles :
 - Fais UNE action par réponse (un Edit, un Read, un Bash...)
 - N'appelle PAS announce_work, post_to_thread, propose_resolution — le système le fait
 - Quand tu as fini le travail, dis "DONE: <résumé en une phrase>"
-- Quand le système t'injecte un interrupt, réponds-y avant de continuer
 `.trim();
-
-function formatInterrupts(interrupts: MqttInterrupt[]): string {
-  const lines = interrupts.map((i) => {
-    const parts = [`[${i.type}]`];
-    if (i.agentId) parts.push(`from ${i.agentId}`);
-    if (i.threadId) parts.push(`thread=${i.threadId}`);
-    if (i.subject) parts.push(`subject: ${i.subject}`);
-    if (i.content) parts.push(i.content);
-    return parts.join(" ");
-  });
-  return `[INTERRUPTION SYSTÈME] Les messages suivants viennent d'autres agents. Réponds-y brièvement avant de continuer ton travail. ${lines.join(" | ")}`;
-}
 
 function formatCoordinationContext(context: string, responses: string): string {
   return `[CONTEXTE COORDINATION] ${context} Réponses des autres agents: ${responses} Que fais-tu? Réponds par CONTINUE, YIELD, ou ADJUST suivi de ton nouveau plan.`;
@@ -623,18 +600,6 @@ export async function runAgentLoop(
       COORDINATOR_AGENT_ID: config.agentId,
       COORDINATOR_AGENT_NAME: config.agentName,
     },
-  });
-
-  // Separate lightweight session for interrupt responses (Fix 5: don't pollute main context).
-  // Hardcoded to haiku (low effort) — interrupts are ack-level work and never need opus.
-  const interruptClaude: ClaudeStreamClient = createClaudeStream({
-    workspacePath: config.workspacePath,
-    model: EFFORT_PROFILES.low.model,
-    appendSystemPrompt: "Tu reçois des notifications d'autres agents. Réponds en 1-2 phrases max.",
-    maxTurns: 1,
-    dangerouslySkipPermissions: config.dangerouslySkipPermissions,
-    abortSignal: config.abortSignal,
-    env: config.env,
   });
 
   // ── Termination gates (F1 + F2) ───────────────────────────────────────
@@ -859,72 +824,29 @@ export async function runAgentLoop(
     return { level, model, thinking, maxTurns };
   }
 
-  // ── Helper: process MQTT interrupts (Fix 1: silent filtering) ─────
+  // ── Helper: process MQTT interrupts ───────────────────────────────
 
-  async function processInterrupts(): Promise<boolean> {
+  // Les interruptions alimentent la machine d'état, et plus AUCUN modèle.
+  // Elles partaient dans une session haiku séparée dont la réponse était
+  // jetée : l'agent principal n'en voyait rien, pour ≈ 17k EP par agent et par
+  // run — et cette session pouvait agir par outils sur la foi d'un message de
+  // pair. Faire lire le savoir des pairs par l'agent qui travaille est un autre
+  // chantier ; payer un modèle qui ne le transmet à personne n'en fait pas partie.
+  async function processInterrupts(): Promise<void> {
     const interrupts = mqtt.drain();
-    if (interrupts.length === 0) return false;
+    if (interrupts.length === 0) return;
 
     mqttMessagesProcessed += interrupts.length;
 
-    const important: MqttInterrupt[] = [];
-
     for (const interrupt of interrupts) {
-      // Always feed to protocol state machine (no LLM needed)
       if (interrupt.type === "consultation_message" && interrupt.threadId && interrupt.agentId) {
         protocol.onThreadMessage(interrupt.threadId, interrupt.agentId, interrupt.content || "");
       }
       if (interrupt.type === "consultation_resolving" && interrupt.threadId) {
         protocol.onResolutionProposed(interrupt.threadId);
       }
-
-      // Silent types: log and skip LLM
-      if (SILENT_INTERRUPT_TYPES.has(interrupt.type)) {
-        logger.debug("MQTT silent", { type: interrupt.type, threadId: interrupt.threadId });
-        continue;
-      }
-
-      // consultation_new: only if target modules overlap with ours
-      if (interrupt.type === "consultation_new") {
-        const theirModules = interrupt.targetModules || [];
-        const overlap = theirModules.length === 0 || theirModules.some(m =>
-          config.modules.some(cm => m.startsWith(cm) || cm.startsWith(m))
-        );
-        if (!overlap) {
-          logger.debug("MQTT skip (no module overlap)", { type: interrupt.type, threadId: interrupt.threadId });
-          continue;
-        }
-      }
-
-      // consultation_message: only if it's a thread we claimed
-      if (interrupt.type === "consultation_message" && interrupt.threadId) {
-        if (!claimedThreadIds.has(interrupt.threadId)) {
-          logger.debug("MQTT skip (not our thread)", { type: interrupt.type, threadId: interrupt.threadId });
-          continue;
-        }
-      }
-
-      important.push(interrupt);
+      logger.debug("MQTT interrupt", { type: interrupt.type, threadId: interrupt.threadId });
     }
-
-    if (important.length === 0) {
-      logger.debug("MQTT all silent", { total: interrupts.length });
-      return false;
-    }
-
-    // Fix 5: send to separate session to avoid polluting main context
-    logger.info("Processing important MQTT interrupts", { count: important.length, skipped: interrupts.length - important.length });
-    const formatted = formatInterrupts(important);
-    // interruptClaude est une session SEPAREE : elle ne passe pas par le wrapper
-    // `send`, donc le verrou read_only doit etre applique ici aussi (DF4). Le
-    // contenu d'une interruption vient d'un pair — un agent read-only ne doit
-    // pas pouvoir ecrire l'arbre sur injection.
-    const interruptBlocked = [
-      ...ALWAYS_BLOCKED,
-      ...(config.readOnly ? disallowedForMode("read_only") : []),
-    ];
-    await interruptClaude.send(formatted, { maxTurns: 1, disallowedTools: interruptBlocked });
-    return true;
   }
 
   // ── Helper: process protocol actions ──────────────────────────────
@@ -1631,11 +1553,9 @@ export async function runAgentLoop(
         }
       }
 
-      // â'£ RESOLUTION PHASE
-      if (exitReason === "done" && protocol.currentThreadId) {
-        protocol.workDone();
-        await processProtocolActions();
-      }
+      // Pas de propose de fin de run : il visait le fil d'annonce de boot, déjà
+      // expiré sur tout run réel — le rouvrir coûtait un tour LLM « Résume »
+      // (≈ 57k EP) et 20 s d'attente d'approbation que personne ne donne.
     }
   } catch (err) {
     if (err instanceof BudgetExceededError) {
@@ -1660,7 +1580,6 @@ export async function runAgentLoop(
 
   // ⑤ CLEANUP
   claude.close();
-  interruptClaude.close();
   await mqtt.close().catch(() => {});
 
   // Chaque sortie nominale dépareille unclaimTask avec un
