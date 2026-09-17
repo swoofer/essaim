@@ -206,6 +206,42 @@ describe("buildArgs", () => {
     expect(args).toContain("--dangerously-skip-permissions");
   });
 
+  // L'enfant héritait de TOUT l'environnement de l'utilisateur : mesuré, 143
+  // outils, 9 serveurs MCP (dont un second coordinator et des connecteurs
+  // Gmail/Drive), 424 skills, 77 agents, 9 hooks SessionStart. Le contenu
+  // variable de ces hooks forçait la réécriture du cache à chaque envoi :
+  // 18,6k tokens réécrits contre 4,5k isolé, −69 % sur le premier appel. Et
+  // claude-mem y a injecté un faux fait venu d'un autre run.
+  it("isole l'enfant de l'environnement utilisateur par défaut", () => {
+    const saved = process.env.ESSAIM_INHERIT_USER_SETTINGS;
+    delete process.env.ESSAIM_INHERIT_USER_SETTINGS;
+    try {
+      const args = buildArgs({ workspacePath: "/tmp", mcpConfigPath: "/w/.mcp.json" }, "hello", false);
+      const at = args.indexOf("--setting-sources");
+      expect(at).toBeGreaterThan(-1);
+      expect(args[at + 1]).toBe("project,local");
+      expect(args).toContain("--strict-mcp-config");
+      // --strict-mcp-config ne garde QUE --mcp-config : celui du worktree doit rester.
+      expect(args).toContain("/w/.mcp.json");
+    } finally {
+      if (saved === undefined) delete process.env.ESSAIM_INHERIT_USER_SETTINGS;
+      else process.env.ESSAIM_INHERIT_USER_SETTINGS = saved;
+    }
+  });
+
+  it("ESSAIM_INHERIT_USER_SETTINGS=1 rend l'environnement utilisateur", () => {
+    const saved = process.env.ESSAIM_INHERIT_USER_SETTINGS;
+    process.env.ESSAIM_INHERIT_USER_SETTINGS = "1";
+    try {
+      const args = buildArgs({ workspacePath: "/tmp" }, "hello", false);
+      expect(args).not.toContain("--setting-sources");
+      expect(args).not.toContain("--strict-mcp-config");
+    } finally {
+      if (saved === undefined) delete process.env.ESSAIM_INHERIT_USER_SETTINGS;
+      else process.env.ESSAIM_INHERIT_USER_SETTINGS = saved;
+    }
+  });
+
   it("uses --resume on subsequent turns", () => {
     const args = buildArgs({ workspacePath: "/tmp", sessionId: "s1" }, "next", true);
     expect(args).toContain("--resume");

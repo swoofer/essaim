@@ -73,6 +73,10 @@ One chmod test is POSIX-only and skips on Windows — `it.skipIf(process.platfor
 
 It holds **the path to reset**, not a boolean. Before creating worktrees it runs `git checkout -- . && git clean -fd` on that path. The value must equal the run's `-p` base; anything else (including the legacy `=1`) is refused with both paths named. Off by default — worktrees snapshot from a git ref, so a dirty base is harmless without it.
 
+## Spawned `claude` is isolated from `~/.claude`
+
+`buildArgs` (`src/agent-loop/claude-stream.ts`) passes `--setting-sources project,local --strict-mcp-config`. Inheriting the user environment loaded ~140 tools, 9 MCP servers, 400+ skills and 9 SessionStart hooks into every agent; the hooks' variable output forced a prompt-cache rewrite on every send (measured 18.6k vs 4.5k tokens rewritten, −69% on the first call) and claude-mem once fed an agent a false fact from another run. Worktree hooks (`.claude/settings.json`, project source) and `--mcp-config` still load. `ESSAIM_INHERIT_USER_SETTINGS=1` restores inheritance, for auth or a proxy configured in `~/.claude/settings.json`.
+
 ## Logging
 
 Pino JSON to stdout. Component loggers: `orchestrator`, `agent-loop`, `phase-scheduler`, `work-stealing`, `effort`, `quota`, `tokens`. `LOG_LEVEL=debug`, pretty via `NODE_ENV=development`. Per-run token report lands in `reports/report-<run-id>.md` (run-id = `<template>-<8-hex>`; gitignored).
