@@ -434,25 +434,38 @@ describe("runAgentLoop", () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("creates interruptClaude with haiku model (low effort)", async () => {
+  // La session d'interruption répondait aux messages des pairs dans une session
+  // SÉPARÉE dont la réponse était jetée : l'agent principal n'en voyait jamais
+  // rien. Coût mesuré ≈ 17k EP par agent et par run, pour zéro savoir transmis —
+  // et une surface d'injection, puisque cette session pouvait agir par outils
+  // sur la foi d'un message de pair.
+  it("ne crée qu'une session claude et ne paie aucun modèle pour les interruptions", async () => {
     const { createClaudeStream } = await import("../../src/agent-loop/claude-stream.js");
-    mockSend.mockResolvedValue({
-      content: "DONE: quick",
-      toolCalls: [],
-      costUsd: 0.01,
-      durationMs: 100,
-      sessionId: "s1",
-    });
+    mockMqttDrain
+      .mockReturnValueOnce([{ type: "broadcast", agentId: "peer", content: "stop sur src/a.ts", timestamp: 0, raw: {} }])
+      .mockReturnValue([]);
+    mockSend
+      .mockResolvedValueOnce({ content: "je continue", toolCalls: [], costUsd: 0.01, durationMs: 100, sessionId: "s1" })
+      .mockResolvedValue({ content: "DONE: fini", toolCalls: [], costUsd: 0.01, durationMs: 100, sessionId: "s1" });
 
     await runAgentLoop(makeConfig(), silentLogger);
 
-    // Two createClaudeStream calls: main claude + interruptClaude
-    const calls = (createClaudeStream as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect((createClaudeStream as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+    const prompts = mockSend.mock.calls.map((c) => String(c[0]));
+    expect(prompts.some((p) => p.includes("INTERRUPTION SYSTÈME"))).toBe(false);
+  });
 
-    // The second call is interruptClaude — should use haiku
-    const interruptOpts = calls[1][0] as { model?: string };
-    expect(interruptOpts.model).toBe("claude-haiku-4-5-20251001");
+  // Le tour « Résume en 1-2 phrases » + l'attente d'approbation de 20 s visaient
+  // le fil d'annonce de boot, déjà expiré sur tout run réel : le propose le
+  // rouvrait pour le laisser ré-expirer. ≈ 57k EP et 20-47 s par agent.
+  it("un run réussi ne demande ni résumé de fin ni attente d'approbation", async () => {
+    mockCurrentThreadId = "t-boot";
+    mockSend.mockResolvedValue({ content: "DONE: fini", toolCalls: [], costUsd: 0.01, durationMs: 100, sessionId: "s1" });
+
+    const result = await runAgentLoop(makeConfig(), silentLogger);
+
+    expect(result.exitReason).toBe("done");
+    expect(mockWorkDone).not.toHaveBeenCalled();
   });
 
   // ── Coordination decision: ADJUST ────────────────────────────────────
