@@ -232,7 +232,11 @@ async function taskBaseline(
  * Résolution « ce n'en est pas un » — la mission de sentinelle la prévoit
  * noir sur blanc. Aucun patch, donc aucun test à exiger.
  */
-export const FALSE_POSITIVE_PATTERN = /FALSE[_ ]?POSITIVE/i;
+// Ancré : il dispense du test rouge, donc il doit désigner la CONCLUSION du
+// résumé (extractDoneSummary a déjà retiré l'emphase de tête), pas une mention
+// en passant — non ancré, « … ce n'était pas un FALSE_POSITIVE » suffisait à
+// faire accepter un correctif sans test.
+export const FALSE_POSITIVE_PATTERN = /^FALSE[_ ]?POSITIVE/i;
 
 /** Publie le motif du refus dans le thread, pour que la reprise soit informée. */
 async function postRefusal(

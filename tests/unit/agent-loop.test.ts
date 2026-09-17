@@ -2296,4 +2296,18 @@ describe("FALSE_POSITIVE_PATTERN", () => {
     const { FALSE_POSITIVE_PATTERN } = await import("../../src/agent-loop/agent-loop.js");
     expect(FALSE_POSITIVE_PATTERN.test("Échappement ajouté sur f.title + test")).toBe(false);
   });
+
+  // Le motif dispense du test rouge : il doit désigner la CONCLUSION, pas un
+  // mot croisé en route. Non ancré, un correctif sans test passait le garde-fou
+  // dès que le résumé mentionnait « false positive » n'importe où.
+  it("ne s'active pas sur une simple mention au milieu du résumé", async () => {
+    const { FALSE_POSITIVE_PATTERN } = await import("../../src/agent-loop/agent-loop.js");
+    expect(FALSE_POSITIVE_PATTERN.test("Échappement ajouté ; ce n'était pas un FALSE_POSITIVE")).toBe(false);
+    expect(FALSE_POSITIVE_PATTERN.test("ÉCARTÉ: classer FALSE_POSITIVE")).toBe(false);
+  });
+
+  it("reconnaît la conclusion telle que settleDone la reçoit, emphase comprise", async () => {
+    const { FALSE_POSITIVE_PATTERN, extractDoneSummary } = await import("../../src/agent-loop/agent-loop.js");
+    expect(FALSE_POSITIVE_PATTERN.test(extractDoneSummary("DONE: **FALSE_POSITIVE** — déjà échappé", "Done"))).toBe(true);
+  });
 });
